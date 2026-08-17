@@ -1,5 +1,5 @@
 Reference,Value,Footprint,MPN,Fitted,Order,Unit low,Unit high,Currency,Qty break,Basis,Source
-"C101,C201,C301,C401,C501,C601,C802,C804",10u/16V X7R,Capacitor_SMD:C_1210_3225Metric,GRM21BR61C106KE15L,8,12,0.08,0.25,GBP,25,band,"typical distributor band, not read this session"
+"C101,C201,C301,C401,C501,C601,C802",10u/16V X7R,Capacitor_SMD:C_1210_3225Metric,GRM21BR61C106KE15L,7,11,0.08,0.25,GBP,25,band,"typical distributor band, not read this session"
 "C102,C202,C302,C402,C502,C602",1200p/50V C0G,Capacitor_SMD:C_0805_2012Metric,GRM2165C1H122JA01D,6,10,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
 "C121,C221,C321,C421,C521,C621",100p/50V C0G,Capacitor_SMD:C_0805_2012Metric,GRM2165C1H101JA01D,6,10,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
 "C131,C231,C331,C431,C531,C631",150n/50V X7R,Capacitor_SMD:C_0805_2012Metric,GRM216R71H154KA01D,6,10,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"

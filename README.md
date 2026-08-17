@@ -18,16 +18,16 @@ and never writes to it — see [`contract/PINNED.md`](contract/PINNED.md).
 
 **A spike, and an honest one.** All seven tasks of the brief are complete. Every
 number carries its arithmetic, every check can be shown to fail, and everything
-guessed is in [`ASSUMPTIONS.md`](ASSUMPTIONS.md).
+guessed is in [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
 
 | | |
 |---|---|
 | one channel derived | ✅ every value, arithmetic inline |
-| netlist | ✅ 189 parts, 138 nets, all pins resolved |
+| netlist | ✅ 188 parts, 138 nets, all pins resolved |
 | schematic | ✅ **0 merges, 0 breaks, 0 stranded pins** |
 | the verification loop | ✅ `verify.py` reads **KiCad's** netlist, compared by name |
 | ERC | ✅ 0 errors; 6 declared warnings, held to their exact count |
-| section 5 constraints | ✅ checked mechanically, 27 planted faults caught |
+| section 5 constraints | ✅ checked mechanically, 31 planted faults caught |
 | deltas against the mixer's own model | ✅ three results contradict `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
 | board | ❌ not started |
@@ -98,8 +98,8 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | | |
 |---|---|
 | [`CLAUDE.md`](CLAUDE.md) | the rules, including which "load-bearing constraints" actually are |
-| [`STYLE.md`](STYLE.md) | the mixer's conventions, read off its source and followed |
-| [`ssi2164-control-port.md`](ssi2164-control-port.md) | the datasheet read first-hand. **Six spec corrections** |
+| [`STYLE.md`](docs/STYLE.md) | the mixer's conventions, read off its source and followed |
+| [`ssi2164-control-port.md`](docs/ssi2164-control-port.md) | the datasheet read first-hand. **Six spec corrections** |
 | [`contract/socket.py`](contract/socket.py) | the only place upstream constants are adapted |
 | [`toolchain/`](toolchain/PROVENANCE.md) | KiCad plumbing, copied from the mixer. Ours to modify |
 | `design.py` | values, derivations, the netlist, and the borrowed-symbol patch |
@@ -107,12 +107,12 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | `delta.py` | this module's effect, via the mixer's own functions |
 | `gen_sch.py` / `gen_project.py` | the sheet, and the project KiCad needs to read it |
 | `verify.py` / `test_verify.py` | the constraints against KiCad's own netlist, and proof the checks can fail |
-| [`FINDINGS.md`](FINDINGS.md) | things wrong in the mixer repo — noted, never fixed |
-| [`ASSUMPTIONS.md`](ASSUMPTIONS.md) | everything guessed, with what it costs if wrong |
+| [`FINDINGS.md`](docs/FINDINGS.md) | things wrong in the mixer repo — noted, never fixed |
+| [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) | everything guessed, with what it costs if wrong |
 | `out/` | for machines: schematic, project, netlist, BOM as CSV. All generated |
 | `docs/` | for people: [floorplan](docs/floorplan.md), [constraint audit](docs/constraints.md), [shopping list](docs/SHOPPING.md). All generated |
 
-## The three results worth knowing
+## The results worth knowing
 
 **The dominant noise mechanism is additive, not multiplicative.**
 `00-current-state.md` records overturning this. Referred to one string: the VCA
@@ -120,9 +120,19 @@ cells sit 84.3 dB down and the CV chain's AM sits 91.7 dB down. The original
 claim was right and was overturned for a mechanism 8 dB quieter. `delta.py`.
 
 **The "free 8 dB" from summing-resistor scaling is a wash.** It assumed source
-noise independent of the source's full-scale voltage; the MAX6126's noise is
-proportional to its output — 45 nV/√Hz at 2.5 V against 95 at 5 V. Scaling up
-and dividing back down cancels. `ssi2164-control-port.md`.
+noise independent of the source's full-scale voltage; the MAX6126's noise rises
+with its output — 45 nV/√Hz at 2.5 V against 95 at 5 V, both **now confirmed
+first-hand** against Maxim's own PDF where they had been read from a text mirror.
+Scaling up and dividing back down cancels. `ssi2164-control-port.md`.
+
+**A fitted 10 µF was defending against something a capacitor cannot defend
+against.** C804 existed to keep the reference's loop from seeing an 8 kHz load
+step. At 8 kHz a 10 µF is 1.99 Ω and the MAX6126's own output impedance is
+0.028 Ω, so it supplied **1.4%** of that step and the loop supplied the rest — it
+only becomes the stiffer element above 568 kHz. Two 10 µF reservoirs also put
+VREF at 20.1 µF against a 10 µF stability ceiling. Deleted; VREF now carries the
+datasheet's own 10 µF ∥ 0.1 µF, and `verify.check_reference_load()` holds it.
+`design.reference_load()`.
 
 **One of the five load-bearing constraints had no mechanism.** "Six separate
 returns to six pin-3s" was generated in an earlier session, promoted into a list
@@ -134,7 +144,7 @@ Struck, with the arithmetic, at `design.FRONT_R`. `constraints.py`.
 
 ## The verification loop, and why it is the point
 
-`gen_sch.py` draws all 189 parts. Its own checker builds nets from the geometry
+`gen_sch.py` draws all 188 parts. Its own checker builds nets from the geometry
 the way eeschema does and compares them to `design.py`; then `verify.py` throws
 that away and asks **KiCad** the same question, over
 `kicad-cli sch export netlist`. Both agree, net by net and pin by pin.
@@ -217,8 +227,9 @@ Three more things the pass turned up, each recorded where it happened:
 3. **The envelope rectifier time constant** — not derivable from the spec, and
    the six op-amp sections reserved for it are the 6 declared ERC warnings.
 4. **The shared blocks**, all six.
-5. **The MAX6126 pin map contradicts itself.** `REF_PINS` carries real pin
-   numbers and three comments plus `ASSUMPTIONS.md` still say the map "has not
-   been read". One of the two is wrong and this pass could not tell which
-   without inventing the answer, which is exactly what §6 forbids. Whoever knows
-   should say so.
+5. **The fail-safe's power-up sequence now has a number to wait for.** The NR
+   capacitor costs 20 ms of reference turn-on, and the '541's Vcc *is* VREF, so
+   for 20 ms every channel's full scale is ramping from zero — and zero CV is
+   unity gain. §4.5's named fail-loud hazard, arriving by the reference. 20 ms is
+   4× the ~5 ms a relay needs, so it is a sequencing requirement rather than a
+   hazard. `design.VREF_TURN_ON_S`, waiting for the deferred fail-safe.

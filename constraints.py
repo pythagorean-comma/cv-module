@@ -319,7 +319,11 @@ it.
 def _report():
     print("Testing the five constraints for a mechanism")
     print(f"requirement for isolation: {ISOLATION_DB:.0f} dB per pair "
-          f"(00-current-state.md)")
+          f"(docs/00-current-state.md)")
+    print("numbered as hardware-spec-v0.md section 5 numbers them, which is "
+          "also")
+    print("what verify.py prints and what every 'constraint N' in design.py "
+          "means")
     print()
 
     c = constraint_1()
@@ -335,6 +339,17 @@ def _report():
     print(f"               signal current from its own rails, so 'nothing' is "
           f"unachievable ({c['indirect_sag_uv']:.1f} uV of sag)")
     print(f"   verdict     {c['verdict']}")
+    print()
+
+    # Constraint 2 has no block below and the gap is deliberate: 2a is binary --
+    # either one part bridges the two grounds or it does not, so there is no
+    # margin to compute -- and 2b is struck, with its arithmetic in
+    # design.FRONT_R rather than here. Said out loud because a reader who sees
+    # 1, 3, 4, 5 cannot tell a deliberate gap from a forgotten one.
+    print("2. exactly one AGND bond, and six separate returns")
+    print("   2a is binary and has no margin to compute: verify.py holds it")
+    print("   2b is struck for having no mechanism -- see design.FRONT_R and "
+          "the table")
     print()
 
     c = constraint_3()

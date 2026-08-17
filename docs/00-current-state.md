@@ -1,9 +1,36 @@
 # Per-string level control — current state
 
-**Read this first.** Five documents have accumulated, each correcting the last, so
-several confident-sounding passages in the earlier files are now wrong. This page
-is the single authoritative statement of what we currently believe. Where a
-document contradicts this page, this page wins.
+> ## ⚠ Two corrections to this page's own standing
+>
+> **1. "Where a document contradicts this page, this page wins" no longer holds.**
+> It was true when written, and this page kept its own promise honestly — it is
+> the document that established the habit of recording what each correction
+> overturned. But `hardware-spec-v0.md` is the authoritative spec for this repo,
+> and where either conflicts with a *computed* result, **the arithmetic wins.**
+> `delta.py` prints its disagreements last and loudly for exactly this reason.
+>
+> **2. Two of the three results `delta.py` disagrees with are on this page**, and
+> one of them is not a detail:
+>
+> | this page says | the arithmetic says |
+> |---|---|
+> | Hardware table: dominant noise mechanism is **multiplicative**, corrected from additive | **Additive wins, and the correction should be reverted.** The VCA cells sit 84.3 dB under one string; the CV chain's AM sits 91.7 dB under the same signal. The original claim was right and was overturned for a mechanism 8 dB quieter |
+> | Three things that most affect the sound, item 2: summing-resistor scaling is a **free 8 dB** | A wash. It assumed source noise independent of the source's full-scale voltage; the MAX6126's noise rises with its output — 45 nV/√Hz at 2.5 V against 95 at 5 V, both read first-hand — so scaling up and dividing back down cancels |
+>
+> `delta.DISAGREEMENTS` is the authority for both, with the numbers recomputed on
+> every run rather than quoted here. The third disagreement is against `CLAUDE.md`,
+> not this page.
+>
+> **The reading order below is history.** Documents 0–4 belong to the parent
+> project and are not in this repo; nothing here depends on them. What survives
+> of that discussion, and is here, is
+> [`element-revisit.md`](element-revisit.md) and
+> [`supply-decision.md`](supply-decision.md).
+
+**Read this for context, not for current truth.** Five documents accumulated, each
+correcting the last, so several confident-sounding passages in the earlier files
+are wrong — and, as above, two on this page are too. The value of this page is
+that it says *why* the choices are what they are.
 
 Last revised: after the DAC8568 SYNC correction.
 

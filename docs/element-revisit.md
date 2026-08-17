@@ -1,5 +1,27 @@
 # The element choice, revisited
 
+> **Where this landed.** Recommendation 2 was followed: the schematic is drawn with
+> the **SSI2164**, two packages, 3 + 3 across them so every string has two
+> die-mates rather than four having three and two having one — `design.allocation()`
+> carries that arithmetic, which is not in this document because it did not exist
+> yet. The footprint choice is isolated as this document asked.
+>
+> **Recommendation 3 is resolved and it clears.** The rails are ±12 V
+> (`design.MODULE_RAIL`, decided in [`supply-decision.md`](supply-decision.md)),
+> so the THAT4301's ±7 to ±15 V requirement is not the gate this document worried
+> it might be — and the SSI2164 accepts ±4 to ±18 V, read first-hand. The
+> bench-off is unblocked rather than narrowed.
+>
+> **Recommendation 4 is still open**: the THAT4301's price and availability were
+> never looked up. So is the bench-off itself, and so is the guess at the bottom of
+> this page. Nothing since has tested it.
+>
+> The datasheet read that followed this document is
+> [`ssi2164-control-port.md`](ssi2164-control-port.md), and it settled §1 of this
+> page independently: the control-law argument really was cancelled, and the
+> reason is a voltage input behind a 9k∥1k divider rather than the current-summing
+> node every earlier document assumed.
+
 Short answer: **no, we are not certain — and the SSI2164 recommendation is weaker
 now than when it was made, because the lead feature changed afterwards.**
 

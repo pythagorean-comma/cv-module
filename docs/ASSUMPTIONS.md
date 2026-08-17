@@ -8,13 +8,12 @@ The discipline is the mixer's. Its `Assumption` class says it plainly: **the ran
 
 ## The short version
 
-Two of these would change the board, and the rest would change a number:
+Both of these would change the board; the rest would change a number:
 
 1. **`MEASURED['noise_floor']`** — the mixer's own unmeasured figure, which decides whether this module costs 0.11 dB or 0.85 dB with everything open, and 0.56 dB or 3.17 dB while the lead feature is running.
 2. **The pad relay** — not chosen, 49 % of the board area and about a third of its cost.
-3. **The MAX6126's noise figures**, read from a text mirror rather than Analog Devices' own PDF. They are what overturn the "free 8 dB".
 
-One entry that *was* on this list is now settled rather than open: constraint 2's "six separate returns" has been struck, with the arithmetic, in [Readings of the spec](#readings-of-the-spec).
+**Two entries that *were* on this list are settled rather than open.** Constraint 2's "six separate returns" has been struck, with the arithmetic, in [Readings of the spec](#readings-of-the-spec). And the 20.1 µF that used to sit on VREF — twice the MAX6126's capacitive-load stability ceiling, because two 10 µF reservoirs were fitted — is resolved by deleting C804: its justification was shielding the reference's loop from an 8 kHz load step, and at 8 kHz a 10 µF could only supply 1.4 % of that step. VREF now carries 10.1 µF, which is the datasheet's own recommended 10 µF ∥ 0.1 µF, and `verify.check_reference_load()` holds the range against KiCad's netlist. See `design.reference_load()`.
 
 ## Numbers with declared ranges
 
@@ -106,25 +105,15 @@ The relay coils are also a **spec correction**, recorded and not acted on. Secti
 
 ## Readings not taken
 
-### The `MAX6126A25` pin map.
+### The MAX6126's turn-on settling time, and the fail-safe sequence.
 
-**Basis:** Not read. The part is chosen on its noise figure and its voltage, both of which came from the datasheet's electrical table via a text mirror rather than from the PDF itself.
+**Basis:** Read first-hand (page 4, and page 16 in prose): turn-on to 0.01 % of final value is 1 ms with no NR capacitor and **20 ms with the 0.1 uF fitted**. The capacitor is fitted, for 75 -> 45 nV/rtHz.
 
-**Affects:** U12's four connections are pin *roles* in the netlist -- `<VIN>`, `<VOUT>`, `<GND>`, `<NR>` -- and design.check_pin_numbers() refuses to let a number be invented for them.
+**Affects:** The power-up sequence, which spec section 4.5 says to "design explicitly" and nothing in this repo had a number for. The '541's Vcc *is* VREF, so for 20 ms after power-up every channel's full scale is ramping from zero -- and positive Vc attenuates, so zero CV is unity gain. Section 4.5's named hazard, arriving by the reference rather than by the DAC.
 
-**If wrong:** Nothing silently. The netlist is not loadable by KiCad until they resolve, which is the intended state.
+**If wrong:** Nothing, if the bypass relay is held bypassed across it: 20 ms is 4x the ~5 ms section 4.5 quotes for a relay to transfer, so the margin is comfortable. It is a sequencing requirement rather than a hazard. If it is *not* sequenced, the box is briefly at unity gain on all six strings at power-up, which is the loudest possible failure.
 
-**To settle:** Open the MAX6126 datasheet and fill in design.UNSPECIFIED's entry.
-
-### The MAX6126's noise figures per output voltage.
-
-**Basis:** Read from a text mirror of the datasheet (pdf.datasheet.live), not from Analog Devices' own PDF, which timed out three times. The figures are internally coherent -- noise scales almost exactly with output voltage -- and one of them (35 nV/rtHz at 2.048 V) is corroborated by an independent search result.
-
-**Affects:** The whole of correction 5: whether the '0-5 V through 15k' scaling buys 8 dB or nothing. The answer turns on 45 nV/rtHz at 2.5 V against 95 at 5 V.
-
-**If wrong:** If the scaling really is proportional to voltage, nothing changes. If the 2.5 V part is quieter than 45 nV/rtHz relative to the 5 V part, the 5 V option becomes worth something again -- and it is still blocked by the '541's input threshold, so the conclusion is robust even if the numbers move.
-
-**To settle:** Fetch the ADI PDF when it is reachable and check the two rows.
+**To settle:** Nothing to settle -- the figure is read. It belongs in the fail-safe block, which is DEFERRED, and design.VREF_TURN_ON_S is where it is waiting.
 
 ### The OPA1644's input offset voltage.
 
@@ -320,5 +309,5 @@ For contrast, because a document of guesses can make a design look less settled 
 - **R_OFF = R1** — the exact-cancellation condition, not a value.
 - **The CV chain is fail-silent** — every fault drives the '541 output toward 0 V, which is full attenuation, because the offset current comes from neither the MCU nor the reference that feeds it.
 - **The MAGND star is at the SSI2164 ground pins** — because the control port is ground-referenced, so 1 mV in the wrong place is AM 51 dB below the signal.
-- **The five section 5 constraints** — checked mechanically by `verify.py`, and `test_verify.py` plants fourteen faults to prove the checks can fail.
-- **Every pin map in the netlist except the MAX6126's** — SSI2164, OPA1644 and SN74AHC541 were each read off their own pin-configuration tables in this session.
+- **The five section 5 constraints** — checked mechanically by `verify.py`, and `test_verify.py` plants 27 faults to prove the checks can fail.
+- **Every pin map in the netlist** — SSI2164, OPA1644, SN74AHC541 and now the MAX6126, each read off its own pin-configuration table. The MAX6126 was the last one out: it had been read from a text mirror, three comments and this document went on saying it had not been read at all, and it is now confirmed pin-for-pin against Maxim's own PDF. The mirror was right.

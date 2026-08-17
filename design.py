@@ -366,7 +366,7 @@ def vca_noise(rin):
 # A single-ended inverting unity stage. Two resistors.
 #
 # **It was a four-resistor difference amplifier, and the reason it was is worth
-# more than the circuit.** Constraint 2 in CLAUDE.md reads:
+# more than the circuit.** Constraint 2 -- spec section 5, item 2 -- reads:
 #
 #     "Exactly one bond between module audio ground and board AGND. Six
 #      separate returns to six pin-3s, not commoned in the module."
@@ -701,9 +701,24 @@ def servo_residual():
 # one row and "source at 0-5 V" in the next, which are different parts. Two
 # findings settle it.
 #
-# The 35 nV/rtHz belongs to the 2.048 V option. MAX6126 noise scales with
-# output voltage: with the 0.1 uF NR capacitor fitted it is 35 nV/rtHz at
-# 2.048 V, **45 at 2.5 V**, 80 at 4.096 V and 95 at 5.0 V.
+# The 35 nV/rtHz belongs to the 2.048 V option. MAX6126 noise rises with output
+# voltage: with the 0.1 uF NR capacitor fitted it is 35 nV/rtHz at 2.048 V,
+# **45 at 2.5 V**, 80 at 4.096 V and 95 at 5.0 V.
+#
+# **All four are now confirmed first-hand** from Maxim's own PDF -- 19-2647
+# Rev 8, the per-voltage electrical tables, one page each -- where they had been
+# read from a text mirror. Every figure the mirror gave was right, which is worth
+# stating as plainly as a correction would have been. The e_OUT rows also give the
+# unbypassed figures, so what the NR capacitor buys is exact: 60 -> 35 at
+# 2.048 V, **75 -> 45 at 2.5 V**, 120 -> 80 at 4.096 V, 145 -> 95 at 5.0 V.
+#
+# One correction to the wording rather than the numbers: "scales with output
+# voltage" is loose. 2.5 V and 2.8 V both read 75 -> 45, so the family steps
+# rather than scales, and the parts share tables across adjacent voltages. The
+# conclusion is unaffected -- 45 against 95 is 2.11x for a 2.0x change in
+# full scale, so scaling up and dividing back down still cancels -- but the
+# mechanism is a lookup and not a proportionality, and a proportionality is the
+# kind of thing that gets extrapolated later.
 #
 # And the 5 V version cannot be driven. A 74AHC541 at Vcc = 5 V needs
 # VIH = 0.7 Vcc = 3.5 V and an RP2040 GPIO delivers 3.3 V. The AHCT part whose
@@ -720,6 +735,83 @@ VREF_PART = "MAX6126A25"
 VREF_NOISE = 45e-9                  # V/rtHz at 1 kHz, with C_NR fitted
 VREF_NR_CAP = "100n/50V C0G"
 VREF_MAX_FOR_AHC = 3.3 / 0.7
+
+# **The NR capacitor costs 20 ms of turn-on time, and that lands on the
+# fail-safe rather than on the noise budget.** First-hand from the pinned
+# datasheet's own electrical table for the 2.5 V part (page 4): turn-on settling
+# to 0.01% of final value is 1 ms with C_NR = 0 and **20 ms with C_NR = 0.1 uF**,
+# a 20x penalty for the 75 -> 45 nV/rtHz the capacitor buys. Page 16 says the
+# same thing in prose: "A noise reduction capacitor of 0.1uF increases the
+# turn-on time to 20ms."
+#
+# Why it matters here and not in an ordinary reference application: **the '541's
+# Vcc *is* VREF**, so for those 20 ms the whole CV chain's full scale is ramping
+# from zero. Positive Vc attenuates, so a CV of zero is *unity gain*, and spec
+# section 4.5 already names this shape of fault -- "a DAC's POR to zero scale =
+# 0 V = unity gain = fail-loud ... Same applies to PWM outputs idling low."
+#
+# 20 ms is four times the ~5 ms a relay needs to transfer, which is the figure
+# section 4.5 quotes, so the bypass relay can be held bypassed across it. That
+# makes this a **sequencing requirement rather than a hazard**: the fail-safe
+# must not release bypass until VREF has settled, and the number it has to wait
+# for is this one. Recorded here because the fail-safe is DEFERRED and this is
+# the kind of constant that gets rediscovered by a bang in a speaker.
+VREF_TURN_ON_S = 20e-3
+VREF_TURN_ON_NO_NR_S = 1e-3
+
+# The datasheet's stability range for whatever hangs on OUTF, page 4:
+# "Capacitive-Load Stability Range ... No sustained oscillations ... 0.1 to 10 uF".
+# Page 16 states it as a requirement rather than a range -- "The MAX6126 requires
+# an output capacitor between 0.1uF and 10uF" -- and then recommends "a 10uF
+# capacitor in parallel with a 0.1uF capacitor" for loads that switch, which is
+# 10.1 uF and so slightly over its own ceiling. Read together, the 10 uF bounds
+# the *bulk* capacitor and not the summed total including local decouplers.
+#
+# reference_load() computes what is fitted and verify.check_reference_load()
+# holds it against the range, read off the *exported netlist* rather than off
+# these constants -- so a fourth capacitor drawn onto VREF fails even though
+# nothing here changed.
+VREF_CLOAD_MIN_F = 0.1e-6
+VREF_CLOAD_MAX_F = 10e-6
+
+# The capacitors on VREF, as value/float pairs -- STYLE.md rule 2, and they were
+# inline literals in shared() until reference_load() needed to add them up. That
+# is the rule earning its keep rather than being obeyed: the total was not a
+# number anybody had, because the values were only ever strings sitting in
+# separate calls, and the total was **20.1 uF against a 10 uF ceiling**.
+#
+# **C804 was here and has been deleted. `LOGIC_BULK` was its value pair.**
+#
+# It was a second 10 uF, at the '541 rather than at the reference, and it is what
+# put the total at 2.01x the datasheet's capacitive-load stability range. Its
+# justification -- floorplan.REFERENCE_PLACEMENT, which has been corrected --
+# was "the reservoir the steady 684 uA comes out of, so U12's own loop never
+# sees the load step when six channels change duty at the 8 kHz frame rate".
+#
+# **A capacitor cannot do that at 8 kHz, and no value of it could.** A load step
+# divides between the reservoir and the part's own output impedance by
+# impedance, and at 8 kHz those are 1.99 ohm and 0.028 ohm -- the max
+# load-regulation figure, 28 uV/mA. The reservoir supplies 1.4% of the step and
+# the reference supplies the rest; 10 uF only becomes the stiffer of the two
+# above 568 kHz. The clause described a mechanism that runs the other way.
+#
+# It also did not need doing. reference_load() carries the arithmetic: the step
+# is 19 uV on VREF, which is -143 dB of AM after the CV filter's 59.9 dB at
+# 8 kHz, against a -54 dB requirement.
+#
+# **What survives is the sense decision, and it was never the same question.**
+# "Locate the output capacitor as close to OUTF as possible" and "bring a line
+# from OUTS to join the line from OUTF, at the point where the voltage accuracy
+# is needed" are the two halves of force and sense, not a choice between two
+# places to put a capacitor -- the bulk capacitor stabilises the amplifier at its
+# output, the sense line closes at the load so the loop corrects the drop in
+# between. Reading them as a trade-off is what made this look undecidable for a
+# session; they are complementary and the answer is forced. The sense pair still
+# closes at the '541, now at C803.
+VREF_RESERVOIR = "10u/16V X7R"          # C802, at OUTF: the required output cap
+VREF_RESERVOIR_FARADS = 10e-6
+LOGIC_LOCAL = "100n/50V X7R"            # C803, at the Vcc pin, where OUTS meets OUTF
+LOGIC_LOCAL_FARADS = 100e-9
 
 # The inverted reference, which spec section 4.2 does not have and the
 # datasheet's Figure 10 requires.
@@ -1039,20 +1131,53 @@ RELAY_PINS = {"SET+": "A1", "SET-": "A2", "RESET+": "B1", "RESET-": "B2",
               "COM_A": "11", "NC_A": "12", "NO_A": "14",
               "COM_B": "21", "NC_B": "22", "NO_B": "24"}
 
-# MAX6126, 8-pin SO. Read from a text mirror of the datasheet rather than from
-# Analog Devices' own PDF, which timed out repeatedly -- the same provenance as
-# its noise figures, and recorded as such in ASSUMPTIONS.md.
+# MAX6126, 8-pin SO/uMAX. **Read first-hand from Maxim's own PDF** -- document
+# 19-2647, Rev 8, 6/16 -- page 1's Pin Configuration and page 16's Pin
+# Description table. Analog Devices' own URL still times out; the copy that
+# resolved is Digi-Key's mirror of the same document, and it is the PDF rather
+# than a scrape of it:
+#
+#   https://media.digikey.com/pdf/Data%20Sheets/Maxim%20PDFs/MAX6126_Rev8_1-5-117.pdf
+#
+# **This map was previously read from a text mirror, and the mirror was right.**
+# Every one of the eight is confirmed. That is worth writing down rather than
+# quietly upgrading the provenance, because the interesting part is what the
+# repo said about it in the meantime: three separate comments and the whole
+# ASSUMPTIONS.md entry said the map "has not been read" and that U12's pins were
+# still roles like `<VIN>`, long after this dict held numbers. The stale claims
+# outnumbered the true one 3:1 and no check could see the difference, because a
+# comment is not an instrument. See gen_assumptions.py for the entry that
+# replaced it.
+#
+# Verbatim, page 16:
+#
+#   1     NR      "Noise Reduction. Connect a 0.1uF capacitor to NR. Leave
+#                  unconnected if not used."
+#   2     IN      "Positive Power-Supply Input"
+#   3     GND     "Ground"
+#   4     GNDS    "Ground-Sense Connection. Connect to ground connection at
+#                  load."
+#   5, 8  I.C.    "Internally Connected. Do not connect anything to these pins."
+#   6     OUTS    "Voltage Reference Sense Output"
+#   7     OUTF    "Voltage Reference Force Output. Short OUTF to OUTS as close
+#                  to the load as possible. Bypass OUTF with a capacitor
+#                  (0.1uF to 10uF) to GND."
 #
 # **It is a Kelvin-sensed part, which is not how spec section 4.2 assumes it is
-# wired.** OUTF *forces* and OUTS *senses*, and the datasheet says to "short
-# OUTF to OUTS as close to the load as possible"; GNDS is the matching ground
-# sense, "connect to ground connection at load". That is four connections where
-# the spec implies two, and it decides where the reference sits relative to the
-# '541 -- the sense pair has to close at the load, which is C804, not at the
-# package.
+# wired.** OUTF *forces* and OUTS *senses*; GNDS is the matching ground sense.
+# That is four connections where the spec implies two, and it decides where the
+# reference sits relative to the '541 -- the sense pair has to close at the load,
+# which is C803 at the '541's Vcc pin, not at the package. The datasheet is
+# explicit about the ground leg too, page 16: "Connect the load to ground and
+# bring a connection from GNDS to exactly the same point."
 #
-# Pins 5 and 8 are internally connected and the datasheet says to connect
-# nothing to them.
+# **This is a separate question from where the bulk capacitor goes, and reading
+# the two as one is what stalled the C804 decision.** "Locate the output
+# capacitor as close to OUTF as possible" is about loop stability at the
+# amplifier; closing OUTS at the load is about correcting the IR drop in the
+# trace between them -- 97 mohm x 682 uA = 66 uV here, the largest error in the
+# block and the only one force and sense removes. Both, at different places, is
+# the arrangement. See VREF_RESERVOIR.
 REF_PINS = {"NR": 1, "IN": 2, "GND": 3, "GNDS": 4,
             "IC1": 5, "OUTS": 6, "OUTF": 7, "IC2": 8}
 
@@ -1164,8 +1289,14 @@ def patch_symbol(lib_id, definition):
         _set_property(definition, "Description",
                       "Quad JFET audio op-amp, 3.3 nV/rtHz, SOIC-14")
     elif lib_id.endswith(":MAX6126"):
+        # The URL that was here pointed at Analog Devices' product page, which
+        # nothing in this project has ever successfully fetched -- ORDER_CODES'
+        # own rule is that a datasheet URL is one that "has been fetched and seen
+        # to resolve", and by that rule it did not qualify. This one did, and it
+        # is the document REF_PINS was read from.
         _set_property(definition, "Datasheet",
-                      "https://www.analog.com/en/products/max6126.html")
+                      "https://media.digikey.com/pdf/Data%20Sheets/"
+                      "Maxim%20PDFs/MAX6126_Rev8_1-5-117.pdf")
         _set_property(definition, "Description",
                       "2.5 V ultra-low-noise reference, Kelvin-sensed, SOIC-8")
         for name, kind in (("NR", "passive"), ("GND", "power_in"),
@@ -1526,11 +1657,20 @@ NET_DC["RINV"] = 0.0
 # The spare section's own output, shorted to its own inverting input. 0 V
 # because its non-inverting input is at MAGND and it is a follower.
 NET_DC["SPARE"] = 0.0
-# The reference's noise-reduction pin. Declared as a range rather than a number
-# because the MAX6126's pin map has not been read in this session -- see
-# UNSPECIFIED -- so what this node actually sits at is not known here. It is
-# bounded by the rails it lives between, which is enough for the polarity and
-# rating checks and is not enough to call it settled.
+# The reference's noise-reduction pin. Still a range rather than a number, and
+# **the reason has been corrected**: it said "because the MAX6126's pin map has
+# not been read in this session -- see UNSPECIFIED", which was wrong twice over.
+# The map had been read (see REF_PINS, now confirmed first-hand), and the
+# MAX6126 is not in UNSPECIFIED and never has been in this form -- that
+# cross-reference pointed at nothing, which is the kind of dangling citation
+# STYLE.md rule 10 is about.
+#
+# The range is right for a different and better reason. The datasheet describes
+# NR functionally -- "Noise Reduction. Connect a 0.1uF capacitor to NR" -- and
+# **publishes no voltage for it at all.** It is an internal node brought out to
+# be bypassed, so what it sits at is not a fact the datasheet offers, and
+# bounding it by the rails it lives between is the honest declaration. That is
+# enough for the polarity and rating checks C801 needs and it is not a reading.
 NET_DC["VNR"] = (0.0, VREF)
 
 
@@ -1767,11 +1907,13 @@ def shared(design):
     design.connect("SPARE", (package, out), (package, inverting))
     design.connect("MAGND", (package, non_inverting))
 
-    # The reference itself. Pins by role, because its map has not been read.
+    # The reference itself. Pins by number, from REF_PINS, which is now confirmed
+    # against Maxim's own PDF -- this line said "Pins by role, because its map has
+    # not been read" while every connection below was already a number.
     design.add(Part(REF_REF, VREF_PART, SOIC8_FP,
                     description="2.5 V band-gap reference, 45 nV/rtHz with "
                                 "C_NR; Kelvin-sensed, OUTF/OUTS shorted at "
-                                "C804; also feeds the ADC"))
+                                "C803; also feeds the ADC"))
     design.connect("V5", (REF_REF, REF_PINS["IN"]))
     # OUTF forces and OUTS senses, shorted at the load: the datasheet's own
     # instruction, and the reason this is two pins on one net rather than one.
@@ -1783,7 +1925,7 @@ def shared(design):
     _capacitor(design, "C801", VREF_NR_CAP, "VNR", "MAGND",
                description="Reference noise reduction -- 75 -> 45 nV/rtHz")
     design.connect("VNR", (REF_REF, REF_PINS["NR"]))
-    _capacitor(design, "C802", "10u/16V X7R", "VREF", "MAGND",
+    _capacitor(design, "C802", VREF_RESERVOIR, "VREF", "MAGND",
                footprint=C_FILM_FP, description="Reference reservoir")
 
     # The logic buffer, powered from the reference.
@@ -1824,12 +1966,15 @@ def shared(design):
     design.connect("MAGND", (LOGIC_REF, LOGIC_PINS["GND"]))
     design.connect("OE", (LOGIC_REF, LOGIC_PINS["OE1"]),
                    (LOGIC_REF, LOGIC_PINS["OE2"]))
-    _capacitor(design, "C803", "100n/50V X7R", "VREF", "MAGND",
-               description="'541 local decoupling -- at the package")
-    _capacitor(design, "C804", "10u/16V X7R", "VREF", "MAGND",
-               footprint=C_FILM_FP,
-               description="'541 charge reservoir -- keeps the switching "
-                           "transient off the reference")
+    # The only capacitor at the '541, and the only one that has a job a capacitor
+    # can do: the PWM edges. Six arriving together dump 630 pC into it for 6.3 mV
+    # of sag, which the CV filter puts 83.1 dB down -- -116 dB of AM, or -132 dB
+    # with the phase stagger spec section 4.2 asks for. It has to be *at the pin*,
+    # inside the trace inductance, because nothing 20 mm away serves a 5 ns edge
+    # at any value. C804's 10 uF sat beside it and is gone; see VREF_RESERVOIR.
+    _capacitor(design, "C803", LOGIC_LOCAL, "VREF", "MAGND",
+               description="'541 local decoupling and the Kelvin closure -- at "
+                           "the package, where OUTS joins OUTF")
     for n in range(1, CHANNELS + 1):
         design.connect(f"PWM{n}", (LOGIC_REF, LOGIC_A[n]))
         design.connect(f"LOGO{n}", (LOGIC_REF, LOGIC_Y[n]))
@@ -1906,6 +2051,146 @@ def build():
 DESIGN = build()
 PARTS = DESIGN.parts
 NETS = DESIGN.nets
+
+
+def reference_load():
+    """What hangs on OUTF, against the datasheet's stability range.
+
+    Two capacitors, 10.1 uF, inside the 0.1 to 10 uF the datasheet qualifies:
+
+        C802  10 uF    the required output capacitor, at OUTF
+        C803  100 nF   local decoupling at the '541's Vcc pin, and the Kelvin
+                       closure
+                       -------
+                       10.1 uF, which is page 16's own recommendation for a
+                       switching load: "a 10uF capacitor in parallel with a
+                       0.1uF capacitor"
+
+    **It was 20.1 uF, and C804 was deleted to get here.** The ceiling is a
+    stability limit rather than a guideline -- page 4's "Capacitive-Load
+    Stability Range", qualified "no sustained oscillations" -- and an unstable
+    reference is the '541's Vcc and therefore all six channels' full scale at
+    once. 10.1 uF against a 10 uF limit is the datasheet's own arithmetic, the
+    100 nF being 1% of a 10 uF part whose tolerance is +/-10% anyway; 20.1 uF is
+    a second bulk capacitor and is not.
+
+    **Why C804 and not C802, derived rather than chosen.** C804's justification
+    was that it was "the reservoir the steady 684 uA comes out of, so U12's own
+    loop never sees the load step when six channels change duty at the 8 kHz
+    frame rate". That is not a thing a capacitor of that size can do at that
+    frequency. A load step divides between the reservoir and the part's own
+    output impedance in inverse proportion to impedance, and at 8 kHz:
+
+        10 uF                        1.99 ohm
+        MAX6126 load regulation      0.028 ohm    (28 uV/mA, the datasheet MAX)
+                                     ---------
+        reservoir's share of the step  1.4%
+
+    So the reference supplied 98.6% of the step it was being shielded from, and
+    10 uF only becomes the stiffer of the two above 568 kHz. Nor did the step
+    need shielding: 682 uA x 0.028 ohm is 19 uV on VREF, the CV filter is
+    -59.9 dB at 8 kHz, so 19 nV reaches Vc and at dg/g = 3.49/V that is -143 dB
+    of AM against a -54 dB requirement.
+
+    What a capacitor *can* do there is serve the PWM edges, and that needs 100 nF
+    at the pin rather than 10 uF across the board -- nothing 20 mm away serves a
+    5 ns edge. C803 does it: 630 pC from six simultaneous edges is 6.3 mV of sag,
+    -83.1 dB through the filter, -116 dB of AM, or -132 dB with the phase stagger
+    spec section 4.2 asks for.
+
+    **And the Kelvin decision was never the same question**, which is what made
+    this look like a trade for a session. "Locate the output capacitor as close
+    to OUTF as possible" and closing OUTS at the load are the two halves of force
+    and sense: the capacitor stabilises the amplifier at its output, the sense
+    line closes at the load so the loop corrects the drop between them --
+    97 mohm x 682 uA = 66 uV, the largest error in the block and the only one
+    force and sense removes. Both, at different places. The sense pair still
+    closes at the '541; it closes at C803 now instead of C804.
+
+    verify.check_reference_load() holds the range against KiCad's exported
+    netlist rather than against this function, so a capacitor drawn onto VREF
+    fails even when nothing in design.py changed.
+    """
+    fitted = {"C802": VREF_RESERVOIR_FARADS, "C803": LOGIC_LOCAL_FARADS}
+    # Cross-checked against the netlist, so a capacitor added to VREF cannot be
+    # left out of the total by being left out of this dict.
+    on_vref = {ref for ref, _ in NETS["VREF"] if ref.startswith("C")}
+    assert on_vref == set(fitted), (
+        f"VREF carries {sorted(on_vref)} and reference_load() knows the value of "
+        f"{sorted(fitted)} -- add the pair and re-read the stability range")
+    return dict(classify_reference_load(fitted),
+                # What the deleted reservoir was for, and what it could actually
+                # have contributed to it. Numbers, so the argument stays runnable.
+                step_amps=CHANNELS * VREF / CV_R1_OHMS,
+                part_ohms=0.028,
+                reservoir_share_at_8k=(
+                    0.028 / (0.028 + 1 / (2 * math.pi * 8e3 * 10e-6))),
+                reservoir_wins_above_hz=1 / (2 * math.pi * 0.028 * 10e-6))
+
+
+def classify_reference_load(fitted):
+    """Bulk and local, and whether that is a configuration the datasheet shows.
+
+    **A naive total is the wrong test and getting it wrong the first time is
+    instructive.** Summing everything on the net gives 10.1 uF against a 10 uF
+    ceiling and reports a fault -- but 10.1 uF is *page 16's own recommendation*:
+    "it is advantageous to use a 10uF capacitor in parallel with a 0.1uF
+    capacitor". A check that fails on the datasheet's own worked example is
+    measuring the wrong thing.
+
+    What the datasheet actually describes is a topology, and it is expressible
+    entirely in the datasheet's own two numbers:
+
+      * **one** output capacitor, between VREF_CLOAD_MIN_F and
+        VREF_CLOAD_MAX_F, as close to OUTF as possible;
+      * optionally a capacitor *at* the floor value in parallel with it, which is
+        what the recommendation adds and what local decoupling at a logic pin is.
+
+    So a capacitor larger than the floor is bulk and there may be exactly one of
+    it; a capacitor at or below the floor is a local and may be repeated. No
+    threshold is invented -- 0.1 uF is the datasheet's floor and also the value of
+    the parallel capacitor it recommends, which is why the one number serves for
+    both.
+
+    That distinction is what separates the fault from the fix. Two 10 uF is two
+    bulk capacitors, 2x the qualified load, and no reading of the datasheet
+    sanctions it. One 10 uF plus a 100 nF is 10.1 uF and is printed in it.
+    """
+    # `>` is not safe on the boundary and the boundary is where the fitted part
+    # sits. kisim.magnitude("100n/50V X7R") returns 1.0000000000000001e-07, which
+    # is greater than 1e-7 by one part in 1e16, so C803 classified as *bulk* on
+    # the first run and the check reported three bulk capacitors where there is
+    # one. A tolerance of 1e-6 is a million times tighter than any capacitor
+    # tolerance and a billion times looser than the float noise.
+    def is_local(farads):
+        return (farads < VREF_CLOAD_MIN_F
+                or math.isclose(farads, VREF_CLOAD_MIN_F, rel_tol=1e-6))
+
+    bulk = {ref: farads for ref, farads in fitted.items()
+            if not is_local(farads)}
+    local = {ref: farads for ref, farads in fitted.items()
+             if is_local(farads)}
+    total = sum(fitted.values())
+    problems = []
+    if len(bulk) > 1:
+        problems.append(
+            f"{sorted(bulk)} are all larger than the {VREF_CLOAD_MIN_F * 1e6:g} uF "
+            f"floor, so VREF carries {len(bulk)} bulk capacitors totalling "
+            f"{sum(bulk.values()) * 1e6:.1f} uF -- the part is qualified for one, "
+            f"of at most {VREF_CLOAD_MAX_F * 1e6:g} uF")
+    for ref, farads in sorted(bulk.items()):
+        if farads > VREF_CLOAD_MAX_F:
+            problems.append(
+                f"{ref} is {farads * 1e6:.1f} uF, above the "
+                f"{VREF_CLOAD_MAX_F * 1e6:g} uF capacitive-load stability ceiling")
+    if total < VREF_CLOAD_MIN_F:
+        problems.append(
+            f"VREF carries {total * 1e6:.3f} uF and the datasheet requires an "
+            f"output capacitor of at least {VREF_CLOAD_MIN_F * 1e6:g} uF")
+    return {"fitted": fitted, "bulk": bulk, "local": local,
+            "total_farads": total, "ceiling_farads": VREF_CLOAD_MAX_F,
+            "floor_farads": VREF_CLOAD_MIN_F, "problems": problems,
+            "in_range": not problems}
 
 
 def _report():

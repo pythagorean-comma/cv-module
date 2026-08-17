@@ -125,13 +125,27 @@ a ground loop, whose area depends on how the wiring was dressed on the day.
 
 ---
 
-## Look this up before finalising
+## ~~Look this up before finalising~~ — looked up, and the inference held
 
-**The mixer's actual rail voltages and DC input specification.** I have inferred a
-charge-pump-derived V− from *"55 Ω pump"*, and inferred a single-DC-inlet product
-from that — but the actual input voltage range, the rail voltages, and the headroom
-the summing stage assumes all come from the mixer repo, and they set the DC-DC's
-output voltage and the audio-path headroom.
+**Done.** `contract/socket.py` reads all of it from the mixer at the pinned
+commit, so these are the fabricated board's own numbers rather than inferences:
 
-It is in `design.py` alongside `NEGATIVE_RAIL_DROP`, `output_swing()` and
-`clipping_peak()`. First thing to check when the session mounts that repo.
+| | |
+|---|---|
+| `SUPPLY_RAIL` | 8.6 V |
+| `VREG_VOLTS` | 9.06 V |
+| `NEGATIVE_RAIL_DROP` | 0.47 V — the charge-pump sag this document inferred from *"55 Ω pump"*, and the inference was right |
+| `PUMP_FREQUENCY` | 45 kHz — which is what the ≥300 kHz rule below exists to stay clear of |
+| `output_swing()` | 7.40 V |
+| `clipping_peak()` | 1.23 V per channel with all six aligned |
+
+**Nothing in the decision moved.** The module's own rails are ±12 V for the audio
+domain plus 5 V and 3V3 (`design.RAILS`), from an isolated DC-DC — and that the
+mixer runs on ±8.6 V rather than ±12 V does not couple, which is the point of
+isolating: the two domains meet at one ground bond and at the signal, nowhere
+else. `design.DEFERRED` still lists the supply, because **the topology is decided
+and the part is not.**
+
+One consequence worth carrying forward: `clipping_peak()` is the mixer's headroom,
+not this module's, and it is what `delta.py` measures this module's residual DC
+against.

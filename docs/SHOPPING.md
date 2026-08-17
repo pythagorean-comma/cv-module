@@ -21,7 +21,7 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 
 | Ref | Value | MPN | Fitted | Order | Unit | Basis | Mouser UK |
 |---|---|---|---|---|---|---|---|
-| C101–C804 | 10u/16V X7R | `GRM21BR61C106KE15L` | 8 | 12 | GBP 0.08–0.25 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR61C106KE15L) |
+| C101–C802 | 10u/16V X7R | `GRM21BR61C106KE15L` | 7 | 11 | GBP 0.08–0.25 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR61C106KE15L) |
 | C102–C602 | 1200p/50V C0G | `GRM2165C1H122JA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H122JA01D) |
 | C121–C621 | 100p/50V C0G | `GRM2165C1H101JA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H101JA01D) |
 | C131–C631 | 150n/50V X7R | `GRM216R71H154KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H154KA01D) |
@@ -58,14 +58,14 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 
 ## Totals, per currency, fitted quantities
 
-- **GBP 47.50 – 96.10**
+- **GBP 47.42 – 95.85**
 - **USD 27.96 – 49.80**
 
 Kept per currency rather than converted: two lines were priced in dollars because that is the currency the figures were found in, and folding them into a sterling total at a rate nobody looked up would turn two honest figures into one invented one.
 
 ## Notes per line
 
-**C101–C804** — 1210 X7R
+**C101–C802** — 1210 X7R
 
 **C102–C602** — 0805 C0G
 

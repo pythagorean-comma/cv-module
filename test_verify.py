@@ -190,6 +190,33 @@ def _(nets, values, open_pins, violations):
                        "description": "Symbol U8 has unplaced units [ D ]"})
 
 
+# The four faults check_reference_load() exists for. The first is the one that
+# was actually fitted: C804's second 10 uF, 2.01x the MAX6126's capacitive-load
+# stability range, which every other instrument in this repo passed for the whole
+# life of the design because none of them read a *sum*.
+@case("a second 10 uF reservoir lands on VREF", verify.check_reference_load)
+def _(nets, values, open_pins, violations):
+    nets["VREF"].add(("C804", "1"))
+    values["C804"] = "10u/16V X7R"
+
+
+@case("one oversized capacitor on VREF", verify.check_reference_load)
+def _(nets, values, open_pins, violations):
+    values["C802"] = "22u/16V X7R"
+
+
+@case("the required output capacitor is dropped", verify.check_reference_load)
+def _(nets, values, open_pins, violations):
+    nets["VREF"].discard(("C802", "1"))
+    values["C802"] = "1n/50V C0G"
+
+
+@case("the drawing and design.py disagree about VREF's load",
+      verify.check_reference_load)
+def _(nets, values, open_pins, violations):
+    values["C803"] = "220n/50V X7R"
+
+
 # And the comparison itself, which is the reason this file's netlist now comes
 # out of KiCad. Each of these three is a *drawing* fault rather than a design
 # fault, and none of them was reachable before: while both sides of compare()

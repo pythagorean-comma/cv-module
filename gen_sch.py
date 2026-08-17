@@ -50,6 +50,13 @@ VERT, HORIZ = 0, 90
 
 # Row geometry. The audio rows are on a 38.1 mm pitch because a relay symbol is
 # tall; the CV rows are tighter because an MFB stage is not.
+#
+# **A row pitch must not equal any part offset used inside the row.** CV_PITCH was
+# 25.4 while C{n}42 sits at y - 25.4, which put every channel's C{n}42 exactly on
+# the previous channel's row and merged all six VC nets into one. It is the least
+# obvious of the geometry faults because both numbers are individually sensible
+# and the collision only exists in their difference; check a new offset against
+# the pitch before adding it.
 AUDIO_Y0, AUDIO_PITCH = 38.1, 38.1
 CV_Y0, CV_PITCH = 230 * G, 30 * G
 SHARED_Y = 450 * G
@@ -499,11 +506,18 @@ def shared_block(sch, y):
         _drop_out(sch, logic, str(circuit.LOGIC_A[n]), "MAGND",
                   dx=dx, dy=16 * G)
 
-    # C803 at the Vcc pin supplies the edges; C804 is the reservoir the steady
-    # 684 uA comes out of. **The Kelvin sense pair closes here**, not at the
-    # package -- the MAX6126 datasheet says to short OUTF to OUTS "as close to
-    # the load as possible", and C804 is the load.
-    for ref_name, dx in (("C803", -4 * G), ("C804", 4 * G)):
+    # C803 at the Vcc pin supplies the PWM edges, and **the Kelvin sense pair
+    # closes here**: the datasheet has OUTS join OUTF "at the point where the
+    # voltage accuracy is needed", and that point is this package's Vcc, because
+    # Vcc is what sets the CV full scale.
+    #
+    # C804's 10 uF sat beside it and is gone -- it put VREF at 2.01x the
+    # MAX6126's capacitive-load stability range, and at 8 kHz it could only ever
+    # have supplied 1.4% of the load step it was justified by. See
+    # design.reference_load(). Note the sense closure did *not* move with it:
+    # where the bulk capacitor goes and where the sense line closes are the two
+    # halves of force and sense, not one decision.
+    for ref_name, dx in (("C803", -4 * G),):
         cap = _c(sch, ref_name, 240 * G + dx, y + 30 * G, angle=VERT)
         px, py = cap.pin("1")
         sch.wire((px, py - 5.08), (px, py))
@@ -515,6 +529,14 @@ def shared_block(sch, y):
              200 * G, y - 38.1, size=2.0)
 
     # -- pull-downs and the controller headers ---------------------------
+    #
+    # **The 16 * G pitch is a floor, not a preference.** A vertical Device:R spans
+    # 7.62 mm pin to pin and the ground drop below it adds 5.08, so a stack needs
+    # 12.7 mm before the symbols touch at all -- and at exactly 12.7 each ground
+    # symbol lands on the *next* resistor's top pin, which wires the six
+    # pull-downs into a series chain and shorts all six PWM nets together. It
+    # draws as six separate resistors. Anything below 20.32 is too close; this is
+    # 20.32.
     for n in range(1, circuit.CHANNELS + 1):
         rr = _r(sch, f"R81{n}", 140 * G, y + 38.1 + n * 16 * G, angle=VERT)
         px, py = rr.pin("1")

@@ -21,7 +21,7 @@ boards exist in physical reality. Nothing you can do here justifies changing it.
   repo path.
 - **Never** run `git` commands from a directory that contains both repos. Keep them
   as siblings, never nested.
-- If something there looks wrong, **write it down in `FINDINGS.md` here**. Do not
+- If something there looks wrong, **write it down in `docs/FINDINGS.md`**. Do not
   fix it.
 
 ### Read-only means the interface, not the code
@@ -75,7 +75,7 @@ place, one reason.** Never a magic number inline.
 ## Read before writing
 
 Before generating any design code, read the mixer's `design.py` and `verify.py`
-and write `STYLE.md` here — a short note on the conventions you found: naming,
+and write `docs/STYLE.md` — a short note on the conventions you found: naming,
 how constants are declared, how checks are structured, how units and derivations
 are expressed. Then follow it. This repo should read like a sibling of that one,
 not like a stranger.
@@ -87,7 +87,7 @@ is the existing precedent for the kind of check `verify.py` here should contain.
 
 ## Design rules
 
-1. **Do not invent values.** If something is not in `hardware-spec-v0.md` and
+1. **Do not invent values.** If something is not in `docs/hardware-spec-v0.md` and
    cannot be *derived* from it, stop and ask. A schematic full of plausible values
    is worse than an incomplete one, because it looks finished. §6 of the spec lists
    the specific things not to invent.
@@ -118,59 +118,67 @@ functions, 1 and 3 are derivable from its constants, and 5 appears nowhere in it
 
 ### Load-bearing — `verify.py` must test these
 
-1. **Exactly one bond** between module audio ground and board AGND. The mixer's
-   own `_GROUND_RULE` applied across the connector: a second bond makes a loop
-   enclosing the mixer's AGND pour and the whole length of the loom. Binary —
-   either there is one bridge or there is not. `R901`.
+**Numbered as the spec numbers them.** This section used to run 1–4 in its own
+order, which made it the only artefact in the repo disagreeing with
+`hardware-spec-v0.md` §5 — and since `verify.py` prints the spec's numbers and
+every `constraint N` reference in `design.py` uses them, "constraint 3" meant the
+PIN load here and the SIN DC everywhere else. Grouping by load-bearing versus
+practice is the point of this section; renumbering was not.
 
-2. **No *supply* current from `VREG`, `V+` or `V−`.** Every mA off V− costs
-   65 mV of rail (55 Ω pump + 10 Ω filter), and less rail is less headroom.
-   **Reworded, because "nothing" is unachievable:** the mixer's summer sources
-   this module's 212 µA of signal current from its own rails, exactly as it did
-   for the potentiometer. What is checkable is that no mixer rail net appears in
-   this module's netlist, and it is free to honour because the module's supply is
-   isolated. The arithmetic allows 21.8 mA before `check_headroom()` upstream
-   fails, so the real margin is ~100×.
+**§5.2 — Exactly one bond** between module audio ground and board AGND. The mixer's
+own `_GROUND_RULE` applied across the connector: a second bond makes a loop
+enclosing the mixer's AGND pour and the whole length of the loom. Binary —
+either there is one bridge or there is not. `R901`.
 
-3. **`PIN{n}` presents 5–10 kΩ, keeping the DC-block corner inside the
-   15.9–31.8 Hz the fabricated design already sweeps.** **Corrected:** the old
-   wording said *"or the 31.8 Hz corner moves"*, and 31.8 Hz is the corner at
-   5 kΩ — one end of the window, so the sentence held at exactly one point in
-   its own range. 10 kΩ gives 15.9 Hz and is what this module presents.
-   Mechanism is `coupling_burden()`, the mixer's own function. Note the trade the
-   old wording hid: the top of the window gives back **5.72 dB of subsonic
-   rejection**, which is the same figure `DESIGN.md` quotes for choosing 1 µF
-   over 2.2 µF in the first place.
+**§5.1 — No *supply* current from `VREG`, `V+` or `V−`.** Every mA off V− costs
+65 mV of rail (55 Ω pump + 10 Ω filter), and less rail is less headroom.
+**Reworded, because "nothing" is unachievable:** the mixer's summer sources
+this module's 212 µA of signal current from its own rails, exactly as it did
+for the potentiometer. What is checkable is that no mixer rail net appears in
+this module's netlist, and it is free to honour because the module's supply is
+isolated. The arithmetic allows 21.8 mA before `check_headroom()` upstream
+fails, so the real margin is ~100×.
 
-4. **`SIN{n}` puts no more DC through the master pot's wiper than the mixer
-   already does.** **Restated:** *"zero DC by construction"* overstates by three
-   orders of magnitude and is unachievable — a servo is feedback, not
-   construction, and the series capacitor that would be construction puts a
-   second high-pass within a decade of the mixer's own 15.9 Hz. The servo gives
-   0.5 mV, which through `C703` and `R706` is 3.0 nA at the wiper, against the
-   0.2–1.0 nA the mixer accepts from `U1B`'s own offset. **The absolute threshold
-   at which a wiper goes audibly noisy is not sourced anywhere in this project**
-   — the claim is a comparison against the design we plug into, not a limit met.
+**§5.4 — `PIN{n}` presents 5–10 kΩ**, keeping the DC-block corner inside the
+15.9–31.8 Hz the fabricated design already sweeps. **Corrected:** the old
+wording said *"or the 31.8 Hz corner moves"*, and 31.8 Hz is the corner at
+5 kΩ — one end of the window, so the sentence held at exactly one point in
+its own range. 10 kΩ gives 15.9 Hz and is what this module presents.
+Mechanism is `coupling_burden()`, the mixer's own function. Note the trade the
+old wording hid: the top of the window gives back **5.72 dB of subsonic
+rejection**, which is the same figure `DESIGN.md` quotes for choosing 1 µF
+over 2.2 µF in the first place.
+
+**§5.3 — `SIN{n}` puts no more DC through the master pot's wiper than the
+mixer already does.** **Restated:** *"zero DC by construction"* overstates by three
+orders of magnitude and is unachievable — a servo is feedback, not
+construction, and the series capacitor that would be construction puts a
+second high-pass within a decade of the mixer's own 15.9 Hz. The servo gives
+0.5 mV, which through `C703` and `R706` is 3.0 nA at the wiper, against the
+0.2–1.0 nA the mixer accepts from `U1B`'s own offset. **The absolute threshold
+at which a wiper goes audibly noisy is not sourced anywhere in this project**
+— the claim is a comparison against the design we plug into, not a limit met.
 
 ### Good practice — do it, do not defend it as load-bearing
 
-5. **Audio as twisted pairs inside individual shields, shields grounded at the
-   main-board end only.** Real mechanism, **59 dB of margin**: both loom nodes
-   are low impedance, because `PIN{n}` is `R{n}01` in parallel with the mixer's
-   own `C{n}01` and the capsule behind it — **8 Ω at 20 kHz, not 10 kΩ**.
-   Computing it as 10 kΩ gives −51 dB and *fails* the −54 dB isolation
-   requirement; the correct figure is −113 dB. **If you re-derive this, get the
-   impedance right** — that one substitution is 62 dB and the difference between
-   "mandatory" and "cheap insurance".
+**§5.5 — Audio as twisted pairs inside individual shields**, shields grounded
+at the main-board end only. Real mechanism, **59 dB of margin**: both loom nodes
+are low impedance, because `PIN{n}` is `R{n}01` in parallel with the mixer's
+own `C{n}01` and the capsule behind it — **8 Ω at 20 kHz, not 10 kΩ**.
+Computing it as 10 kΩ gives −51 dB and *fails* the −54 dB isolation
+requirement; the correct figure is −113 dB. **If you re-derive this, get the
+impedance right** — that one substitution is 62 dB and the difference between
+"mandatory" and "cheap insurance".
 
-   Same correction kills a hazard nothing had noticed: the loom carries a
-   channel's input and output in one twisted pair and the module is
-   non-inverting end to end, so intra-pair coupling is *positive feedback* around
-   the channel. 103 dB down, for the same reason.
+Same correction kills a hazard nothing had noticed: the loom carries a
+channel's input and output in one twisted pair and the module is
+non-inverting end to end, so intra-pair coupling is *positive feedback* around
+the channel. 103 dB down, for the same reason.
 
 ### Struck — do not reinstate
 
-~~Six separate returns to six pin-3s, not commoned in the module.~~ **No
+~~**§5.2, second sentence** — six separate returns to six pin-3s, not commoned
+in the module.~~ **No
 mechanism.** Per-channel returns exist to prevent shared-impedance crosstalk.
 With a single bond carrying all six channels that is 122 dB below one string on
 a 100 mm bond and 103 dB on a deliberately bad one, against a −54 dB
@@ -279,30 +287,49 @@ The most valuable output of this repo is still not a drawn schematic. It is:
 derived values with arithmetic shown, a netlist machine-checked against the
 constraints above, `verify.py` with `test_verify.py` proving its checks can
 fail, `constraints.py` proving the constraints have mechanisms, the floorplan
-and ground strategy, and an honest `ASSUMPTIONS.md`.
+and ground strategy, and an honest `docs/ASSUMPTIONS.md`.
 
 ---
 
 ## Layout of this repo
 
-Everything in `out/` and `docs/` is generated. Everything else is source.
+**Everything in `out/` is generated. `docs/` is mixed and the listing below says
+which is which.** Everything else is source.
 
-**The `gen_*.py` prefix is no longer a reliable guide to what writes, and was
-never quite one.** `constraints.py` and `floorplan.py` both emit a document
-alongside their checks — they always did — so "the four `gen_*.py` are the only
-things that write to `out/`", which this said, was wrong when it was written. The
-arrow list below is the authority: if a file appears on the right of an arrow,
-something generates it.
+**Two things this section used to say that were wrong**, both worth keeping
+because they are the same mistake in different places. It said "the four
+`gen_*.py` are the only things that write to `out/`" — `constraints.py` and
+`floorplan.py` have always emitted a document as well, so the `gen_` prefix looked
+like an invariant and never was. And it said "everything in `out/` and `docs/` is
+generated", which was true for the ten minutes before the root's prose moved into
+`docs/`. **The arrow list is the authority**: if a file is on the right of an
+arrow, something generates it and an edit to it is lost on the next run.
+
+**The root holds two files.** It held eleven markdown files, of which two were
+spent prompts whose toolchain advice this file has since reversed. Prose that
+records a decision moved to `docs/`; prose that recorded an instruction was
+deleted. Keeping a decision log is the point; keeping paths not travelled is
+cruft.
 
 ```
 cv-module/
+  README.md              what this is, where it stands, what is open
   CLAUDE.md              this file
-  hardware-spec-v0.md    authoritative spec — read first
-  00-current-state.md    context: why the choices are what they are
-  STYLE.md               the mixer's conventions, written after reading it
-  ssi2164-control-port.md  the datasheet read first-hand — six spec corrections
-  ASSUMPTIONS.md         everything guessed          [generated]
-  FINDINGS.md            anything wrong in the mixer repo — noted, never fixed
+
+  docs/                  every document a person reads
+    hardware-spec-v0.md  authoritative spec — read first. Carries an index of
+                         its own overturned claims; it is v0 and unedited
+    00-current-state.md  context: why the choices are what they are. Two of its
+                         claims lose to delta.py, marked at the top
+    STYLE.md             the mixer's conventions, written after reading it
+    ssi2164-control-port.md  the datasheet read first-hand — spec corrections
+    element-revisit.md   SSI2164 vs THAT2180 vs THAT4301, and where it landed
+    supply-decision.md   isolated DC-DC at >=300 kHz, and why
+    FINDINGS.md          anything wrong in the mixer repo — noted, never fixed
+    ASSUMPTIONS.md       everything guessed                      [generated]
+    constraints.md       does each constraint have a mechanism?  [generated]
+    floorplan.md         zones, domains, boundary crossings      [generated]
+    SHOPPING.md          what to buy and from where              [generated]
 
   contract/
     PINNED.md            the fabricated commit hash — socket.py parses it
@@ -323,24 +350,24 @@ cv-module/
   gen_sch.py             -> out/cv-module.kicad_sch
   gen_project.py         -> out/cv-module.kicad_pro, the lib tables, out/cv.kicad_sym
   gen_bom.py             -> out/cv-module-bom.csv, docs/SHOPPING.md
-  gen_assumptions.py     -> ASSUMPTIONS.md
+  gen_assumptions.py     -> docs/ASSUMPTIONS.md
   constraints.py         -> docs/constraints.md
   floorplan.py           -> docs/floorplan.md
 
   out/                   for machines: the sheet, the project, the netlist, the
                          BOM as CSV, and from-kicad.net / from-kicad-erc.json,
                          which verify.py regenerates on every run
-  docs/                  for people: constraints.md, floorplan.md, SHOPPING.md
 ```
 
-**Everything in `out/` and `docs/` is generated, and the split between them is by
-audience rather than by file type.** `out/` is what another tool reads next —
-KiCad opens the sheet, a quoting tool or an assembly house reads the CSV. `docs/`
-is what a person reads at a screen. Neither is ever hand-edited: an edit there is
-lost on the next run, silently, which is the worst way to lose one.
+**The split between `out/` and `docs/` is by audience, not by file type.** `out/`
+is what another tool reads next — KiCad opens the sheet, a quoting tool or an
+assembly house reads the CSV. `docs/` is what a person reads at a screen.
 
-At the root, `ASSUMPTIONS.md` is generated too. `FINDINGS.md` and every other
-markdown at the root is hand-written source.
+**`docs/` mixes source and generated, so the four marked `[generated]` above are
+the ones never to hand-edit.** An edit to one is lost on the next run, silently,
+which is the worst way to lose one. That mixing is the price of one folder for
+prose, and it is why the listing marks them rather than leaving it to be inferred
+from a filename.
 
 Run order, and each step reads the one before:
 
@@ -364,7 +391,7 @@ and an exact count, so a new violation of a declared class still fails.
 anything.** A green check proves nothing on its own — the failure this project
 keeps finding is a check that passes and covers less than its name. That file
 mutates the netlist into each fault the constraints exist to prevent and fails
-if any check does not notice. 27 faults now, and three of the new ones are
+if any check does not notice. 31 faults now, and three of the new ones are
 *drawing* faults — a wire that missed its endpoint, two nets touching, an
 interior node that lost its label — which were not reachable at all while both
 sides of the comparison came out of `design.py`.

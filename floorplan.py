@@ -261,13 +261,40 @@ So the placement rules are ordinary rather than delicate, and they are all
 local:
 
   * **C803, 100 nF, at the '541's own Vcc pin.** This is what supplies the
-    edges; the reference supplies the average.
-  * **C804, 10 uF, between the reference and the '541.** The reservoir the
-    steady 684 uA comes out of, so U12's own loop never sees the load step
-    when six channels change duty at the 8 kHz frame rate.
+    edges; the reference supplies the average. It is also where the Kelvin sense
+    pair closes, because Vcc is the point where the voltage accuracy is needed.
+  * **C802, 10 uF, at OUTF.** The output capacitor the datasheet requires,
+    "as close to OUTF as possible" -- a loop-stability part, so what matters is
+    its inductance to the pin.
   * **C801, the 0.1 uF NR capacitor, at U12.** Not decoupling: it is what takes
     the part from 75 to 45 nV/rtHz, and it is on a high-impedance internal node
-    so it goes at the pin and nowhere else.
+    so it goes at the pin and nowhere else. It also costs 20 ms of turn-on
+    settling, which is the fail-safe's business rather than the floorplan's --
+    see design.VREF_TURN_ON_S.
+
+~~**C804, 10 uF, between the reference and the '541.** The reservoir the steady
+684 uA comes out of, so U12's own loop never sees the load step when six channels
+change duty at the 8 kHz frame rate.~~ **Struck, and the part is deleted.** Two
+things wrong with it, and the second is why it is worth striking rather than
+quietly shrinking.
+
+It broke a limit. With C802 also fitted, VREF carried 20.1 uF against the
+MAX6126's 0.1-10 uF capacitive-load stability range -- a range qualified "no
+sustained oscillations", on the node that is every channel's full scale.
+
+And **the mechanism in that clause runs the other way.** A load step divides
+between the reservoir and the part's own output impedance in inverse proportion
+to impedance. At 8 kHz a 10 uF is 1.99 ohm and the MAX6126's load regulation is
+0.028 ohm, so the reservoir supplied 1.4% of the step and *the loop supplied the
+rest*: it cannot be shielded from a load step by a capacitor eighty times its own
+impedance, and 10 uF only becomes the stiffer element above 568 kHz. Nor did the
+step need shielding -- 682 uA x 0.028 ohm is 19 uV, which the CV filter puts
+59.9 dB down, so -143 dB of AM against a -54 dB requirement.
+
+The same shape as the struck constraint in CLAUDE.md: a clause with a plausible
+mechanism, satisfied by a fitted part, never checked for whether the mechanism
+was reachable. `design.reference_load()` carries the arithmetic and
+`verify.check_reference_load()` now holds the range against KiCad's own netlist.
   * **U12 between C1 and D1**, so the reference reaches the '541 and the six
     CV filters' offset resistors without either run crossing the audio zones.
   * **Phase-stagger the six PWM slices in firmware**, per spec section 4.2. It

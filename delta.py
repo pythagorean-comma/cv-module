@@ -331,7 +331,8 @@ DISAGREEMENTS = (
      "Summing-resistor scaling -- free 8 dB for one resistor value",
      "A wash: {scaling_delta:+.1f} dB. The 8 dB assumed source noise "
      "independent of the source's full-scale voltage, and the MAX6126's noise "
-     "is proportional to its output -- 45 nV/rtHz at 2.5 V against 95 at 5 V. "
+     "rises with its output -- 45 nV/rtHz at 2.5 V against 95 at 5 V, both "
+     "read first-hand. "
      "Scaling up and dividing back down cancels. Already recorded in "
      "ssi2164-control-port.md; repeated here because it is one of the three."),
 )

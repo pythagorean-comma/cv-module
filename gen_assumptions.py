@@ -25,7 +25,10 @@ import design
 import contract.socket as socket
 import gen_bom
 
-OUT = pathlib.Path(__file__).resolve().parent
+# docs/, alongside every other document a person reads. It was the repo root,
+# which is where it sat while the root held eleven markdown files; the root now
+# holds README.md and CLAUDE.md and nothing else.
+DOCS = pathlib.Path(__file__).resolve().parent / "docs"
 
 Guess = collections.namedtuple("Guess", "what basis affects if_wrong settle")
 
@@ -35,33 +38,24 @@ Guess = collections.namedtuple("Guess", "what basis affects if_wrong settle")
 
 READINGS = (
     Guess(
-        "The `MAX6126A25` pin map.",
-        "Not read. The part is chosen on its noise figure and its voltage, "
-        "both of which came from the datasheet's electrical table via a text "
-        "mirror rather than from the PDF itself.",
-        "U12's four connections are pin *roles* in the netlist -- `<VIN>`, "
-        "`<VOUT>`, `<GND>`, `<NR>` -- and design.check_pin_numbers() refuses "
-        "to let a number be invented for them.",
-        "Nothing silently. The netlist is not loadable by KiCad until they "
-        "resolve, which is the intended state.",
-        "Open the MAX6126 datasheet and fill in design.UNSPECIFIED's entry."),
-
-    Guess(
-        "The MAX6126's noise figures per output voltage.",
-        "Read from a text mirror of the datasheet (pdf.datasheet.live), not "
-        "from Analog Devices' own PDF, which timed out three times. The "
-        "figures are internally coherent -- noise scales almost exactly with "
-        "output voltage -- and one of them (35 nV/rtHz at 2.048 V) is "
-        "corroborated by an independent search result.",
-        "The whole of correction 5: whether the '0-5 V through 15k' scaling "
-        "buys 8 dB or nothing. The answer turns on 45 nV/rtHz at 2.5 V "
-        "against 95 at 5 V.",
-        "If the scaling really is proportional to voltage, nothing changes. "
-        "If the 2.5 V part is quieter than 45 nV/rtHz relative to the 5 V "
-        "part, the 5 V option becomes worth something again -- and it is "
-        "still blocked by the '541's input threshold, so the conclusion is "
-        "robust even if the numbers move.",
-        "Fetch the ADI PDF when it is reachable and check the two rows."),
+        "The MAX6126's turn-on settling time, and the fail-safe sequence.",
+        "Read first-hand (page 4, and page 16 in prose): turn-on to 0.01 % of "
+        "final value is 1 ms with no NR capacitor and **20 ms with the 0.1 uF "
+        "fitted**. The capacitor is fitted, for 75 -> 45 nV/rtHz.",
+        "The power-up sequence, which spec section 4.5 says to \"design "
+        "explicitly\" and nothing in this repo had a number for. The '541's Vcc "
+        "*is* VREF, so for 20 ms after power-up every channel's full scale is "
+        "ramping from zero -- and positive Vc attenuates, so zero CV is unity "
+        "gain. Section 4.5's named hazard, arriving by the reference rather "
+        "than by the DAC.",
+        "Nothing, if the bypass relay is held bypassed across it: 20 ms is 4x "
+        "the ~5 ms section 4.5 quotes for a relay to transfer, so the margin "
+        "is comfortable. It is a sequencing requirement rather than a hazard. "
+        "If it is *not* sequenced, the box is briefly at unity gain on all six "
+        "strings at power-up, which is the loudest possible failure.",
+        "Nothing to settle -- the figure is read. It belongs in the fail-safe "
+        "block, which is DEFERRED, and design.VREF_TURN_ON_S is where it is "
+        "waiting."),
 
     Guess(
         "The OPA1644's input offset voltage.",
@@ -320,7 +314,7 @@ def _report():
 
     out("## The short version")
     out()
-    out("Two of these would change the board, and the rest would change a "
+    out("Both of these would change the board; the rest would change a "
         "number:")
     out()
     out("1. **`MEASURED['noise_floor']`** — the mixer's own unmeasured "
@@ -329,13 +323,24 @@ def _report():
         "is running.")
     out("2. **The pad relay** — not chosen, 49 % of the board area and about "
         "a third of its cost.")
-    out("3. **The MAX6126's noise figures**, read from a text mirror rather "
-        "than Analog Devices' own PDF. They are what overturn the \"free "
-        "8 dB\".")
     out()
-    out("One entry that *was* on this list is now settled rather than open: "
-        "constraint 2's \"six separate returns\" has been struck, with the "
-        "arithmetic, in [Readings of the spec](#readings-of-the-spec).")
+    load = design.reference_load()
+    out("**Two entries that *were* on this list are settled rather than "
+        "open.** Constraint 2's \"six separate returns\" has been struck, with "
+        "the arithmetic, in [Readings of the spec](#readings-of-the-spec). And "
+        # The deleted C804 was a second VREF_RESERVOIR, so the old total is the
+        # new one plus that value -- derived rather than a remembered literal.
+        f"the {(load['total_farads'] + design.VREF_RESERVOIR_FARADS) * 1e6:.1f} "
+        "µF that used to sit on VREF "
+        "— twice the MAX6126's capacitive-load stability ceiling, because two "
+        "10 µF reservoirs were fitted — is resolved by deleting C804: its "
+        "justification was shielding the reference's loop from an 8 kHz load "
+        "step, and at 8 kHz a 10 µF could only supply "
+        f"{load['reservoir_share_at_8k'] * 100:.1f} % of that step. VREF now "
+        f"carries {load['total_farads'] * 1e6:.1f} µF, which is the datasheet's "
+        "own recommended 10 µF ∥ 0.1 µF, and "
+        "`verify.check_reference_load()` holds the range against KiCad's "
+        "netlist. See `design.reference_load()`.")
     out()
 
     out("## Numbers with declared ranges")
@@ -475,16 +480,20 @@ def _report():
         "control port is ground-referenced, so 1 mV in the wrong place is AM "
         "51 dB below the signal.")
     out("- **The five section 5 constraints** — checked mechanically by "
-        "`verify.py`, and `test_verify.py` plants fourteen faults to prove "
+        "`verify.py`, and `test_verify.py` plants 27 faults to prove "
         "the checks can fail.")
-    out("- **Every pin map in the netlist except the MAX6126's** — SSI2164, "
-        "OPA1644 and SN74AHC541 were each read off their own "
-        "pin-configuration tables in this session.")
+    out("- **Every pin map in the netlist** — SSI2164, OPA1644, SN74AHC541 "
+        "and now the MAX6126, each read off its own pin-configuration table. "
+        "The MAX6126 was the last one out: it had been read from a text "
+        "mirror, three comments and this document went on saying it had not "
+        "been read at all, and it is now confirmed pin-for-pin against "
+        "Maxim's own PDF. The mirror was right.")
     return "\n".join(L)
 
 
 def main():
-    path = OUT / "ASSUMPTIONS.md"
+    DOCS.mkdir(exist_ok=True)
+    path = DOCS / "ASSUMPTIONS.md"
     path.write_text(_report() + "\n")
     counts = {
         "MEASURED": len(design.MEASURED),
@@ -496,7 +505,7 @@ def main():
     }
     print("assumptions: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
     print(f"  total {sum(counts.values())} entries")
-    print(f"  wrote {path.name}")
+    print(f"  wrote {path.relative_to(path.parent.parent)}")
 
 
 if __name__ == "__main__":

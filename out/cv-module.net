@@ -491,15 +491,7 @@
 			(value "100n/50V X7R")
 			(footprint "Capacitor_SMD:C_0805_2012Metric")
 			(property "MPN" "GRM216R71H104KA01D")
-			(property "Description" "'541 local decoupling -- at the package")
-			(property "InBOM" yes)
-		)
-		(comp
-			(ref "C804")
-			(value "10u/16V X7R")
-			(footprint "Capacitor_SMD:C_1210_3225Metric")
-			(property "MPN" "GRM21BR61C106KE15L")
-			(property "Description" "'541 charge reservoir -- keeps the switching transient off the reference")
+			(property "Description" "'541 local decoupling and the Kelvin closure -- at the package, where OUTS joins OUTF")
 			(property "InBOM" yes)
 		)
 		(comp
@@ -1442,7 +1434,7 @@
 			(value "MAX6126A25")
 			(footprint "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
 			(property "MPN" "MAX6126AASA25+")
-			(property "Description" "2.5 V band-gap reference, 45 nV/rtHz with C_NR; Kelvin-sensed, OUTF/OUTS shorted at C804; also feeds the ADC")
+			(property "Description" "2.5 V band-gap reference, 45 nV/rtHz with C_NR; Kelvin-sensed, OUTF/OUTS shorted at C803; also feeds the ADC")
 			(property "InBOM" yes)
 		)
 		(comp
@@ -2408,10 +2400,6 @@
 			)
 			(node
 				(ref "C803")
-				(pin "2")
-			)
-			(node
-				(ref "C804")
 				(pin "2")
 			)
 			(node
@@ -4160,10 +4148,6 @@
 			)
 			(node
 				(ref "C803")
-				(pin "1")
-			)
-			(node
-				(ref "C804")
 				(pin "1")
 			)
 			(node

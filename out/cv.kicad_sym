@@ -550,7 +550,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.analog.com/en/products/max6126.html"
+		(property "Datasheet" "https://media.digikey.com/pdf/Data%20Sheets/Maxim%20PDFs/MAX6126_Rev8_1-5-117.pdf"
 			(at 2.54 -8.89 0)
 			(show_name no)
 			(do_not_autoplace no)

@@ -47,13 +47,14 @@ buried in the generator.
 """
 
 import json
+import math
 import pathlib
 import subprocess
 import sys
 
 import design
 import contract.socket as socket
-from toolchain import kicad, sexp
+from toolchain import kicad, kisim, sexp
 
 OUT = pathlib.Path(__file__).resolve().parent / "out"
 SHEET = OUT / "cv-module.kicad_sch"
@@ -445,6 +446,73 @@ def check_triads(nets):
     return problems
 
 
+def check_reference_load(nets, values):
+    """What KiCad found on VREF is a capacitive load the MAX6126 is qualified for.
+
+    First-hand from the pinned datasheet (19-2647 Rev 8): page 4 gives a
+    "Capacitive-Load Stability Range" of 0.1 to 10 uF, qualified "no sustained
+    oscillations", and page 16 states it as a requirement -- "The MAX6126
+    requires an output capacitor between 0.1uF and 10uF" -- then recommends "a
+    10uF capacitor in parallel with a 0.1uF capacitor" for switching loads.
+
+    **The fault this exists for was fitted and shipped in the netlist for the
+    whole life of the design: 20.1 uF, two 10 uF reservoirs, 2x the qualified
+    load.** Nothing could see it, and the reason is worth keeping. The value
+    strings were correct, so a BOM check passed. Each capacitor was individually
+    reasonable, so reading the schematic passed. ERC counts pins and not farads.
+    The netlist comparison proves the drawing matches design.py, and design.py
+    was what was wrong -- which is the shape the mixer records twice, at
+    DIODE_PINS and CAP_PINS. What was missing was any check that read a *sum*.
+
+    Deliberately reads the exported netlist and its component values rather than
+    design.reference_load(), for the reason the rest of this file was repointed
+    at KiCad: a check that reads the same module it is checking cannot catch a
+    fourth capacitor drawn onto VREF. design.classify_reference_load() holds the
+    datasheet's topology and this feeds it what KiCad actually parsed.
+    """
+    problems = []
+    fitted = {}
+    for ref, _ in nets.get("VREF", ()):
+        if not ref.startswith("C"):
+            continue
+        value = values.get(ref)
+        if value is None:
+            problems.append(f"{ref} is on VREF and the netlist gives no value")
+            continue
+        try:
+            fitted[ref] = kisim.magnitude(value)
+        except Exception:
+            problems.append(
+                f"{ref} on VREF has value {value!r}, which does not parse as a "
+                f"capacitance -- the stability range cannot be checked")
+    if not fitted:
+        return problems + ["VREF carries no capacitor at all"]
+
+    verdict = design.classify_reference_load(fitted)
+    problems.extend(verdict["problems"])
+
+    # And the design's own numbers must agree with the drawing's, so the two
+    # cannot drift apart quietly in either direction.
+    #
+    # Compared with a tolerance, not with `!=`. The two totals are the same
+    # 10.1 uF arrived at by different arithmetic -- these from parsing "10u" and
+    # "100n" out of the netlist, design.py's from adding two float constants --
+    # and they differ in the sixteenth digit. Exact float equality reported a
+    # disagreement between two numbers that print identically, which is the
+    # second time the same trap has bitten in this one check: see
+    # design.classify_reference_load() for the first, on the 0.1 uF boundary.
+    # 1e-9 relative is far tighter than any capacitor and far looser than float
+    # noise.
+    intended = design.reference_load()
+    if not math.isclose(verdict["total_farads"], intended["total_farads"],
+                        rel_tol=1e-9):
+        problems.append(
+            f"KiCad found {verdict['total_farads'] * 1e9:.1f} nF on VREF and "
+            f"design.reference_load() intends "
+            f"{intended['total_farads'] * 1e9:.1f} nF")
+    return problems
+
+
 def run_erc(schematic, destination):
     """KiCad's own electrical rules check, as JSON. Regenerated every run."""
     result = subprocess.run(
@@ -597,6 +665,8 @@ CHECKS = (
     ("5  shielded pairs, one end [practice]", check_triads, ("nets",)),
     ("   open pins are the declared ones", check_open_pins, ("open_pins",)),
     ("   ERC finds only declared residue", check_erc, ("violations",)),
+    ("   VREF load inside the MAX6126's range", check_reference_load,
+     ("nets", "values")),
 )
 
 

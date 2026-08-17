@@ -1,11 +1,38 @@
 # Hardware spec v0 — per-string CV module
 
 **Purpose:** seed document for a schematic/PCB spike. This is not a design
-discussion — the discussion is in the other five files. This is the extracted,
-buildable specification, with every value either stated or explicitly marked as
-*compute*, and every unknown explicitly marked as *BLOCKED* or *TBD*.
+discussion. This is the extracted, buildable specification, with every value
+either stated or explicitly marked as *compute*, and every unknown explicitly
+marked as *BLOCKED* or *TBD*.
 
-Read `00-current-state.md` for why any of these choices are what they are.
+Read [`00-current-state.md`](00-current-state.md) for why any of these choices are
+what they are.
+
+---
+
+## ⚠ This is v0, and the design has moved past it in places
+
+**Kept unedited on purpose.** It is the baseline the corrections are measured
+against, and rewriting a claim in place would destroy the record of what was
+specified versus what was derived. So the numbered sections below say what they
+said on day one, and **where a claim has been overturned the answer is somewhere
+else.** This table is the index; none of it is restated here, because one copy in
+one place is the rule the rest of the repo runs on.
+
+| where | what moved | the current answer |
+|---|---|---|
+| §2, §4.1, §4.2, §4.5, §1.1, §1.4 | seventeen claims, checked against the SSI2164 datasheet read first-hand. Six move a component value or a part count | [`ssi2164-control-port.md` §7](ssi2164-control-port.md#7-corrections-to-hardware-spec-v0md) |
+| §5.2 | *"Six separate returns to six pin-3s"* — **struck.** No mechanism: pairwise crosstalk through a single bond is 122 dB below one string against a −54 dB requirement | `CLAUDE.md`, and `design.FRONT_R` for the arithmetic |
+| §5.3, §4.1 | *"zero DC by construction"* — restated. A servo is feedback, not construction, and it overstates by three orders of magnitude | `CLAUDE.md` constraint 4 |
+| §5.4 | *"or the 31.8 Hz corner moves"* — corrected. 31.8 Hz is the corner at 5 kΩ, one end of the window the sentence quotes | `CLAUDE.md` constraint 3 |
+| §5.5 | *"individually-shielded twisted triads"* — demoted from load-bearing to good practice on 59 dB of margin, and a triad here is a pair inside a shield | `CLAUDE.md` constraint 5 |
+| §4.2 | *"MAX6126A25 … (35 nV/√Hz)"* — 35 nV/√Hz is the **2.048 V** part. The 2.5 V part is 45 | `design.VREF`, read first-hand |
+| §4.5 | *"12 coils (six 2-bit pads)"* driven by *"2× TPIC6B595"* — does not close. Dual-coil latching, as §4.1 asks, is 24 coils and 3× registers | [`ASSUMPTIONS.md`](ASSUMPTIONS.md), `design.DEFERRED_PINS` |
+| §7 | asks `verify.py` to check "six separate returns", which is §5.2 and struck | `verify.check_shield_returns()` holds the half that has a mechanism |
+
+**§6 has not moved and is still binding.** Nothing in the list above was invented
+to replace a claim; each is either read from a datasheet or derived, with the
+arithmetic in a function.
 
 ---
 
@@ -233,6 +260,11 @@ the buffer — post-gain makes it a feedback loop that latches shut.
 ---
 
 ## 5. Constraints that must not be violated
+
+> **Four of these five have moved. See the table at the top.** One was struck for
+> having no mechanism, two were restated because they overstate what is
+> achievable, and one was demoted to good practice on 59 dB of margin. The
+> wording below is v0's.
 
 From the parent doc, and they are load-bearing:
 
