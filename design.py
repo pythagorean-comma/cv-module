@@ -6,8 +6,8 @@ schematic full of plausible values is worse than an incomplete one -- it looks
 finished.
 
     from the mixer's RV{n}01 socket
-      PIN{n} --[ 10k ]--+-- inverting unity front end --+-- envelope tap
-       (pin 1)          |          (Rf 10k)             |
+      PIN{n} --[ 10k ]--+-- inverting unity front end --+-- |x| --[ 4.7 ms ]--> ENV{n}
+       (pin 1)          |          (Rf 10k)             |   (2 amps, 2 diodes)
                      virtual                            +--[ 10u ]--,
                       earth                                         |
                                                              R_IN 12k1
@@ -631,19 +631,56 @@ def cell_noise(rin, rout, gain_db=0.0, input_referred=0.0, e_fixed=None):
 FRONT_R = "10k 0.1%"
 FRONT_R_OHMS = 10_000.0
 
-# OPA1644, named in spec section 4.2 for the CV filter. Used throughout rather
-# than introducing a second part.
+# OPA1644, named in spec section 4.2 for the CV filter.
 #
-# 31 sections: 6 front ends, 6 I-V, 6 servos, 6 CV filters, 6 envelope
-# rectifiers and one reference inverter. Eight quads, one spare. The servo and
-# rectifier sections do not need a 3.3 nV/rtHz JFET part and a cheaper quad
-# would serve; that is a BOM optimisation and not a design change, and it is
-# left until the BOM is costed.
+# 32 sections and eight quads, with nothing left over: 6 front ends, 6 I-V,
+# 6 servos, 6 CV filters, 6 envelope summing stages, one reference inverter and
+# one spare terminated as a follower. The envelope block is what filled the
+# last six -- they were reserved for it and the reservation was for one section
+# per channel, which is a half-wave rectifier. ENV_FULL_WAVE wants two.
 OPAMP = "OPA1644"
 OPAMP_EN = 3.3e-9
 OPAMP_SECTIONS = 4
-OPAMP_NEEDED = 6 * 5 + 1
+OPAMP_NEEDED = 6 * 5 + 1 + 1          # +refinv, +the spare that is terminated
 OPAMP_QUADS = -(-OPAMP_NEEDED // OPAMP_SECTIONS)
+
+# The second op-amp, and it is a *second* rather than a replacement.
+#
+# **The note that used to sit here was half right and the wrong half was
+# actionable.** It read: "The servo and rectifier sections do not need a
+# 3.3 nV/rtHz JFET part and a cheaper quad would serve; that is a BOM
+# optimisation and not a design change, and it is left until the BOM is
+# costed." The BOM is costed now, the OPA1644 is both its largest line and out
+# of stock at TI, and the obvious move was to put the servos on the cheap part
+# too. **It is wrong for the servo**, and the reason is in this repo already:
+# the servo's whole specification is its input offset -- servo_residual() says
+# so, "a servo does not make DC small, it makes DC somebody else's offset" --
+# and MEASURED["servo_vos"] declares a range of 0.05 to 3 mV. A TL074 is 3 mV
+# typical and 10 mV maximum, which is the top of that range on a good day.
+# Noise was the wrong axis to have judged it on.
+#
+# What does move is the rectifier's *first* stage, and it moves for a second
+# reason as well as price. A1's output slews across two diode drops at every
+# zero crossing, up to about a thousand times a second on the top string --
+# the hardest edge anywhere in the analogue domain except the '541 -- and the
+# rule at SECTIONS is that a switching thing does not share a die with an audio
+# front end. So stage A goes on its own packages, and stage B, whose output is
+# already filtered by ENV_R x ENV_C, takes the six precision sections that were
+# reserved for the block. That also puts the low offset where it is worth
+# something: A2's offset is the floor of the whole detector, see
+# envelope_balance().
+#
+# TL074: the same 14-pin quad pinout the OPA1644 borrows its symbol from,
+# checked pin by pin in LIBS already, and the part the SSI2164's own datasheet
+# uses in the position this one occupies (Figure 1, "1/2 TL072"). 3 mV of
+# offset is -52 dB against the mixer's clipping_peak(), which is the detector's
+# floor and not the audio path's.
+ENV_OPAMP = "TL074"
+ENV_OPAMP_EN = 18e-9                  # nV/rtHz at 1 kHz, and it never reaches audio
+ENV_OPAMP_VOS = 3.0e-3                # typical; 10 mV maximum
+ENV_SECTIONS_NEEDED = CHANNELS
+ENV_QUADS = -(-ENV_SECTIONS_NEEDED // OPAMP_SECTIONS)
+ENV_PACKAGES_REFS = tuple(f"U{13 + i}" for i in range(ENV_QUADS))
 
 
 def front_end():
@@ -946,6 +983,309 @@ def allocation():
             "die_mates": per_package - 1,
             "spare": VCA_PACKAGES * 4 - CHANNELS,
             "alternative_die_mates": 3}
+
+
+# ---------------------------------------------------------------------------
+# The envelope detector, which the spec said could not be derived
+# ---------------------------------------------------------------------------
+
+# Spec section 4.4 asks for "six precision rectifiers -> RC -> external SPI ADC"
+# and gives a sampling rate and no time constant. This repo carried the block in
+# DEFERRED with the reason "the smoothing time constant is not derivable -- spec
+# section 4.4 gives a sampling rate and no attack/release target", and README
+# listed it as waiting on a musical decision.
+#
+# **That is true of the detector the phrase imagines and false of the one this
+# instrument needs.** "Attack and release" are the two halves of an *asymmetric*
+# detector -- fast up, slow down -- and asymmetry is a musical preference, which
+# is why it wants a target. A *symmetric* one-pole wants no preference at all,
+# because both of its bounds are electrical:
+#
+#     upper   the picked transient. hexsim.karplus_strong's calibration note,
+#             which is the only measured envelope profile in the project --
+#             "peak in the first 20 ms, 8-12 dB down by 250 ms, then
+#             1.8-3.1 dB/s" -- against a real picked electric. A one-pole at
+#             5 ms reads 0.16 dB under the true peak at 20 ms; at 20 ms it
+#             reads 4 dB under, and the attack is gone rather than late.
+#     lower   ripple. Full-wave rectified, the lowest string puts 164.8 Hz on
+#             the detector's own output, and shorter tau lets more of it
+#             through.
+#
+# **And the release bound turns out not to exist.** A 5 ms one-pole falls at
+# 1.7 dB per millisecond; the fastest thing it has to follow downwards is the
+# early decay above, at 25 ms per decibel. It is 43x faster than the music, so
+# a symmetric filter already tracks every musical decay exactly and an
+# asymmetric release buys nothing that firmware cannot do better.
+#
+# **What the instrument is decides the rest, and it is not a guitar.** The
+# target is a modern arpeggione: six strings, standard guitar tuning, bowed as
+# well as picked. Those two techniques want opposite detectors -- picked wants
+# a fast attack and a decay-following release; bowed has no transient at all,
+# modulates continuously through the note, and wants the smoothing that would
+# destroy a pick attack. An RC fixes one compromise across both, permanently.
+# A firmware constant at the 1-2 kHz frame does not, and onset shape is exactly
+# what distinguishes the two, so it can switch on what it hears.
+#
+# So: the analogue side takes the one constant that serves both, and the
+# musical shaping lives at the sample rate where it costs nothing and can be
+# set by ear against hexsim's renders -- which is how corrections 7 and 8 in
+# 00-current-state.md were found in the first place. **The block is no longer
+# blocked on a decision from Tim.** What is left of it is drawing.
+#
+# The derivation survives the one thing nobody here has measured. A bowed
+# onset's rise time appears nowhere in this project and is not needed: the pick
+# binds the fast end and the bow only ever asks for slower.
+
+# 10k x 470n. Both E12, both already ordinary on this board, and the product is
+# the derived figure rather than the round one -- see envelope_filter().
+ENV_R = "10k 1%"
+ENV_R_OHMS = 10_000.0
+ENV_C = "470n/50V X7R"
+ENV_C_FARADS = 470e-9
+
+# Full-wave, and it is the bow that decides it. Half-wave doubles the ripple
+# period and leaves 4.67 dB of it on a sustained low E -- at the string's own
+# pitch, which is precisely the flutter a bowed swell would show. It also costs
+# a second op-amp section per channel, and the six sections OPAMP_NEEDED
+# reserves are one each: **the section count had quietly chosen half-wave and
+# nothing had costed it**, which is the coarse pad's shape one block along.
+#
+# Those twelve sections do not want a 3.3 nV/rtHz JFET part -- the note at
+# OPAMP has said so since the first pass, "left until the BOM is costed", and
+# the BOM is costed now, with the OPA1644 both the largest line on it and out
+# of stock at TI. The part is not chosen here; what is derived is that it is a
+# different one.
+ENV_FULL_WAVE = True
+ENV_SECTIONS_PER_CHANNEL = 2
+
+# hexsim.TUNING_HZ, E2 to E4 in standard tuning. Not imported: hexsim needs
+# numpy and scipy at import time, and nothing in this pipeline may -- see
+# CLAUDE.md on third-party packages. Cited rather than copied silently.
+STRING_HZ = (82.41, 110.00, 146.83, 196.00, 246.94, 329.63)
+
+# hexsim.karplus_strong's calibration note, against a real picked electric.
+PICK_PEAK_S = 0.020
+PICK_EARLY_DB, PICK_EARLY_S = 10.0, 0.250
+
+# Spec section 4.4: "1-2 kHz sampling is sufficient". **It is not a range, and
+# the low end fails.** envelope_sample_rate() is the arithmetic: the top string
+# open is 329.63 Hz, its full-wave ripple is 659 Hz, and at 1 kHz that is above
+# Nyquist and folds back at -29 dB. 2 kHz clears it. Open question 6 in
+# 00-current-state.md asks whether 1-2 kHz is enough for the swell to feel
+# responsive; the sample rate turns out to be settled by the rectifier's own
+# output spectrum before the musical question is reached.
+ENV_SAMPLE_HZ = 2_000.0
+
+# What the firmware averages over, as a *duration* rather than a sample count,
+# so the figure does not silently change with the sample rate. 8 ms is chosen
+# to be short against the 20 ms the picked transient takes to peak: the digital
+# side removes ripple without touching the attack the analogue side was tuned
+# to keep.
+ENV_FIRMWARE_BOX_S = 8e-3
+
+# The two-op-amp absolute-value circuit, which is the standard one: an
+# inverting half-wave stage whose diodes sit inside the loop, then a summing
+# stage that adds the input to twice the half-wave output. Five resistors and
+# two diodes per channel, and the ratio that does the work is R{n}54 = R/2 --
+# everything else is R.
+#
+#     BUF --R51-- (-)A1 [D51 to -in, D52 to HW] --R52-- HW
+#     BUF --R53-- (-)A2 <-- R54 from HW, R55 || C51 in feedback --> ENV
+#
+# The half value is 4k99 rather than 5k because 5k is not an E96 value. 0.2 %
+# off a ratio that only sets the match between the two half-cycles, and a
+# symmetric waveform averages the mismatch away; it is reported by
+# envelope_balance() rather than assumed to be nothing.
+ENV_R_HALF = "4k99 1%"
+ENV_R_HALF_OHMS = 4_990.0
+
+# 1N4148W: an ordinary small-signal switching diode in SOD-123, and the
+# arithmetic that matters for it is not the forward drop -- both diodes sit
+# inside an op-amp's feedback loop, which is the entire point of a *precision*
+# rectifier and is why a 0.6 V drop does not appear in the answer. What is left
+# outside the loop is reverse leakage into the summing junctions, and 1N4148
+# leakage at the millivolts of reverse bias these ever see is picoamps against
+# the 123 uA that R{n}51 delivers at the mixer's own clipping_peak().
+ENV_DIODE = "1N4148W"
+
+# **Named, not numbered, and this repo has a sibling that paid for the rule.**
+# The mixer's DIODE_PINS records D801 fitted backwards for the whole life of
+# that design, with the note that "a pin number can be transposed silently;
+# 'A' and 'K' cannot". Read off KiCad's own Device:D this session: **pin 1 is
+# the cathode** and pin 2 the anode, which is the opposite of what a reader
+# guessing from the picture would assume, because at angle 0 the symbol's
+# triangle points left and current runs right to left.
+DIODE_PINS = {"K": 1, "A": 2}
+
+# Fretted, so the highest fundamental is not an open string. The fret count of
+# the instrument is written down nowhere in this project and is not invented
+# here -- envelope_sample_rate() shows the answer is flat above the eighth fret
+# of the top string, so the unknown does not reach the result. 24 is used to
+# sweep past the point where that becomes true.
+ENV_TOP_FRET = 24
+
+
+def envelope_harmonics(f0, terms=20):
+    """Ripple components of a rectified sine, relative to its own mean.
+
+    Full-wave is even harmonics of f0 with amplitude (4/pi)/(4k^2-1); half-wave
+    adds the fundamental at half the peak. Both are divided by their own mean,
+    because what the ADC cares about is ripple as a fraction of the level being
+    reported, not as a fraction of the input.
+    """
+    if ENV_FULL_WAVE:
+        mean = 2 / math.pi
+        return [(2 * k * f0, (4 / math.pi) / (4 * k * k - 1) / mean)
+                for k in range(1, terms + 1)]
+    mean = 1 / math.pi
+    return [(f0, 0.5 / mean)] + [
+        (2 * k * f0, (2 / math.pi) / (4 * k * k - 1) / mean)
+        for k in range(1, terms + 1)]
+
+
+def envelope_filter(tau=None, sample_hz=None):
+    """The one-pole after the rectifier: what it costs and what it keeps.
+
+    Four figures per string and none of them is a preference.
+
+    `attack_db` is how far under the true peak the filter sits at the moment
+    the picked transient peaks. It is the number that bounds tau from above and
+    it is not recoverable afterwards -- a peak the filter missed is gone.
+
+    `ripple_db` is the residue at the detector's output. It bounds tau from
+    below and it *is* recoverable, because the ripple sits at a known frequency:
+    each channel carries exactly one string, so the firmware knows what to
+    average. **That asymmetry is the whole of the choice of tau.** Ripple is
+    recoverable and attack is not, so the budget goes to the transient and the
+    ripple is left for the sample rate to clean up.
+
+    `alias_db` is the worst component still above Nyquist at the ADC, which is
+    the one thing no amount of firmware fixes.
+
+    `firmware_db` is what survives an ENV_FIRMWARE_BOX_S box average -- the
+    digital half doing the job the RC is not being asked to do.
+    """
+    tau = tau or ENV_R_OHMS * ENV_C_FARADS
+    sample_hz = sample_hz or ENV_SAMPLE_HZ
+
+    def onepole(f):
+        return 1.0 / math.sqrt(1 + (2 * math.pi * f * tau) ** 2)
+
+    def box(f):
+        # An N-sample box at the frame rate is a sinc; N is a duration here.
+        x = math.pi * f * ENV_FIRMWARE_BOX_S
+        return abs(math.sin(x) / x) if x else 1.0
+
+    rows = []
+    for f0 in STRING_HZ:
+        harmonics = envelope_harmonics(f0)
+        ripple = sum(a * onepole(f) for f, a in harmonics)
+        alias = max([a * onepole(f) for f, a in harmonics
+                     if f > sample_hz / 2] or [0.0])
+        rows.append({
+            "f0": f0,
+            "ripple_db": 20 * math.log10(1 + ripple),
+            "alias_db": 20 * math.log10(alias) if alias else -math.inf,
+            "firmware_db": 20 * math.log10(
+                1 + sum(a * onepole(f) * box(f) for f, a in harmonics)),
+        })
+    return {
+        "tau": tau,
+        "corner": 1.0 / (2 * math.pi * tau),
+        "attack_db": 20 * math.log10(1 - math.exp(-PICK_PEAK_S / tau)),
+        "fall_db_per_ms": 8.685889638 / (tau * 1000),
+        "music_ms_per_db": PICK_EARLY_S / PICK_EARLY_DB * 1000,
+        "faster_than_music": (8.685889638 / (tau * 1000)
+                              / (PICK_EARLY_DB / (PICK_EARLY_S * 1000))),
+        "full_wave": ENV_FULL_WAVE,
+        "sections": ENV_SECTIONS_PER_CHANNEL * CHANNELS,
+        "rows": rows,
+    }
+
+
+def envelope_balance():
+    """What the E96 half-value costs, and what the detector's floor is.
+
+    Two small numbers that a "coarse enough" argument would skip, and this
+    repo's own habit is that coarse is a claim about what a block is for and
+    not permission to leave it uncomputed -- pad_states() used to say so and
+    envelope_filter() is the reason it matters here: the whole block exists to
+    report level, so an error in the reported level is the one error it cannot
+    absorb.
+
+    `imbalance_db` is the mismatch between the two half-cycles from R{n}54
+    being 4k99 where the ratio wants 5k. It is a *difference* between halves,
+    so a symmetric waveform averages it out and what is left is second-order;
+    the figure below is the worst case, on a waveform with only one polarity.
+
+    `floor_db` is the offset of the summing amplifier referred to the mixer's
+    own clipping_peak(), which is the quietest thing this detector can report.
+    It is the reason the two stages are not on the same part -- see
+    ENV_PACKAGES_REFS.
+    """
+    ideal = ENV_R_OHMS / 2
+    imbalance = ENV_R_HALF_OHMS / ideal
+    peak = socket.clipping_peak()
+    return {
+        "ratio_error": imbalance - 1,
+        "imbalance_db": abs(20 * math.log10(imbalance)),
+        "floor_db": 20 * math.log10(ENV_OPAMP_VOS / peak),
+        "floor_volts": ENV_OPAMP_VOS,
+        "peak": peak,
+        "input_current": peak / ENV_R_OHMS,
+    }
+
+
+def envelope_sample_rate(tau=None):
+    """Why 2 kHz and not 1, and what is left aliasing at either.
+
+    Spec section 4.4 offers "1-2 kHz" as though the difference were a taste.
+    It is not: the rectifier's output spectrum decides it, and the decision is
+    made by the *top* string rather than by anything musical.
+
+    Swept across the fretted range rather than the open strings, because this
+    is a fretted instrument and the highest fundamental is not an open E4. Two
+    regimes, and the crossover is the whole reason 1 kHz fails:
+
+      * below about the eighth fret of the top string, the ripple fundamental
+        2*f0 is under 1 kHz's Nyquist, so what aliases is the *second* ripple
+        harmonic and the one-pole has already buried it. 2 kHz is ~20 dB
+        better here, and it is the region a player actually lives in;
+      * above it, 2*f0 clears Nyquist at either rate and the alias is set by
+        the RC rather than by the sample rate, so the two converge and the
+        answer improves with pitch.
+
+    `folds_to_dc` is the case that matters most and reads best: an alias only
+    becomes unremovable when it folds close to DC, which happens where 2*f0
+    approaches the sample rate itself. Everything else lands high in the band
+    and the firmware's own average takes it out with the ripple.
+    """
+    tau = tau or ENV_R_OHMS * ENV_C_FARADS
+
+    def onepole(f):
+        return 1.0 / math.sqrt(1 + (2 * math.pi * f * tau) ** 2)
+
+    def worst(f0, sample_hz):
+        folded = [(a * onepole(f), abs(sample_hz - f))
+                  for f, a in envelope_harmonics(f0) if f > sample_hz / 2]
+        return max(folded or [(0.0, 0.0)])
+
+    out = {"tau": tau, "rates": {}}
+    fundamentals = [STRING_HZ[-1] * 2 ** (n / 12)
+                    for n in range(ENV_TOP_FRET + 1)]
+    for sample_hz in (1_000.0, 2_000.0):
+        rows = [(f0, *worst(f0, sample_hz)) for f0 in fundamentals]
+        peak = max(rows, key=lambda row: row[1])
+        near_dc = min(rows, key=lambda row: row[2])
+        out["rates"][sample_hz] = {
+            "worst_db": 20 * math.log10(peak[1]) if peak[1] else -math.inf,
+            "worst_f0": peak[0],
+            "worst_fret": round(12 * math.log2(peak[0] / STRING_HZ[-1])),
+            "folds_to_dc_db": (20 * math.log10(near_dc[1]) if near_dc[1]
+                               else -math.inf),
+            "folds_to_dc_hz": near_dc[2],
+        }
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1379,10 +1719,19 @@ def fail_states():
     the summing node is the offset, and the offset comes from neither the MCU
     nor the reference that feeds the '541.
 
-    The last row is the single fail-loud path in the CV chain and it is
-    recorded here rather than fixed: the mitigation belongs with the shared
-    fail-safe blocks, and the bypass relay's AC-coupled charge pump covers it
-    at the audio level in the meantime.
+    The last row is the single fail-loud path in the CV chain, and **what this
+    docstring used to say about it was wrong**: "the mitigation belongs with
+    the shared fail-safe blocks, and the bypass relay's AC-coupled charge pump
+    covers it at the audio level in the meantime."
+
+    It does not cover it. The pump collapses when the *MCU* stops, and an
+    inverted reference that fails to the positive rail leaves the MCU healthy,
+    still emitting its 10 kHz, holding the relay in. The one state the
+    fail-safe cannot see is the one state that is loud, and the sentence read
+    as though "the fail-safe" were a single thing that covered everything.
+
+    D803 is the answer and it is one diode: clamp_gain() turns +20 dB into
+    +7.4 dB, inside the mixer's own 7.84 dB of headroom. See CLAMP_DIODE.
     """
     filt = cv_filter()
     full = filt["span"]
@@ -1399,6 +1748,219 @@ def fail_states():
     return [{"state": s, "vc": v,
              "db": max(min(control_law(v), GAIN_MAX_DB), GAIN_MIN_DB)}
             for s, v in rows]
+
+
+# ---------------------------------------------------------------------------
+# The fail-safe: the bypass relay, the pump that holds it in, and the clamp
+# ---------------------------------------------------------------------------
+
+# Spec section 4.5, and it is three claims in one sentence: "MCU emits ~10 kHz
+# on a GPIO -> two-diode charge pump -> MOSFET -> bypass relay. **Any** stuck
+# state -- high, low, hi-Z, crashed, halted clock -- collapses the pump and
+# drops to bypass."
+#
+# The mechanism is sound and it is the reason this is a pump rather than a
+# watchdog: a watchdog IC sees a signal that firmware can emit while wedged,
+# and an AC-coupled pump can only be held up by something that keeps changing.
+# Three things about it are not in the sentence, and each moves a part count.
+#
+# **"Bypass" here is six changeover contacts, not one relay.** This module
+# replaces the mixer's six RV{n}01 level pots, so removing it from circuit means
+# reconnecting each PIN{n} to its own SIN{n} -- six independent audio paths, not
+# one. That is 3 DPDT, and it is the third count in section 4.5 that does not
+# close (the coil arithmetic was the second; the pad it drove is deleted).
+#
+# **The relay must be non-latching, which is the opposite of the pad's
+# requirement**, and the reason is the whole of the fail-safe: de-energised has
+# to *be* bypass, so that losing the rails, the MCU or the pump all land in the
+# same safe state. A latching relay holds its last position through a power cut,
+# which is precisely the property that makes it wrong here. Nothing in the
+# module's own supply can be a precondition for being safe.
+#
+# **It costs continuous coil current, and that is the bill.** A 5 V signal DPDT
+# coil is 25-40 mA; three of them is 75-120 mA held for as long as the module is
+# working, against about 55 mA for every amplifier and VCA on the board. See
+# coil_budget() -- it is a requirement on the deferred supply, not a detail.
+BYPASS_RELAY = None                    # see UNSPECIFIED; the pins are pinned
+BYPASS_FET = None
+BYPASS_RELAYS = 3
+BYPASS_POLES_EACH = 2
+BYPASS_COIL_V = 5.0                    # V5 exists in RAILS; the coil must suit
+BYPASS_COIL_MA = (25.0, 40.0)          # envelope for a 5 V signal DPDT, not read
+BYPASS_TRANSFER_MS = 5.0               # section 4.5's own figure
+
+# The pump, and every value here is set by an inequality rather than preferred.
+PUMP_HZ = 10_000.0                     # "~10 kHz on a GPIO", section 4.5
+PUMP_GPIO_V = 3.3                      # RP2040 output swing
+PUMP_DIODE_VF = 0.32                   # BAT54-class Schottky at microamps
+PUMP_C = "2n2/50V C0G"
+PUMP_C_FARADS = 2.2e-9
+PUMP_HOLD_C = "1u/16V X7R"
+PUMP_HOLD_C_FARADS = 1e-6
+PUMP_BLEED_R = "100k 1%"
+PUMP_BLEED_R_OHMS = 100_000.0
+
+# What the gate has to do with 1.8 V, which is all the pump can give it. This is
+# a filter on which MOSFET may be fitted, in the same sense RELAY_PINS was a
+# filter on which relay: a part with a 2.5 V threshold will not turn on at all,
+# and one with a 1.0 V threshold will. It is not a part number.
+FET_VGSTH_MAX = 1.0
+FET_ID_MIN = 0.2                       # A, to cover three coils with margin
+
+
+def pump_timing(c_pump=None, c_hold=None, r_bleed=None):
+    """When the module comes into circuit, and how long it stays there dead.
+
+    A two-diode pump is a switched capacitor, so it presents the hold node a
+    source resistance of 1/(f*C) -- 45 kohm here -- and the bleed resistor that
+    discharges the node also divides the pump's output down. Both time
+    constants fall out of that pair, and **they are not independent**:
+
+        t_on   the gate reaching the FET's threshold from cold
+        t_off  the gate falling back through it after the drive stops
+
+    with t_off / t_on always greater than one, because the same capacitor
+    charges through R_eq in parallel with the bleed and discharges through the
+    bleed alone. **A pump cannot be made to drop out faster than it picks up**,
+    which is the opposite of what a fail-safe would prefer and is worth knowing
+    before somebody tries to tune it that way.
+
+    So the values are chosen against two inequalities and the second one is why
+    this block exists at all:
+
+      * `t_off` bounds how long a wedged MCU keeps the module in circuit. It
+        wants to be short;
+      * `t_on` must exceed VREF_TURN_ON_S. **This is the consumer that number
+        has been waiting for.** The '541's Vcc is VREF, so for 20 ms after
+        power-up the CV chain's full scale is ramping from zero and a control
+        voltage of zero is unity gain -- and the relay must not put the module
+        into circuit during that. Nothing in firmware is trusted for it: the
+        hold capacitor starts at zero volts, so the delay is a property of the
+        board.
+
+    `margin_v` is the third inequality and the thinnest: the pump's final
+    voltage against the threshold of whatever MOSFET is fitted. There is no
+    room to spend here, which is why FET_VGSTH_MAX is declared as a
+    requirement.
+    """
+    c_pump = c_pump or PUMP_C_FARADS
+    c_hold = c_hold or PUMP_HOLD_C_FARADS
+    r_bleed = r_bleed or PUMP_BLEED_R_OHMS
+
+    r_eq = 1.0 / (PUMP_HZ * c_pump)
+    v_final = ((PUMP_GPIO_V - 2 * PUMP_DIODE_VF)
+               * r_bleed / (r_bleed + r_eq))
+    tau_rise = (r_eq * r_bleed / (r_eq + r_bleed)) * c_hold
+    tau_fall = r_bleed * c_hold
+    return {
+        "r_eq": r_eq,
+        "v_final": v_final,
+        "margin_v": v_final - FET_VGSTH_MAX,
+        "tau_rise": tau_rise,
+        "tau_fall": tau_fall,
+        "t_on": -tau_rise * math.log(1 - FET_VGSTH_MAX / v_final),
+        "t_off": tau_fall * math.log(v_final / FET_VGSTH_MAX),
+        "interlock": -tau_rise * math.log(1 - FET_VGSTH_MAX / v_final)
+                     > VREF_TURN_ON_S,
+        "needs": VREF_TURN_ON_S,
+        "transfer_s": BYPASS_TRANSFER_MS * 1e-3,
+    }
+
+
+def coil_budget():
+    """What holding the module in circuit costs, continuously.
+
+    The number that makes this block a supply requirement rather than a corner
+    of the schematic, and it is the price of the non-latching relay the
+    mechanism forces. Compared against everything else on the board, because a
+    figure like this only means something next to what it displaces.
+    """
+    low, high = BYPASS_COIL_MA
+    quads = OPAMP_QUADS + ENV_QUADS
+    # OPA1644 is 1.7 mA per section typical; the TL074 is 1.4. Both are quoted
+    # per amplifier, and this is the only place the two are added up.
+    amplifiers = (OPAMP_QUADS * 4 * 1.7) + (ENV_QUADS * 4 * 1.4)
+    vcas = VCA_PACKAGES * VCA_SUPPLY_MA
+    return {
+        "relays": BYPASS_RELAYS,
+        "low_ma": low * BYPASS_RELAYS,
+        "high_ma": high * BYPASS_RELAYS,
+        "amplifiers_ma": amplifiers,
+        "vcas_ma": vcas,
+        "rest_ma": amplifiers + vcas,
+        "quads": quads,
+        "ratio": (low + high) / 2 * BYPASS_RELAYS / (amplifiers + vcas),
+        "rail": "V5",
+    }
+
+
+def bypass_state():
+    """What the mixer sees with the module out of circuit, and it is not new.
+
+    The claim worth checking rather than assuming: bypass links PIN{n} to
+    SIN{n}, which puts the mixer's own RIN on the same node as this module's
+    R{n}01 -- 10k in parallel with 10k. **That is 5 kohm, which is exactly what
+    the fabricated pot presents at full rotation**, and attenuator_input_
+    impedance(1.0) upstream says so. So the bypass state is not an unusual
+    condition the mixer has never seen; it is the wide-open pot, load and all,
+    and check_headroom() upstream already covers it.
+
+    It is also the loudest state the instrument has, and that is the point: a
+    box that fails should leave the player audible.
+    """
+    parallel = 1.0 / (1.0 / FRONT_R_OHMS + 1.0 / socket.RIN_OHMS)
+    wide_open = socket.attenuator_input_impedance(1.0)
+    return {
+        "parallel": parallel,
+        "pot_wide_open": wide_open,
+        "matches": abs(parallel - wide_open) < 1.0,
+        "gain_db": 0.0,
+        "module_max_db": 0.0,
+    }
+
+
+# The clamp, and it is one part answering the one fail-loud path this design
+# has.
+#
+# **fail_states() said the bypass relay covered this and it does not.** Its note
+# read "the mitigation belongs with the shared fail-safe blocks, and the bypass
+# relay's AC-coupled charge pump covers it at the audio level in the meantime",
+# which sounds right and is not: the pump collapses when the *MCU* stops, and an
+# inverted reference that fails to the positive rail leaves the MCU perfectly
+# healthy, still emitting 10 kHz, holding the relay in. The one state the pump
+# cannot see is the one state that is loud.
+#
+# What it costs to fix is a diode. VREFN sits at -2.5 V in normal operation, so
+# a Schottky with its anode there and its cathode at MAGND is reverse-biased and
+# does nothing; if the inverter's output heads for +12 V, it conducts at about
+# 0.3 V instead. clamp_gain() computes what that is worth: +20 dB becomes
+# +7.4 dB, which is inside the 7.84 dB of margin the mixer's own clipping_peak()
+# has over its assumed channel peak. The failure stops clipping the summer.
+#
+# The margin is 0.4 dB and that is thin enough to state plainly rather than
+# round off. What the clamp buys is not comfort, it is the difference between a
+# fault that overloads the whole mono mix and one that sits at the edge of the
+# design's own envelope.
+CLAMP_DIODE = "BAT54"
+CLAMP_VF = 0.3
+
+
+def clamp_gain():
+    """What the VREFN clamp turns the fail-loud path into."""
+    filt = cv_filter()
+    unclamped = -(filt["gain"] / CV_ROFF_OHMS * CV_R1_OHMS) * MODULE_RAIL
+    clamped = -(filt["gain"] / CV_ROFF_OHMS * CV_R1_OHMS) * CLAMP_VF
+    headroom = 20 * math.log10(
+        socket.clipping_peak() / socket.MEASURED["channel_peak"].value)
+    return {
+        "unclamped_vc": unclamped,
+        "unclamped_db": max(min(control_law(unclamped), GAIN_MAX_DB),
+                            GAIN_MIN_DB),
+        "clamped_vc": clamped,
+        "clamped_db": control_law(clamped),
+        "headroom_db": headroom,
+        "fits": control_law(clamped) < headroom,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1448,6 +2010,43 @@ LOGIC_PINS = {"OE1": 1, "GND": 10, "OE2": 19, "VCC": 20}
 LOGIC_A = {n: n + 1 for n in range(1, 9)}
 LOGIC_Y = {n: 19 - n for n in range(1, 9)}
 LOGIC_REF = "U11"
+
+# **RELAY_PINS is back, and the note below said it would be.** It was deleted
+# with the coarse pad, with the observation that "the deferred bypass relay will
+# face the same question, and it is worth knowing that a pin map can be pinned
+# before a part is chosen, by naming the standard rather than the manufacturer".
+# That is what this is: IEC 60947 contact numbering again, on a part that is
+# still UNSPECIFIED.
+#
+# The map is the same shape and the *requirement* is the opposite one. The pad
+# wanted dual-coil latching; this must be **non-latching**, single coil, because
+# de-energised has to be bypass -- see BYPASS_RELAYS. So the coil is A1/A2 and
+# there is no B pair, which is the whole difference between the two parts
+# expressed in a dict.
+RELAY_PINS = {"COIL+": "A1", "COIL-": "A2",
+              "COM_A": "11", "NC_A": "12", "NO_A": "14",
+              "COM_B": "21", "NC_B": "22", "NO_B": "24"}
+
+# Which relay and which pole carries each channel. Three DPDT, two channels
+# each, and the arithmetic is here rather than at the connect site so that
+# gen_sch.py and verify.py cannot disagree with it.
+BYPASS_RELAY_REFS = tuple(f"K80{i + 1}" for i in range(BYPASS_RELAYS))
+
+
+def bypass_contact(n):
+    """(ref, com, nc, no) for channel n's changeover."""
+    ref = BYPASS_RELAY_REFS[(n - 1) // BYPASS_POLES_EACH]
+    pole = "A" if (n - 1) % BYPASS_POLES_EACH == 0 else "B"
+    return (ref, RELAY_PINS[f"COM_{pole}"], RELAY_PINS[f"NC_{pole}"],
+            RELAY_PINS[f"NO_{pole}"])
+
+
+# The MOSFET that sinks the coils, read off KiCad's Transistor_FET:Q_NMOS_GSD
+# this session: gate 1, source 2, drain 3. Named for the same reason the diodes
+# are -- a transposed 2 and 3 puts the coil in the source and the drain on
+# ground, which draws as a transistor and works as a diode.
+FET_PINS = {"G": 1, "S": 2, "D": 3}
+FET_REF = "Q801"
 
 # **RELAY_PINS was here and is deleted with the pad it belonged to.** It held
 # the IEC 60947 contact numbers -- 11/12/14 for pole 1 as common /
@@ -1545,6 +2144,25 @@ LIBS = {
                                      "Conn_01x05", None),
     "Connector:TestPoint": ("Connector", "Connector", "TestPoint", None),
     "cv:OPA1644": ("cv", "Amplifier_Operational", "TL074", "OPA1644"),
+    # The same stock symbol under its own name, which is the one case in this
+    # table where nothing is being borrowed: the OPA1644 above *is* a renamed
+    # TL074 because their pinouts are identical, so the envelope's own TL074 is
+    # that symbol not renamed. Two lib_ids, one source, and the project library
+    # carries both.
+    "cv:TL074": ("cv", "Amplifier_Operational", "TL074", None),
+    "Device:D": ("Device", "Device", "D", None),
+    # Under the "cv" nickname, not "Device": the symbol lives in KiCad's
+    # Transistor_FET library, and a lib_id of Device:Q_NMOS_GSD asks the
+    # Device library for it. ERC said so in one line -- "Symbol
+    # 'Q_NMOS_GSD' not found in symbol library 'Device'" -- which is the
+    # cheapest fault this pass produced and the reason ERC runs on every
+    # build rather than at the end.
+    "cv:Q_NMOS_GSD": ("cv", "Transistor_FET", "Q_NMOS_GSD", None),
+    # Non-latching this time. The generic symbol carries IEC contact numbering
+    # and one coil, which is exactly what the fail-safe requires and nothing
+    # part-specific -- the same argument that made the pad's symbol safe to
+    # draw with, for the opposite part.
+    "cv:Relay": ("cv", "Relay", "Relay_DPDT", "Relay"),
     "cv:SSI2164": ("cv", "Audio", "SSI2164", None),
     "cv:74AHC541": ("cv", "74xx", "74AHC541", None),
     "cv:MAX6126": ("cv", "Reference_Voltage", "ADR4525", "MAX6126"),
@@ -1651,6 +2269,8 @@ SOIC8_FP = "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
 SOIC14_FP = "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm"
 SOP16_FP = "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm"
 SOIC20_FP = "Package_SO:SOIC-20W_7.5x12.8mm_P1.27mm"
+SOD123_FP = "Diode_SMD:D_SOD-123"
+SOT23_FP = "Package_TO_SOT_SMD:SOT-23"
 LOOM_FP = socket.CHANNEL_POT_FP          # the mixer's own 1x03, mirrored
 PAD_FP = "TestPoint:TestPoint_Pad_D2.0mm"
 
@@ -1676,6 +2296,14 @@ ORDER_CODES = {
     "100n/50V C0G":   "GRM2195C1H104JA01D",
     "10u/16V X7R":    "GRM21BR61C106KE15L",
     OPAMP:            "OPA1644AIDR",
+    PUMP_C:           "GRM2165C1H222JA01D",
+    PUMP_HOLD_C:      "GRM21BR71C105KA01L",
+    CLAMP_DIODE:      "BAT54-7-F",
+    ENV_OPAMP:        "TL074CDR",
+    ENV_DIODE:        "1N4148WS-7-F",
+    "10k 1%":         "RC0805FR-0710KL",
+    "4k99 1%":        "RC0805FR-074K99L",
+    "470n/50V X7R":   "GRM21BR71H474KA88L",
     VCA:              "SSI2164S-RT",
     LOGIC:            "SN74AHC541DWR",
     # 8-pin SO, A grade, 2.5 V. The "+" suffix is the lead-free marker in
@@ -1686,13 +2314,30 @@ ORDER_CODES = {
 # Parts and blocks this pass does not place, each with the reason. Declared so
 # that "deferred" and "missed" are different states a check can distinguish --
 # the same argument design.NO_CONNECT makes upstream about floating pins.
-# **Empty, and it is the pad's deletion that emptied it.** Its one entry was
-# the dual-coil latching relay: a part the spec asks for by function, does not
-# name, and section 6 forbids inventing. The dict and the two checks that read
-# it stay, because the deferred blocks will refill it -- the DC-DC, the ADC and
-# the bypass relay are all named by function and not by part -- and because an
-# empty declaration is a different statement from a missing one.
-UNSPECIFIED = {}
+# **Refilled by the fail-safe, which is what this dict is for.** It was emptied
+# when the coarse pad went, with the note that "the deferred DC-DC, ADC and
+# bypass relay are all named by function and not by part". Two of those are
+# here now, and both are declared by the property that filters them rather than
+# by a guess at a part number -- which is section 6 obeyed rather than worked
+# around.
+UNSPECIFIED = {
+    BYPASS_RELAY: "non-latching signal DPDT, 5 V coil, IEC 60947 contact "
+                  "numbering, and every word of that is derived. Non-latching "
+                  "because de-energised must *be* bypass; DPDT because six "
+                  "changeovers is three parts; 5 V because that is the rail "
+                  "this module has; IEC because the pin map is pinned and the "
+                  "part is not -- see RELAY_PINS. What is not derivable is the "
+                  "coil current, which is a property of the part and which "
+                  "coil_budget() therefore states as an envelope.",
+    BYPASS_FET: "logic-level N-channel MOSFET, SOT-23, with Vgs(th) at most "
+                f"{FET_VGSTH_MAX:.1f} V and at least {FET_ID_MIN * 1e3:.0f} mA "
+                "of drain current. The threshold is the binding one and it is "
+                "computed: pump_timing() says the gate can only ever reach "
+                "1.83 V, because a two-diode pump off a 3.3 V GPIO gives "
+                "3.3 - 2*Vf and the bleed resistor divides that against the "
+                "pump's own source impedance. A 2.5 V-threshold part will not "
+                "turn on at all.",
+}
 
 # Pins deliberately left unconnected, declared beside the circuit rather than
 # buried in the checker -- the mixer's NO_CONNECT, same argument.
@@ -1760,20 +2405,33 @@ NO_CONNECT = tuple(
 # RAILS never had is not needed after all.
 DEFERRED_PINS = {}
 DEFERRED = {
-    "envelope rectifier": "the smoothing time constant is not derivable -- "
-                          "spec section 4.4 gives a sampling rate and no "
-                          "attack/release target. The tap net BUF{n} exists "
-                          "and is driven; the rectifier hangs off it.",
+    # **"envelope rectifier" was here through two passes and it is drawn.** Its
+    # reason read "the smoothing time constant is not derivable -- spec section
+    # 4.4 gives a sampling rate and no attack/release target", which was true of
+    # an asymmetric detector and false of the symmetric one this instrument
+    # wants: envelope_filter() bounds tau above by the picked transient and
+    # below by ripple, and there is no release bound at all. Twelve op-amp
+    # sections, twelve diodes, thirty resistors and six capacitors later, the
+    # only thing still deferred about it is the ADC it feeds.
     "controller": "RP2040 and its QSPI flash, crystal, USB and MIDI: shared "
                   "block, and the scope statement puts shared blocks after "
                   "one channel is complete.",
-    "envelope ADC": "ADS131M08 or MCP3564, undecided in spec section 4.4.",
+    "envelope ADC": "ADS131M08 or MCP3564, undecided in spec section 4.4 -- "
+                    "but its sample rate is decided now, at 2 kHz rather than "
+                    "the 1-2 kHz the spec offers, and the six ENV{n} nets "
+                    "exist and are driven. See envelope_sample_rate(); the "
+                    "ADC hangs off them, in the analogue section, so that only "
+                    "SPI crosses the domain boundary.",
     # "relay drive" was here -- 2 x TPIC6B595 and the 74LVC1G123 one-shot,
     # section 4.5. It existed only to drive the coarse pad's coils and goes
     # with it. Section 4.5 calls the one-shot's absence "the
     # highest-probability field failure in the design", which was true and is
     # now a failure this board cannot have.
-    "bypass relay and fail-safe": "the AC-coupled charge pump, section 4.5.",
+    # "bypass relay and fail-safe" was here and is drawn: the pump, the sink,
+    # three non-latching DPDT and the clamp on the inverted reference. What is
+    # not chosen is the relay and the MOSFET, and both are in UNSPECIFIED with
+    # the property that filters them rather than a guess -- which is a
+    # different state from deferred and check_pin_numbers() keeps them apart.
     "supply": "isolated DC-DC at >=300 kHz per section 1.1; the topology is "
               "decided and the part is not.",
 }
@@ -1940,17 +2598,57 @@ for _n in range(1, CHANNELS + 1):
     SECTIONS[("servo", _n)] = (f"U{5 + (_n - 1) // 4}", "ABCD"[(_n - 1) % 4])
     SECTIONS[("cv", _n)] = (f"U{7 + (_n - 1) // 4}", "ABCD"[(_n - 1) % 4])
 SECTIONS[("refinv", 0)] = ("U8", "C")
-# The one genuinely spare section, and it needs terminating rather than leaving.
-# OPAMP_NEEDED counts 31 of the 32 available; six of the seven that this pass
-# does not draw are U2/U4/U6 C and D, reserved above for the six envelope
-# rectifiers and DEFERRED with them. U8 D is the remainder, and an unused JFET
-# section with floating inputs is not neutral: it sits against a rail, draws
-# more than its share of the supply and couples back through the die it shares
-# with the reference inverter and two CV filters. Wired as a unity follower with
-# its input at MAGND, which is the standard answer and costs no parts.
+
+# The envelope detector's summing stage, in the six sections U2/U4/U6 C and D
+# that were reserved for "the envelope rectifier" and left empty for two passes.
+# **They are the half of the rectifier that belongs on this part**, and the
+# split is derived rather than tidy -- see ENV_OPAMP. A2's offset is the
+# detector's floor, so it wants the low-offset part; A1 slews across two diode
+# drops at every zero crossing, so it wants to be somewhere else.
+#
+# It does relax the rule at the top of this table, and the relaxation is worth
+# naming: U2 carries two front ends, so two channels' envelope summing stages
+# now share a die with them. The rule was written about the CV filter's 30.5 kHz
+# square wave, and what lands here instead is a stage whose own output is
+# already low-passed at 33.9 Hz by ENV_R x ENV_C. Its *input* carries the
+# half-wave edges, which is the term to watch if the front end ever measures
+# dirtier than it computes.
+for _n in range(1, CHANNELS + 1):
+    SECTIONS[("env_b", _n)] = (f"U{2 + 2 * ((_n - 1) // 2)}",
+                               "CD"[(_n - 1) % 2])
+
+# The envelope detector's half-wave stage, on its own packages. Six sections
+# into two quads leaves two over, and they are terminated the same way U8's is.
+for _n in range(1, CHANNELS + 1):
+    SECTIONS[("env_a", _n)] = (ENV_PACKAGES_REFS[(_n - 1) // OPAMP_SECTIONS],
+                               "ABCD"[(_n - 1) % OPAMP_SECTIONS])
+
+# The genuinely spare sections, and they need terminating rather than leaving.
+# An unused JFET section with floating inputs is not neutral: it sits against a
+# rail, draws more than its share of the supply and couples back through the die
+# it shares. Wired as unity followers with their inputs at MAGND, which is the
+# standard answer and costs no parts.
+#
+# There is one on the precision side -- U8 D, the remainder after 31 -- and two
+# on the cheap side, because six half-wave stages do not fill two quads.
 SECTIONS[("spare", 0)] = ("U8", "D")
-OPAMP_PACKAGES = sorted({pkg for pkg, _ in SECTIONS.values()},
-                        key=lambda r: int(r[1:]))
+for _index, (_ref, _unit) in enumerate(
+        [(ENV_PACKAGES_REFS[-1], "ABCD"[u])
+         for u in range(ENV_SECTIONS_NEEDED % OPAMP_SECTIONS
+                        or OPAMP_SECTIONS, OPAMP_SECTIONS)], start=1):
+    SECTIONS[("spare", _index)] = (_ref, _unit)
+
+OPAMP_PACKAGES = sorted(
+    {pkg for pkg, _ in SECTIONS.values()} - set(ENV_PACKAGES_REFS),
+    key=lambda r: int(r[1:]))
+SPARE_SECTIONS = sorted(key for key in SECTIONS if key[0] == "spare")
+
+
+def package_part(ref):
+    """(lib_id, value) for an op-amp package. Two parts on this board now."""
+    if ref in ENV_PACKAGES_REFS:
+        return "cv:TL074", ENV_OPAMP
+    return "cv:OPA1644", OPAMP
 
 
 # Every net, and what DC it sits at. Single numbers where a net has one,
@@ -1969,12 +2667,21 @@ NET_DC = {
 }
 for _n in range(1, CHANNELS + 1):
     NET_DC.update({
-        f"PIN{_n}": 0.0, f"SIN{_n}": 0.0,
+        f"PIN{_n}": 0.0, f"SIN{_n}": 0.0, f"IVOUT{_n}": 0.0,
         f"FEN{_n}": 0.0, f"BUF{_n}": 0.0,
         f"CPL{_n}": 0.0, f"IIN{_n}": 0.0, f"RCJ{_n}": 0.0,
         f"IOUT{_n}": 0.0, f"SVN{_n}": 0.0, f"SRV{_n}": (-MODULE_RAIL,
                                                         MODULE_RAIL),
         f"CVX{_n}": (0.0, VREF), f"CVN{_n}": 0.0,
+        # The envelope detector. HWN and ENVN are virtual earths; AOUT is an
+        # amplifier output and swings both ways; HW is negative-going only,
+        # because it is the half-wave stage's output and D{n}52 only conducts
+        # one way; and ENV is |x|, so it is positive by construction. That last
+        # one is a claim worth declaring rather than assuming, because the ADC
+        # that reads it is single-supply.
+        f"HWN{_n}": 0.0, f"HW{_n}": (-MODULE_RAIL, 0.0),
+        f"AOUT{_n}": (-MODULE_RAIL, MODULE_RAIL),
+        f"ENVN{_n}": 0.0, f"ENV{_n}": (0.0, MODULE_RAIL),
         f"VC{_n}": (0.0, VREF), f"LOGO{_n}": (0.0, VREF),
         f"PWM{_n}": (0.0, 3.3),
     })
@@ -1984,9 +2691,22 @@ for _n in range(1, CHANNELS + 1):
 
 # The reference inverter's virtual earth, held at MAGND by feedback.
 NET_DC["RINV"] = 0.0
-# The spare section's own output, shorted to its own inverting input. 0 V
-# because its non-inverting input is at MAGND and it is a follower.
-NET_DC["SPARE"] = 0.0
+# The fail-safe. FSDRV is the MCU's 10 kHz; FSAC is the pump's own node, which
+# is the one net on this board that sits *below* ground -- the clamp diode
+# holds it at -Vf on the negative half of every cycle, which is how a two-diode
+# pump works and is worth declaring rather than discovering at a polarised
+# part. FSG is the gate and FSD is the coils' low side, pulled to MDGND by the
+# FET when the pump is up.
+NET_DC["FSDRV"] = (0.0, 3.3)
+NET_DC["FSAC"] = (-PUMP_DIODE_VF, PUMP_GPIO_V)
+NET_DC["FSG"] = (0.0, PUMP_GPIO_V)
+NET_DC["FSD"] = (0.0, BYPASS_COIL_V)
+# Each spare section's own output, shorted to its own inverting input. 0 V
+# because its non-inverting input is at MAGND and it is a follower. One per
+# spare, because two sections sharing a net would be two followers with their
+# outputs tied together -- which is a fault, not a termination.
+for _index, _key in enumerate(sorted(k for k in SECTIONS if k[0] == "spare")):
+    NET_DC[f"SPARE{_key[1]}"] = 0.0
 # The reference's noise-reduction pin. Still a range rather than a number, and
 # **the reason has been corrected**: it said "because the MAX6126's pin map has
 # not been read in this session -- see UNSPECIFIED", which was wrong twice over.
@@ -2071,6 +2791,17 @@ def channel(design, n):
     design.connect(f"PIN{n}", (f"J{n}", 1))
     design.connect(f"SIN{n}", (f"J{n}", 2))
 
+    # The bypass changeover, and it is the first thing in the channel rather
+    # than the last because that is where it sits electrically: SIN{n} is the
+    # mixer's wiper, and what it is connected to is either this module or a
+    # link straight back to PIN{n}. De-energised is the link -- see
+    # fail_safe(), and bypass_state() for why that link reproduces the
+    # fabricated pot at full rotation exactly, 5 kohm load included.
+    relay, com, nc, no = bypass_contact(n)
+    design.connect(f"SIN{n}", (relay, com))
+    design.connect(f"PIN{n}", (relay, nc))
+    design.connect(f"IVOUT{n}", (relay, no))
+
     # Two matched 10k. R{n}01 is the socket contract and R{n}02 sets unity.
     _resistor(design, f"R{n}01", FRONT_R, f"PIN{n}", f"FEN{n}",
               description=f"Channel {n} socket load -- constraint 4")
@@ -2108,22 +2839,31 @@ def channel(design, n):
     design.connect(f"IOUT{n}", (vca_ref, pins["IOUT"]))
     design.connect(f"VC{n}", (vca_ref, pins["VC"]))
 
-    # I-V, holding IOUT at virtual earth. Its output *is* SIN{n}.
+    # I-V, holding IOUT at virtual earth.
+    #
+    # **Its output was SIN{n} and is now IVOUT{n}**, because the bypass relay
+    # sits between the two: SIN{n} is what the mixer's wiper sees, and in
+    # bypass that is PIN{n} rather than this amplifier. The servo follows it --
+    # sensing downstream of a contact would open the loop the moment the
+    # module left circuit, and an integrator with an open loop goes to a rail
+    # and stays there, so the module would come back *wrong* rather than
+    # coming back. See fail_safe().
     package, unit = SECTIONS[("iv", n)]
     out, inverting, non_inverting = OPAMP_UNITS[unit]
-    _resistor(design, f"R{n}21", VCA_ROUT, f"IOUT{n}", f"SIN{n}",
-              description=f"Channel {n} I-V -- unity at the 0 dB pad step")
-    _capacitor(design, f"C{n}21", IV_CF, f"IOUT{n}", f"SIN{n}",
+    _resistor(design, f"R{n}21", VCA_ROUT, f"IOUT{n}", f"IVOUT{n}",
+              description=f"Channel {n} I-V -- unity, R_OUT = R_IN")
+    _capacitor(design, f"C{n}21", IV_CF, f"IOUT{n}", f"IVOUT{n}",
                description=f"Channel {n} I-V compensation")
-    design.connect(f"SIN{n}", (package, out))
+    design.connect(f"IVOUT{n}", (package, out))
     design.connect(f"IOUT{n}", (package, inverting))
     design.connect("MAGND", (package, non_inverting))
 
-    # The DC servo, sensing SIN{n} and injecting into IOUT{n}.
+    # The DC servo, sensing IVOUT{n} and injecting into IOUT{n}.
     package, unit = SECTIONS[("servo", n)]
     out, inverting, non_inverting = OPAMP_UNITS[unit]
-    _resistor(design, f"R{n}31", SERVO_R, f"SIN{n}", f"SVN{n}",
-              description=f"Channel {n} servo sense")
+    _resistor(design, f"R{n}31", SERVO_R, f"IVOUT{n}", f"SVN{n}",
+              description=f"Channel {n} servo sense -- upstream of the bypass "
+                          f"contact, so the loop stays closed in bypass")
     _capacitor(design, f"C{n}31", SERVO_C, f"SVN{n}", f"SRV{n}",
                description=f"Channel {n} servo integrator")
     _resistor(design, f"R{n}32", SERVO_RINJ, f"SRV{n}", f"IOUT{n}",
@@ -2155,6 +2895,151 @@ def channel(design, n):
     design.connect("MAGND", (package, non_inverting))
 
 
+def fail_safe(design):
+    """The bypass relays, the charge pump that holds them in, and the clamp.
+
+    Spec section 4.5's shape, with three things it does not say and one it says
+    that is wrong. All four are derived above: BYPASS_RELAYS on why bypass is
+    six changeovers and why the relay cannot latch, pump_timing() on why the
+    hold capacitor is what sets the power-up interlock, coil_budget() on what
+    holding it in costs, and CLAMP_DIODE on the fail-loud path the pump cannot
+    see.
+
+    The state table, which is the whole block in four lines:
+
+        MCU emitting 10 kHz     pump up    FET on    coils energised    module
+        MCU stopped, any way    pump down  FET off   coils released     bypass
+        module unpowered        -          -         -                  bypass
+        power-up, first 25 ms   charging   off       released           bypass
+
+    The last two rows are why this is a relay and not an analogue switch. A
+    CMOS switch needs its own supply to be in a defined state, so "the module
+    lost its rails" would leave the audio path undefined; a relay's rest
+    position is mechanical and survives everything.
+    """
+    # The pump. C805 couples the drive, D801 clamps the node's negative half to
+    # its own forward drop, D802 charges C806 on the positive half, and R803
+    # is what discharges it when the drive stops -- so R803 is the fail-safe's
+    # actual time constant and is not a pull-down somebody can "tidy".
+    _capacitor(design, "C805", PUMP_C, "FSDRV", "FSAC",
+               description="Fail-safe pump: the AC coupling that makes a "
+                           "stuck level -- high, low or hi-Z -- indistinguish"
+                           "able from a dead MCU")
+    design.add(Part("D801", CLAMP_DIODE, SOD123_FP,
+                    description="Fail-safe pump clamp: anode MDGND, cathode "
+                                "FSAC"))
+    design.connect("MDGND", ("D801", DIODE_PINS["A"]))
+    design.connect("FSAC", ("D801", DIODE_PINS["K"]))
+    design.add(Part("D802", CLAMP_DIODE, SOD123_FP,
+                    description="Fail-safe pump rectifier: anode FSAC, cathode "
+                                "FSG"))
+    design.connect("FSAC", ("D802", DIODE_PINS["A"]))
+    design.connect("FSG", ("D802", DIODE_PINS["K"]))
+    _capacitor(design, "C806", PUMP_HOLD_C, "FSG", "MDGND",
+               description="Fail-safe hold: starts at zero volts, which is "
+                           "what makes the power-up interlock a property of "
+                           "the board rather than of firmware")
+    _resistor(design, "R803", PUMP_BLEED_R, "FSG", "MDGND",
+              description="Fail-safe bleed -- sets t_off, see pump_timing()")
+
+    design.add(Part(FET_REF, BYPASS_FET, SOT23_FP,
+                    description="Fail-safe sink: gate on the pump, drain on "
+                                "the coils, source on MDGND"))
+    design.connect("FSG", (FET_REF, FET_PINS["G"]))
+    design.connect("FSD", (FET_REF, FET_PINS["D"]))
+    design.connect("MDGND", (FET_REF, FET_PINS["S"]))
+
+    # The relays. Coils in parallel on the one sink, each with its own flyback
+    # diode -- the coil is the only inductor on this board and the FET is the
+    # only thing that switches it off.
+    for index, ref in enumerate(BYPASS_RELAY_REFS, start=1):
+        design.add(Part(ref, BYPASS_RELAY, None, units=1,
+                        description=f"Bypass relay {index} of {BYPASS_RELAYS}: "
+                                    f"non-latching DPDT, de-energised is "
+                                    f"bypass; contacts carry channel audio"))
+        design.connect("V5", (ref, RELAY_PINS["COIL+"]))
+        design.connect("FSD", (ref, RELAY_PINS["COIL-"]))
+        diode = f"D{80 + index}3"
+        design.add(Part(diode, CLAMP_DIODE, SOD123_FP,
+                        description=f"{ref} coil flyback: anode FSD, cathode "
+                                    f"V5"))
+        design.connect("FSD", (diode, DIODE_PINS["A"]))
+        design.connect("V5", (diode, DIODE_PINS["K"]))
+
+    # The clamp on the inverted reference, which is the fail-loud path the pump
+    # cannot see. Reverse-biased at -2.5 V in normal operation and doing
+    # nothing; conducting at +0.3 V if the inverter's output heads for the
+    # rail. See clamp_gain(): +20 dB becomes +7.4 dB, which the mixer's own
+    # headroom covers and +20 dB does not.
+    design.add(Part("D803", CLAMP_DIODE, SOD123_FP,
+                    description="Reference inverter clamp: anode VREFN, "
+                                "cathode MAGND. Reverse-biased in normal "
+                                "operation"))
+    design.connect("VREFN", ("D803", DIODE_PINS["A"]))
+    design.connect("MAGND", ("D803", DIODE_PINS["K"]))
+
+
+def envelope(design, n):
+    """One channel's precision full-wave rectifier and its one-pole.
+
+    Spec section 4.4's "six precision rectifiers -> RC", with the topology and
+    the time constant derived at envelope_filter() rather than chosen. Hung off
+    BUF{n}, which is the front end's output and therefore *pre-gain* -- section
+    4.4 is explicit that post-gain detection "makes it a feedback loop that
+    latches shut", and the tap is free here because BUF{n} is a driven low
+    impedance. Section 4.1's 1 Mohm series tap belongs to the follower topology
+    that front_end() replaced, and verify.check_pin_load() now refuses it.
+
+    Stage A is the half-wave inverting stage with both diodes inside its loop.
+    Stage B sums BUF{n} with twice A's output and low-passes the result. The
+    output is |BUF{n}|, positive, into a deferred ADC.
+
+    **The diodes are the one part on this board where the drawing can be right
+    and the circuit backwards**, which is why they are connected by role and
+    not by number. D{n}51 conducts when A1's output goes positive -- input
+    negative -- and holds the loop closed; D{n}52 passes the other polarity out
+    to HW{n}. Swap them and the rectifier still draws, still passes ERC, and
+    reports nothing.
+    """
+    package, unit = SECTIONS[("env_a", n)]
+    out, inverting, non_inverting = OPAMP_UNITS[unit]
+
+    _resistor(design, f"R{n}51", ENV_R, f"BUF{n}", f"HWN{n}",
+              description=f"Channel {n} half-wave input")
+    _resistor(design, f"R{n}52", ENV_R, f"HWN{n}", f"HW{n}",
+              description=f"Channel {n} half-wave feedback")
+    design.add(Part(f"D{n}51", ENV_DIODE, SOD123_FP,
+                    description=f"Channel {n} half-wave clamp -- anode to "
+                                f"A1's output, cathode to its summing node"))
+    design.connect(f"AOUT{n}", (f"D{n}51", DIODE_PINS["A"]))
+    design.connect(f"HWN{n}", (f"D{n}51", DIODE_PINS["K"]))
+    design.add(Part(f"D{n}52", ENV_DIODE, SOD123_FP,
+                    description=f"Channel {n} half-wave output -- anode to "
+                                f"HW{n}, cathode to A1's output"))
+    design.connect(f"HW{n}", (f"D{n}52", DIODE_PINS["A"]))
+    design.connect(f"AOUT{n}", (f"D{n}52", DIODE_PINS["K"]))
+    design.connect(f"AOUT{n}", (package, out))
+    design.connect(f"HWN{n}", (package, inverting))
+    design.connect("MAGND", (package, non_inverting))
+
+    # The summing stage: BUF{n} at unity, HW{n} at twice, and the feedback pair
+    # that makes it the one-pole envelope_filter() derives.
+    package, unit = SECTIONS[("env_b", n)]
+    out, inverting, non_inverting = OPAMP_UNITS[unit]
+    _resistor(design, f"R{n}53", ENV_R, f"BUF{n}", f"ENVN{n}",
+              description=f"Channel {n} envelope sum -- the input at unity")
+    _resistor(design, f"R{n}54", ENV_R_HALF, f"HW{n}", f"ENVN{n}",
+              description=f"Channel {n} envelope sum -- the half-wave at 2x")
+    _resistor(design, f"R{n}55", ENV_R, f"ENVN{n}", f"ENV{n}",
+              description=f"Channel {n} envelope feedback -- with C{n}51, tau")
+    _capacitor(design, f"C{n}51", ENV_C, f"ENVN{n}", f"ENV{n}",
+               description=f"Channel {n} envelope one-pole -- "
+                           f"{ENV_R_OHMS * ENV_C_FARADS * 1e3:.1f} ms")
+    design.connect(f"ENV{n}", (package, out))
+    design.connect(f"ENVN{n}", (package, inverting))
+    design.connect("MAGND", (package, non_inverting))
+
+
 def shared(design):
     """The reference, the logic buffer, the amplifiers and the two ground stars.
 
@@ -2175,10 +3060,15 @@ def shared(design):
     # grounded to whatever was closest.
     bypass = iter(range(701, 799))
 
-    for ref in OPAMP_PACKAGES:
-        design.add(Part(ref, OPAMP, SOIC14_FP,
+    for ref in OPAMP_PACKAGES + list(ENV_PACKAGES_REFS):
+        _, value = package_part(ref)
+        design.add(Part(ref, value, SOIC14_FP,
                         units=len(OPAMP_UNITS),
-                        description="Quad JFET, front end / I-V / servo / CV"))
+                        description=(
+                            "Quad JFET, envelope half-wave stages"
+                            if ref in ENV_PACKAGES_REFS
+                            else "Quad JFET, front end / I-V / servo / CV / "
+                                 "envelope sum")))
         design.connect("VA+", (ref, OPAMP_PINS["V+"]))
         design.connect("VA-", (ref, OPAMP_PINS["V-"]))
         _capacitor(design, f"C{next(bypass)}", "100n/50V X7R", "VA+", "MAGND",
@@ -2216,13 +3106,19 @@ def shared(design):
     design.connect("RINV", (package, inverting))
     design.connect("MAGND", (package, non_inverting))
 
-    # The spare section, terminated. See SECTIONS[("spare", 0)] for why an
+    # The spare sections, terminated. See SECTIONS[("spare", 0)] for why an
     # unused JFET section is not free. Output to its own inverting input, input
     # at MAGND: a follower sitting at 0 V, with no external part.
-    package, unit = SECTIONS[("spare", 0)]
-    out, inverting, non_inverting = OPAMP_UNITS[unit]
-    design.connect("SPARE", (package, out), (package, inverting))
-    design.connect("MAGND", (package, non_inverting))
+    #
+    # **Three of them now, and each gets its own net.** One net across all three
+    # would tie three followers' outputs together, which is a fault that draws
+    # as a tidy single label -- and the netlist comparison would have agreed
+    # with it, because design.py would have said the same wrong thing.
+    for key in SPARE_SECTIONS:
+        package, unit = SECTIONS[key]
+        out, inverting, non_inverting = OPAMP_UNITS[unit]
+        design.connect(f"SPARE{key[1]}", (package, out), (package, inverting))
+        design.connect("MAGND", (package, non_inverting))
 
     # The reference itself. Pins by number, from REF_PINS, which is now confirmed
     # against Maxim's own PDF -- this line said "Pins by role, because its map has
@@ -2334,10 +3230,15 @@ def shared(design):
     for pin, net in ((1, "PWM3"), (2, "MDGND"), (3, "PWM4"),
                      (4, "MDGND"), (5, "PWM5")):
         design.connect(net, ("J10", pin))
-    design.add(Part("J11", "CTRL3", socket.CONN_FP[3], mpn=socket.CONN_MPN[3],
+    # Five ways rather than three: the fail-safe's 10 kHz needs a pin, and it
+    # gets a ground either side of it like everything else on this connector.
+    # A 30 kHz-class square wave next to OE would be the one aggressor on a
+    # connector otherwise carrying static levels and slow PWM.
+    design.add(Part("J11", "CTRL3", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
                     description="From the RP2040 (DEFERRED), continued: "
-                                "1=PWM6, 2=MDGND, 3=OE"))
-    for pin, net in ((1, "PWM6"), (2, "MDGND"), (3, "OE")):
+                                "1=PWM6, 3=OE, 5=FSDRV, grounds between"))
+    for pin, net in ((1, "PWM6"), (2, "MDGND"), (3, "OE"),
+                     (4, "MDGND"), (5, "FSDRV")):
         design.connect(net, ("J11", pin))
 
     # The two stars. R901 is the one bridge constraint 2 allows; R902 is the
@@ -2359,8 +3260,10 @@ def shared(design):
 def build():
     design = Design()
     shared(design)
+    fail_safe(design)
     for n in range(1, CHANNELS + 1):
         channel(design, n)
+        envelope(design, n)
     design.check()
     return design
 
@@ -2543,7 +3446,10 @@ def _report():
     print(f"  own noise            {f['total'] * 1e9:>8.1f} nV/rtHz, "
           f"x6 -> {f['six_channels'] * 1e9:.0f}")
     print(f"  op-amp sections      {OPAMP_NEEDED:>8d}     -> "
-          f"{OPAMP_QUADS} x {OPAMP}")
+          f"{OPAMP_QUADS} x {OPAMP}, all used")
+    print(f"  plus                 {ENV_SECTIONS_NEEDED:>8d}     -> "
+          f"{ENV_QUADS} x {ENV_OPAMP} for the envelope half-wave stages, "
+          f"{len(SPARE_SECTIONS)} spare terminated")
     print()
 
     print("  what that does to the mixer's own DC block, via coupling_burden()")
@@ -2614,6 +3520,39 @@ def _report():
           f"compensate more")
     print()
 
+    print("envelope detector -- symmetric one-pole, and both bounds are electrical")
+    e = envelope_filter()
+    print(f"  tau                  {e['tau'] * 1e3:>8.2f} ms  "
+          f"({ENV_R} x {ENV_C}), corner {e['corner']:.1f} Hz")
+    print(f"  at the pick's peak   {e['attack_db']:>+8.2f} dB  "
+          f"(peak arrives at {PICK_PEAK_S * 1e3:.0f} ms -- hexsim's own "
+          f"calibration)")
+    print(f"  falls at             {e['fall_db_per_ms']:>8.2f} dB/ms  "
+          f"against {e['music_ms_per_db']:.0f} ms/dB of early decay -- "
+          f"{e['faster_than_music']:.0f}x")
+    print(f"  -> there is no release bound, so no attack/release target is "
+          f"needed. {e['sections']} sections,")
+    print(f"     {'full' if e['full_wave'] else 'half'}-wave: the bow decides "
+          f"it, see ENV_FULL_WAVE")
+    print(f"  open string  ripple    alias at {ENV_SAMPLE_HZ / 1e3:.0f} kHz"
+          f"   after {ENV_FIRMWARE_BOX_S * 1e3:.0f} ms")
+    for row in e["rows"]:
+        print(f"  {row['f0']:>8.1f} Hz  {row['ripple_db']:>+6.2f} dB  "
+              f"{row['alias_db']:>+11.1f} dB  {row['firmware_db']:>+13.2f} dB")
+    b = envelope_balance()
+    print(f"  detector floor       {b['floor_db']:>+8.1f} dB  "
+          f"({b['floor_volts'] * 1e3:.0f} mV of A2 offset against "
+          f"{b['peak']:.2f} V pk), and the E96 half-value costs "
+          f"{b['imbalance_db']:.3f} dB")
+    s = envelope_sample_rate()
+    print("  and the sample rate is derived, not the range section 4.4 offers:")
+    for rate, row in sorted(s["rates"].items()):
+        print(f"    {rate / 1e3:.0f} kHz   worst {row['worst_db']:>+6.1f} dB "
+              f"across the fretted range (fret {row['worst_fret']}), "
+              f"{row['folds_to_dc_db']:+.1f} dB folding to "
+              f"{row['folds_to_dc_hz']:.0f} Hz")
+    print()
+
     print("DC servo, and constraint 3")
     s = servo_residual()
     print(f"  integrator corner    {s['corner']:>8.2f} Hz")
@@ -2671,6 +3610,34 @@ def _report():
     for row in fail_states():
         print(f"  {row['state']:<44} Vc = {row['vc']:>+7.2f} V  "
               f"-> {row['db']:>+7.1f} dB")
+    g = clamp_gain()
+    print(f"  the last row is the only loud one, and D803 is the answer: "
+          f"{g['unclamped_db']:+.0f} dB -> {g['clamped_db']:+.1f} dB")
+    print(f"  against {g['headroom_db']:.2f} dB of headroom at the mixer's "
+          f"summer: fits = {g['fits']}")
+    print()
+
+    print("the fail-safe -- de-energised is bypass")
+    t = pump_timing()
+    c = coil_budget()
+    b = bypass_state()
+    print(f"  pump source impedance {t['r_eq'] / 1e3:>6.1f} k   "
+          f"(1 / f.C at {PUMP_HZ / 1e3:.0f} kHz)")
+    print(f"  gate reaches          {t['v_final']:>6.2f} V   against a "
+          f"{FET_VGSTH_MAX:.1f} V threshold requirement, "
+          f"{t['margin_v']:+.2f} V of margin")
+    print(f"  comes into circuit at {t['t_on'] * 1e3:>6.1f} ms  "
+          f"(VREF needs {t['needs'] * 1e3:.0f} ms: "
+          f"{'holds' if t['interlock'] else 'FAILS'})")
+    print(f"  drops to bypass in    {t['t_off'] * 1e3:>6.1f} ms  "
+          f"+ {t['transfer_s'] * 1e3:.0f} ms of transfer, after any stuck "
+          f"MCU state")
+    print(f"  bypass presents       {b['parallel']:>6.0f} ohm  "
+          f"= the pot at full rotation ({b['pot_wide_open']:.0f}), so the "
+          f"mixer has seen it: {b['matches']}")
+    print(f"  coils cost            {c['low_ma']:>3.0f}-{c['high_ma']:.0f} mA  "
+          f"continuous on {c['rail']}, against {c['rest_ma']:.0f} mA for every "
+          f"amplifier and VCA ({c['ratio']:.1f}x)")
     print()
 
     print("assumptions still open here")

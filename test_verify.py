@@ -31,7 +31,9 @@ Every mutation below is a real fault rather than a synthetic one:
 
 import contextlib
 import copy
+import pathlib
 import sys
+import tempfile
 import types
 
 import design
@@ -96,59 +98,65 @@ def case(label, check):
 
 
 @case("mixer V- appears in the netlist", verify.check_no_mixer_rail_load)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["V-"] = {("R901", "1"), ("R902", "1")}
 
 
 @case("a second part bridges MAGND and AGND", verify.check_one_ground_bond)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["MAGND"].add(("R999", "1"))
     nets[socket.AGND].add(("R999", "2"))
 
 
 @case("a stray part hangs off AGND", verify.check_one_ground_bond)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets[socket.AGND].add(("C999", "1"))
 
 
 @case("a third conductor creeps into the loom", verify.check_shield_returns)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     design.NETS["MAGND"].append(("J1", "3"))
 
 
 @case("a shield lands on the wrong socket pin", verify.check_shield_returns)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     design.LOOM[4]["shield_pin"] = "1"
 
 
 @case("something extra lands on SIN4", verify.check_sin_dc_by_construction)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["SIN4"].add(("C999", "1"))
 
 
+@case("something extra lands on IVOUT6", verify.check_sin_dc_by_construction)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["IVOUT6"].add(("C999", "1"))
+
+
 @case("channel 5 loses its DC servo", verify.check_sin_dc_by_construction)
-def _(nets, values, open_pins, violations):
-    nets["SIN5"].discard(("R531", "1"))
+def _(nets, values, open_pins, violations, drc, board):
+    # Was SIN5; the servo senses IVOUT5 now, upstream of the bypass contact.
+    nets["IVOUT5"].discard(("R531", "1"))
 
 
 @case("the 1M envelope tap is hung on PIN2, as spec s4.1 asks",
       verify.check_pin_load)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["PIN2"].add(("R299", "1"))
 
 
 @case("R101 respecified as 4k7", verify.check_pin_load)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     values["R101"] = "4k7 0.1%"
 
 
 @case("the socket load is not a virtual earth", verify.check_pin_load)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["FEN6"].add(("C999", "1"))
 
 
 @case("a seventh conductor leaves on the loom", verify.check_triads)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["STRAY"] = {("J3", "4"), ("R301", "1")}
 
 
@@ -159,25 +167,113 @@ def _(nets, values, open_pins, violations):
 # are visible here and nowhere else in the netlist.
 @case("a second R_IN branch appears on CPL3, which is a pad returning",
       verify.check_gain_chain)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["CPL3"].add(("R312", "1"))
 
 
 @case("R411 fitted at a pad step's value, so the channel is not unity",
       verify.check_gain_chain)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     values["R411"] = "24k3 0.1%"
 
 
 @case("a contact lands between R_IN and the cell's input", verify.check_gain_chain)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["IIN2"].add(("K201", "11"))
 
 
 @case("design.py itself drifts off unity: R_OUT no longer equals R_IN",
       verify.check_gain_chain)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     design.VCA_ROUT_OHMS = 24_300.0
+
+
+# The bypass changeover, and these are the faults that make "de-energised is
+# bypass" false while leaving the sheet looking finished.
+@case("the servo senses downstream of the bypass contact",
+      verify.check_sin_dc_by_construction)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["IVOUT4"].discard(("R431", "1"))
+    nets["SIN4"].add(("R431", "1"))
+
+
+@case("channel 5 is bypassed to channel 6's pole",
+      verify.check_sin_dc_by_construction)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["SIN5"].discard(("K803", "11"))
+    nets["SIN5"].add(("K803", "21"))
+
+
+@case("the module reaches the wiper through the normally *closed* contact",
+      verify.check_sin_dc_by_construction)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["IVOUT1"].discard(("K801", "14"))
+    nets["IVOUT1"].add(("K801", "12"))
+
+
+@case("a coil returns to MDGND instead of the sink", verify.check_fail_safe)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["FSD"].discard(("K802", "A2"))
+    nets["MDGND"].add(("K802", "A2"))
+
+
+@case("a flyback diode is fitted backwards", verify.check_fail_safe)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["FSD"].discard(("D823", "2"))
+    nets["V5"].discard(("D823", "1"))
+    nets["FSD"].add(("D823", "1"))
+    nets["V5"].add(("D823", "2"))
+
+
+@case("the pump's two diodes are swapped", verify.check_fail_safe)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["FSAC"].discard(("D802", "2"))
+    nets["FSG"].discard(("D802", "1"))
+    nets["FSAC"].add(("D802", "1"))
+    nets["FSG"].add(("D802", "2"))
+
+
+@case("the VREFN clamp is reversed, shorting the inverted reference",
+      verify.check_fail_safe)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["VREFN"].discard(("D803", "2"))
+    nets["MAGND"].discard(("D803", "1"))
+    nets["VREFN"].add(("D803", "1"))
+    nets["MAGND"].add(("D803", "2"))
+
+
+@case("a second resistor lands on the hold node", verify.check_fail_safe)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["FSG"].add(("R999", "1"))
+
+
+# The three faults check_rectifier_polarity() exists for. The first is the
+# mixer's own D801, transplanted: a diode fitted backwards, which draws
+# correctly, passes ERC, and leaves the rectifier reporting nothing. It is the
+# fault that repo records twice and could never catch, because both of its
+# instruments compared the board against a design.py that agreed with the fault.
+@case("D351 is fitted backwards, which is the mixer's own D801",
+      verify.check_rectifier_polarity)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["AOUT3"].discard(("D351", "2"))
+    nets["HWN3"].discard(("D351", "1"))
+    nets["AOUT3"].add(("D351", "1"))
+    nets["HWN3"].add(("D351", "2"))
+
+
+@case("both diodes point the same way, so one half-cycle is lost",
+      verify.check_rectifier_polarity)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["HW5"].discard(("D552", "2"))
+    nets["AOUT5"].discard(("D552", "1"))
+    nets["HW5"].add(("D552", "1"))
+    nets["AOUT5"].add(("D552", "2"))
+
+
+@case("a stray part loads the envelope summing junction",
+      verify.check_rectifier_polarity)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["ENVN2"].add(("C999", "1"))
 
 
 # The two faults check_open_pins() exists for. There used to be three, and the
@@ -192,12 +288,12 @@ def _(nets, values, open_pins, violations):
 # deferred block that lands brings the cases back with it.
 @case("a pin is left open on the sheet and declared nowhere",
       verify.check_open_pins)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     open_pins.add(("U9", "2"))
 
 
 @case("a permanent no-connect is quietly wired up", verify.check_open_pins)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     open_pins.discard((design.REF_REF, str(design.REF_PINS["IC1"])))
     nets["MAGND"].add((design.REF_REF, str(design.REF_PINS["IC1"])))
 
@@ -208,19 +304,19 @@ def _(nets, values, open_pins, violations):
 # different count, which is the case that distinguishes this from silencing the
 # rule in the project file.
 @case("ERC reports an error of a kind nobody expected", verify.check_erc)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     violations.append({"type": "pin_not_connected", "severity": "error",
                        "description": "Symbol U9 Pin 2 [I_IN1] not connected"})
 
 
 @case("ERC reports a warning class that is not declared", verify.check_erc)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     violations.append({"type": "hier_label_mismatch", "severity": "warning",
                        "description": "Mismatch between hierarchical labels"})
 
 
 @case("a seventh op-amp section goes missing", verify.check_erc)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     violations.append({"type": "missing_unit", "severity": "warning",
                        "description": "Symbol U8 has unplaced units [ D ]"})
 
@@ -230,28 +326,47 @@ def _(nets, values, open_pins, violations):
 # stability range, which every other instrument in this repo passed for the whole
 # life of the design because none of them read a *sum*.
 @case("a second 10 uF reservoir lands on VREF", verify.check_reference_load)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["VREF"].add(("C804", "1"))
     values["C804"] = "10u/16V X7R"
 
 
 @case("one oversized capacitor on VREF", verify.check_reference_load)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     values["C802"] = "22u/16V X7R"
 
 
 @case("the required output capacitor is dropped", verify.check_reference_load)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     nets["VREF"].discard(("C802", "1"))
     values["C802"] = "1n/50V C0G"
 
 
 @case("the drawing and design.py disagree about VREF's load",
       verify.check_reference_load)
-def _(nets, values, open_pins, violations):
+def _(nets, values, open_pins, violations, drc, board):
     values["C803"] = "220n/50V X7R"
 
 
+# The board. Two checks, and the second is the one no other instrument in this
+# project or KiCad itself will make.
+@case("DRC reports a clearance violation", verify.check_board)
+def _(nets, values, open_pins, violations, drc, board):
+    drc["violations"].append({
+        "type": "clearance", "severity": "error",
+        "description": "Clearance violation ( clearance 0.2mm; actual 0.05mm)",
+        "items": [{"description": "Pad 1 of R101"}]})
+
+
+@case("routing goes backwards and the count is not put back up",
+      verify.check_board)
+def _(nets, values, open_pins, violations, drc, board):
+    drc["unconnected_items"] = drc["unconnected_items"][:-4]
+
+
+# The router's own invariant, checked without KiCad: two nets on one point.
+# gen_pcb.py runs this on every build and refuses to save if it fails, so what
+# is planted here is the check itself rather than a board.
 # And the comparison itself, which is the reason this file's netlist now comes
 # out of KiCad. Each of these three is a *drawing* fault rather than a design
 # fault, and none of them was reachable before: while both sides of compare()
@@ -275,6 +390,7 @@ def main():
     clean_values = verify.read_components(verify.NETLIST)
     clean_open = verify.read_open_pins(verify.NETLIST)
     clean_erc = verify.run_erc(verify.SHEET, verify.ERC)
+    clean_drc = verify.read_drc(verify.PCB, verify.DRC)
 
     print("test_verify: every section 5 check must be able to fail")
     print()
@@ -284,10 +400,13 @@ def main():
         context = {"nets": copy.deepcopy(clean_nets),
                    "values": dict(clean_values),
                    "open_pins": set(clean_open),
-                   "violations": copy.deepcopy(clean_erc)}
+                   "violations": copy.deepcopy(clean_erc),
+                   "drc": copy.deepcopy(clean_drc),
+                   "board": verify.PCB}
         with _design_restored():
             mutate(*(context[name] for name in
-                     ("nets", "values", "open_pins", "violations")))
+                     ("nets", "values", "open_pins", "violations",
+                      "drc", "board")))
             found = _run(check, context)
         print(f"  {label:<52} {'caught' if found else '*** MISSED ***'}")
         if not found:
@@ -300,6 +419,37 @@ def main():
         print(f"  {label:<52} {'caught' if found else '*** MISSED ***'}")
         if not found:
             missed.append(label)
+
+    # The router's own invariant, which is not a verify.py check and so cannot
+    # be planted through CASES: gen_pcb.py runs it before it saves and refuses
+    # to write a board that fails it. What is proved here is that it can fail.
+    import route
+    shorts = route.check_no_shorts(
+        [("A", route.FRONT, [(1.0, 1.0), (1.5, 1.0)]),
+         ("B", route.FRONT, [(1.5, 1.0), (2.0, 1.0)])], [], 0.5)
+    label = "the router puts two nets on one point"
+    print(f"  {label:<52} {'caught' if shorts else '*** MISSED ***'}")
+    if not shorts:
+        missed.append(label)
+
+    # The pour overlap, which needs a *file* rather than a netlist: the whole
+    # point of check_ground_split_on_the_board() is that it reads what was
+    # written. So the board is copied to the scratch path with one zone moved
+    # across the split, and the copy is what is checked. The real board is
+    # never touched.
+    import tempfile
+    original = verify.PCB.read_text()
+    moved = original.replace("158.44", "100.0")
+    with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                     delete=False) as handle:
+        handle.write(moved)
+        planted = pathlib.Path(handle.name)
+    found = verify.check_ground_split_on_the_board(planted)
+    label = "the two ground pours overlap on an inner layer"
+    print(f"  {label:<52} {'caught' if found else '*** MISSED ***'}")
+    if not found:
+        missed.append(label)
+    planted.unlink()
 
     # The declaration-only checks cannot be mutated through the netlist, so
     # they are exercised against TRIADS directly and restored afterwards.
@@ -380,7 +530,7 @@ def main():
     if missed:
         raise SystemExit(f"{len(missed)} checks did not fail when they should: "
                          + "; ".join(missed))
-    total = len(CASES) + len(DRAWING_FAULTS) + 3 + 4
+    total = len(CASES) + len(DRAWING_FAULTS) + 2 + 3 + 4
     print(f"all {total} faults caught -- the checks are checks")
 
 

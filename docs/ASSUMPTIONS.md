@@ -85,16 +85,14 @@ Facts this repo takes from `../summing-mixer` at `4bc7ddb`. Their truth is upstr
 
 ## Parts not chosen
 
-None. The one entry was the pad relay — a part the spec asks for by function, does not name, and §6 forbids inventing — and it was resolved by deleting the pad rather than by choosing the relay. See `design.pad_benefit()`. `design.check_orderable()` and `check_pin_numbers()` are unchanged and still refuse a BOM line with no part number and a pin written as a role; the deferred DC-DC, ADC and bypass relay will refill this list when they are drawn.
+- **None** — logic-level N-channel MOSFET, SOT-23, with Vgs(th) at most 1.0 V and at least 200 mA of drain current. The threshold is the binding one and it is computed: pump_timing() says the gate can only ever reach 1.83 V, because a two-diode pump off a 3.3 V GPIO gives 3.3 - 2*Vf and the bleed resistor divides that against the pump's own source impedance. A 2.5 V-threshold part will not turn on at all.
 
 ## Blocks deferred
 
 Not assumptions so much as absences, listed because a section 5 check against a partial board proves less than it appears to.
 
-- **bypass relay and fail-safe** — the AC-coupled charge pump, section 4.5.
 - **controller** — RP2040 and its QSPI flash, crystal, USB and MIDI: shared block, and the scope statement puts shared blocks after one channel is complete.
-- **envelope ADC** — ADS131M08 or MCP3564, undecided in spec section 4.4.
-- **envelope rectifier** — the smoothing time constant is not derivable -- spec section 4.4 gives a sampling rate and no attack/release target. The tap net BUF{n} exists and is driven; the rectifier hangs off it.
+- **envelope ADC** — ADS131M08 or MCP3564, undecided in spec section 4.4 -- but its sample rate is decided now, at 2 kHz rather than the 1-2 kHz the spec offers, and the six ENV{n} nets exist and are driven. See envelope_sample_rate(); the ADC hangs off them, in the analogue section, so that only SPI crosses the domain boundary.
 - **supply** — isolated DC-DC at >=300 kHz per section 1.1; the topology is decided and the part is not.
 
 ### Pins waiting on a deferred block
@@ -166,6 +164,46 @@ None. All 48 were the twelve pad relays' coils, and they went with the pad — s
 **If wrong:** If the figure is somehow the cell alone, this repo *under*-counts by an op-amp and a resistor -- about 15 nV/rtHz, which would raise the gating penalty by roughly 0.1 dB.
 
 **To settle:** It is a reading of the conditions line and it is a confident one. Left as an assumption because it is load-bearing, not because it is doubtful.
+
+### A bowed onset is slower than a picked one, and never faster.
+
+**Basis:** The target instrument is a modern arpeggione -- six strings, standard guitar tuning, bowed as well as picked -- and no bowed envelope is measured anywhere in this project. hexsim's only measured profile is a picked electric, and its sustained_stems() models an ebow-like source with a 0.6-1.5 s swell rather than a bow.
+
+**Affects:** Nothing, and that is the point of recording it. envelope_filter() is bounded above by the *picked* transient and below by ripple, so a bow that rises more slowly only ever asks for more smoothing than tau already gives. If a bowed attack were somehow faster than 20 ms the bound would move, and nothing else in the block would.
+
+**If wrong:** The detector would read a bowed onset late by up to a few milliseconds, which is inside the 8 ms the firmware averages over anyway.
+
+**To settle:** Record one bowed note off the Nexus at Phase 0.5 and run it through hexsim --stems. It is the same recording session the picked stems need.
+
+### The musical attack and release belong in firmware, not in the RC.
+
+**Basis:** envelope_filter() shows a symmetric 4.7 ms one-pole falls 46x faster than the fastest musical decay, so there is no release the analogue side has to be asked for. Bowed and picked want opposite shaping and the instrument does both, which a fixed RC cannot serve and a constant at the 2 kHz frame can.
+
+**Affects:** Where a musical decision lives. The board is identical either way; what changes is whether the decision costs a soldering iron.
+
+**If wrong:** If firmware shaping turns out not to be enough -- a case nobody has described -- the fallback is a diode and a second resistor per channel, which is the asymmetric detector spec section 4.4 implies. It is two parts per channel, added later, on a board that already has the sections.
+
+**To settle:** Set it by ear against hexsim's renders, which is how corrections 7 and 8 were found. It needs no hardware.
+
+### The Schottky forward drop, in three places that need it small.
+
+**Basis:** 0.3 V is assumed for a BAT54-class part at the microamps this circuit draws, and no datasheet was opened this session. It is not one figure doing one job: it sets how much gate voltage the charge pump can produce (3.3 - 2*Vf), and it *is* the clamped voltage on the inverted reference.
+
+**Affects:** pump_timing()'s whole margin, and clamp_gain()'s +7.4 dB against the mixer's 7.84 dB of headroom -- which is 0.44 dB of room, so this is the assumption in this repo with the least slack behind it.
+
+**If wrong:** At 0.4 V the clamp gives +9.8 dB and the summer clips on the fault it was fitted to prevent; at 0.25 V it gives +6.1 dB and the pump gains 0.14 V of gate. The direction that hurts is the one a hot junction moves in.
+
+**To settle:** Read the curve at 10 uA and 25 C for the specific part, before the BOM is ordered. It is the one reading this pass left undone.
+
+### A 5 V signal DPDT relay coil draws 25-40 mA.
+
+**Basis:** An envelope for the class, not a part: the relay is in design.UNSPECIFIED with its requirements and coil current is a property of whichever one is fitted.
+
+**Affects:** coil_budget(), and through it the deferred supply -- 75 to 120 mA continuous on V5, against 78 mA for every amplifier and VCA on the board.
+
+**If wrong:** The supply is sized wrong, which is a DC-DC that has not been chosen yet rather than a board change. Nothing on the schematic moves: the FET's requirement is stated as 200 mA, which covers the top of a wide error.
+
+**To settle:** Choose the relay. It is now the only part on this board whose *current* matters to another block.
 
 ### X7R is acceptable for the CV filter's 56 nF and 22 nF.
 
@@ -285,7 +323,7 @@ None. All 48 were the twelve pad relays' coils, and they went with the pad — s
 
 ## Prices
 
-Of 30 BOM lines, **1 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 27 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
+Of 40 BOM lines, **1 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 35 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
 
 The totals in `docs/SHOPPING.md` are therefore a range, and the range is honest rather than decorative. They are also a floor: none of the deferred blocks is costed.
 

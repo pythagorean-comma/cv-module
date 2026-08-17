@@ -182,12 +182,36 @@ published.
 - If it is nearer **−45 dB**, musical gate depth is capped around −31 dB, the lead
   feature is compromised, and the part is wrong for this design.
 
+### New evidence, added later: the instrument is bowed
+
+The target is a modern **arpeggione** — six strings, standard guitar tuning,
+**bowed as well as picked**. That was not known when this document was written
+and it strengthens the 4301 case a third time, for a reason the sections above
+do not contain.
+
+A bowed note has no transient and the player modulates level continuously
+through it, so the sensing layer stops being an onset detector and becomes the
+thing that reports the performance. §4.4's answer to that is six precision
+rectifiers into an RC and an ADC, which `design.envelope_filter()` now derives —
+and it is an *average* detector with ripple at the string's own pitch, needing
+12 op-amp sections and a firmware average to clean up after it. The THAT4301
+carries an **RMS detector with a dB-linear 6.5 mV/dB output** in the same
+package as the VCA. Log-domain, so the ripple problem largely goes away; the
+sensing layer lands in the same units as the control law; and it is not 12
+sections of a second op-amp type.
+
+Not acted on, for the reason the whole document gives: this is a bench decision
+and the number that settles it is still unpublished crosstalk. Recorded so the
+bench-off measures the right things.
+
 ### Changes to the plan
 
 1. **Phase 1.5 becomes a three-way bench-off**, not a single-part crosstalk check:
    one channel each of SSI2164, THAT2180 and THAT4301. Measure crosstalk, noise,
    control feedthrough, and channel matching on all three. Budget ~£70 rather than
-   £5. That is cheap against committing a PCB to the wrong element.
+   £5. That is cheap against committing a PCB to the wrong element. **Add the
+   4301's RMS detector to what is measured**, on a bowed note as well as a
+   picked one — see the bowing note above.
 2. **The spike is not blocked.** All three are current-in/current-out Blackmer-class
    parts with the same surrounding topology — local I–V, CV divider, servo. The
    schematic is architecturally identical; only the footprint and two resistor

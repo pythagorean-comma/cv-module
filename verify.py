@@ -39,6 +39,10 @@ What it catches:
   * a load at PIN{n} that is not the 10k the DC-block corner was computed for;
   * an audio conductor leaving the module without a declared pair and shield;
   * a pin left open on the sheet that the design has not declared open;
+  * an envelope rectifier diode fitted backwards, which is the fault the mixer
+    records twice and could not catch;
+  * a bypass contact on the wrong pole, a coil that does not return to the one
+    sink, or a servo sensing downstream of the changeover;
   * R_IN switched, loaded, revalued or no longer equal to R_OUT, which is what
     the coarse pad's deletion rests on -- see design.pad_benefit().
 
@@ -55,6 +59,7 @@ import subprocess
 import sys
 
 import design
+import placement
 import contract.socket as socket
 from toolchain import kicad, kisim, sexp
 
@@ -62,6 +67,8 @@ OUT = pathlib.Path(__file__).resolve().parent / "out"
 SHEET = OUT / "cv-module.kicad_sch"
 NETLIST = OUT / "from-kicad.net"
 ERC = OUT / "from-kicad-erc.json"
+PCB = OUT / "cv-module.kicad_pcb"
+DRC = OUT / "from-kicad-drc.json"
 
 
 def export_netlist(schematic, destination):
@@ -304,33 +311,64 @@ def check_sin_dc_by_construction(nets, values):
     from U1B's own offset. See constraints.py.
 
     A netlist cannot measure volts, so what is checked is still the
-    construction: exactly the I-V amplifier,
-    its feedback pair, the servo's sense resistor and the loom -- and nothing
-    else. Anything additional on this net is a path that can put DC into
-    R{n}01 and from there into the mixer's summing node, where six channels'
-    worth lands on the master pot's wiper.
+    construction -- and **the construction moved when the bypass relay landed,
+    so this check moved with it rather than being loosened to accommodate it.**
+    SIN{n} used to be the I-V amplifier's own output. It is now the mixer's
+    wiper on one side of a changeover contact, with the amplifier on the other:
 
-    The servo is checked for by name because its absence is the whole failure:
-    without it the SSI2164's own +/-150 nA output offset current through R_OUT
-    sits on this net permanently, and nothing else in the module would notice.
+        SIN{n}    the loom, and this channel's own relay pole
+        IVOUT{n}  the I-V output, its feedback pair, the servo sense, and the
+                  same relay's normally-open contact
+
+    Anything additional on either is a path that can put DC into R{n}01 and
+    from there into the mixer's summing node, where six channels' worth lands
+    on the master pot's wiper.
+
+    Two things are asserted that could not be before, and both are failures a
+    drawing would not show.
+
+    **The servo must sense IVOUT{n} and not SIN{n}.** Downstream of the contact
+    the loop opens the moment the module leaves circuit, and an integrator with
+    an open loop goes to a rail and stays there -- so the module would come
+    back from bypass wrong rather than coming back. The old wiring is now a
+    fault and test_verify.py plants it.
+
+    **The pole must be this channel's own.** bypass_contact(n) says which, and
+    a channel wired to a neighbour's pole is a board that bypasses two strings
+    to one place and leaves another pair crossed. Every other instrument passes
+    on it: the parts are all present, the counts are right, and ERC has nothing
+    to say about which contact of a relay a net lands on.
     """
     problems = []
     for n in range(1, design.CHANNELS + 1):
-        name = f"SIN{n}"
-        expected = {f"J{n}", f"R{n}21", f"C{n}21", f"R{n}31",
-                    design.SECTIONS[("iv", n)][0]}
-        found = {ref for ref, _ in nets.get(name, ())}
-        if found != expected:
+        relay, com, nc, no = design.bypass_contact(n)
+        for name, expected in (
+                (f"SIN{n}", {f"J{n}", relay}),
+                (f"IVOUT{n}", {f"R{n}21", f"C{n}21", f"R{n}31", relay,
+                               design.SECTIONS[("iv", n)][0]})):
+            found = {ref for ref, _ in nets.get(name, ())}
+            if found != expected:
+                problems.append(
+                    f"{name} carries {sorted(found)}, expected "
+                    f"{sorted(expected)} -- see design.fail_safe() for why "
+                    f"the I-V output and the mixer's wiper are two nets")
+            if design.net_dc(name) != (0.0, 0.0):
+                problems.append(f"{name} is not declared 0 V DC in NET_DC")
+        if (relay, com) not in nets.get(f"SIN{n}", ()):
             problems.append(
-                f"{name} carries {sorted(found)}, expected {sorted(expected)} "
-                f"-- I-V output, its feedback pair, the servo sense and the "
-                f"loom")
-        if design.net_dc(name) != (0.0, 0.0):
-            problems.append(f"{name} is not declared 0 V DC in NET_DC")
-        if f"R{n}31" not in found:
+                f"SIN{n} is not on {relay}.{com}, which is the pole "
+                f"design.bypass_contact({n}) assigns it")
+        if (relay, no) not in nets.get(f"IVOUT{n}", ()):
             problems.append(
-                f"channel {n} has no DC servo sensing {name} -- the VCA's own "
-                f"150 nA offset current would stand on it")
+                f"IVOUT{n} is not on {relay}.{no} -- the module must reach the "
+                f"wiper through the *normally open* contact, or de-energised "
+                f"is not bypass")
+        if (f"R{n}31", "1") not in nets.get(f"IVOUT{n}", ()):
+            problems.append(
+                f"channel {n}'s servo does not sense IVOUT{n} -- either the "
+                f"VCA's own 150 nA offset current stands on the output, or "
+                f"the loop is downstream of the bypass contact and opens "
+                f"every time the module leaves circuit")
     return problems
 
 
@@ -349,9 +387,19 @@ def check_pin_load(nets, values):
     and 5k wide open, so anything in between reproduces some position of the
     control this module replaces.
 
-    Nothing else is on the node. A second part at PIN{n} -- the 1 Mohm envelope
-    tap spec section 4.1 puts here, for instance -- shifts the load and the
-    corner with it, and the symptom is a tonal complaint rather than a fault.
+    Nothing else is on the node **except this channel's own bypass contact**. A
+    second part at PIN{n} -- the 1 Mohm envelope tap spec section 4.1 puts here,
+    for instance -- shifts the load and the corner with it, and the symptom is a
+    tonal complaint rather than a fault.
+
+    The contact is admitted rather than excused. It is open whenever the module
+    is in circuit, so the 10.000 kohm above is what PIN{n} sees in normal
+    operation; when it closes, PIN{n} and SIN{n} become one node and the mixer
+    sees R{n}01 in parallel with its own RIN -- 5 kohm, which
+    design.bypass_state() shows is exactly what the fabricated pot presents at
+    full rotation. Both ends of the changeover are conditions the mixer was
+    built for, and that is the argument for allowing the extra member here
+    rather than the convenience of it.
 
     And the load is a resistor into a *virtual earth*, not a shunt to ground.
     That is what makes it 10.000 kohm rather than 10k in parallel with whatever
@@ -362,13 +410,20 @@ def check_pin_load(nets, values):
     low, high = 5_000.0, 10_000.0
     for n in range(1, design.CHANNELS + 1):
         name = f"PIN{n}"
-        expected = {f"J{n}", f"R{n}01"}
+        relay, _, nc, _ = design.bypass_contact(n)
+        expected = {f"J{n}", f"R{n}01", relay}
         found = {ref for ref, _ in nets.get(name, ())}
         if found != expected:
             problems.append(
                 f"{name} carries {sorted(found)}, expected {sorted(expected)} "
-                f"-- the loom and the socket load only")
+                f"-- the loom, the socket load and this channel's own bypass "
+                f"contact")
             continue
+        if (relay, nc) not in nets.get(name, ()):
+            problems.append(
+                f"{name} is not on {relay}.{nc} -- the link back to the wiper "
+                f"must be the *normally closed* contact, or the module fails "
+                f"into silence rather than into bypass")
         if values.get(f"R{n}01") != design.FRONT_R:
             problems.append(
                 f"R{n}01 is {values.get(f'R{n}01')!r}, expected "
@@ -519,6 +574,257 @@ def check_gain_chain(nets, values):
     return problems
 
 
+def check_rectifier_polarity(nets, values):
+    """Both envelope diodes point the way the rectifier needs them to.
+
+    **The one part of this board where the drawing can be right and the circuit
+    backwards, and the mixer paid for the lesson twice.** Its DIODE_PINS records
+    D801 fitted cathode-to-the-inlet for the whole life of that design and says
+    what was blind to it -- "a pin number can be transposed silently; 'A' and
+    'K' cannot" -- and its CAP_PINS records the same fault one part class later.
+    Neither was catchable there, because both instruments compared the board to
+    a design.py that was itself wrong.
+
+    Here it is catchable, and this is the check that does it: the netlist is
+    KiCad's, read back from geometry, and what is asserted is the *role* of each
+    pin rather than its number. D{n}51's anode belongs on the amplifier's output
+    and its cathode on the summing node; D{n}52's are the other way round. Swap
+    either and the rectifier still draws, still passes ERC, still matches part
+    for part -- and reports nothing, because the loop closes through the wrong
+    diode on both half-cycles.
+
+    Also asserted: the two summing junctions carry exactly what design.py puts
+    on them. HWN{n} is R{n}51, R{n}52, D{n}51 and the amplifier; ENVN{n} is the
+    three summing resistors, the capacitor and its amplifier. Anything else on
+    either is a load on a virtual earth, which changes the gain that
+    envelope_filter() derives without changing anything a wire can see.
+    """
+    problems = []
+    for n in range(1, design.CHANNELS + 1):
+        expected = {
+            (f"D{n}51", str(design.DIODE_PINS["A"])): f"AOUT{n}",
+            (f"D{n}51", str(design.DIODE_PINS["K"])): f"HWN{n}",
+            (f"D{n}52", str(design.DIODE_PINS["A"])): f"HW{n}",
+            (f"D{n}52", str(design.DIODE_PINS["K"])): f"AOUT{n}",
+        }
+        for (ref, pin), net in sorted(expected.items()):
+            found = sorted(name for name, nodes in nets.items()
+                           if (ref, pin) in nodes)
+            role = "anode" if pin == str(design.DIODE_PINS["A"]) else "cathode"
+            if found != [net]:
+                problems.append(
+                    f"{ref}'s {role} is on {found or ['nothing']}, expected "
+                    f"[{net!r}] -- see design.envelope(), and design.DIODE_PINS "
+                    f"for why this is asserted by role and not by number")
+        package_a = design.SECTIONS[("env_a", n)][0]
+        package_b = design.SECTIONS[("env_b", n)][0]
+        for name, want in (
+                (f"HWN{n}", {f"R{n}51", f"R{n}52", f"D{n}51", package_a}),
+                (f"ENVN{n}", {f"R{n}53", f"R{n}54", f"R{n}55", f"C{n}51",
+                              package_b})):
+            found = {ref for ref, _ in nets.get(name, ())}
+            if found != want:
+                problems.append(
+                    f"{name} carries {sorted(found)}, expected {sorted(want)} "
+                    f"-- anything else on a virtual earth changes the gain "
+                    f"envelope_filter() derives")
+    return problems
+
+
+def check_fail_safe(nets, values):
+    """De-energised is bypass, and every coil is on the one sink.
+
+    The fail-safe's whole claim is a *state*, and states are what a netlist is
+    worst at -- so what is asserted here is the connectivity that makes the
+    state true, one clause at a time.
+
+    **Every coil returns to the same drain.** Three relays released by one FET
+    is what makes "the module is in circuit" a single fact; a coil wired to
+    MDGND instead would hold two channels in circuit for ever, and the sheet
+    would look like three identical relays.
+
+    **Every coil has a flyback diode across it, pointing the right way.** The
+    coils are the only inductance on this board and the FET is the only thing
+    that switches them off; a diode reversed here is a short across V5 through
+    the drain, which is a part destroyed rather than a fault heard. Asserted by
+    role, per design.DIODE_PINS.
+
+    **The pump's two diodes are the pump.** D801 clamps FSAC to MDGND and D802
+    passes the positive half to the hold node, and swapping them gives a
+    circuit that draws correctly and charges nothing -- so the module never
+    leaves bypass and the fault reads as "the relay is dead".
+
+    **The hold node carries the bleed and nothing else.** R803 is the fail-safe's
+    actual time constant, and a second resistor on FSG changes t_off and t_on
+    together without changing a part count. pump_timing() is what it would
+    invalidate.
+
+    **VREFN's clamp is present and the right way round.** It is the only answer
+    to the one fail-loud path, and reversed it shorts the inverted reference to
+    ground through a diode -- which is not a subtle failure, but it is one that
+    looks identical on a sheet.
+    """
+    problems = []
+    coil_low = {ref for ref, _ in nets.get("FSD", ())}
+    expected = ({design.FET_REF}
+                | set(design.BYPASS_RELAY_REFS)
+                | {f"D{80 + i}3" for i in range(1, design.BYPASS_RELAYS + 1)})
+    if coil_low != expected:
+        problems.append(
+            f"FSD carries {sorted(coil_low)}, expected {sorted(expected)} -- "
+            f"every coil and every flyback on the one sink, or 'released' is "
+            f"not one fact")
+
+    for index in range(1, design.BYPASS_RELAYS + 1):
+        ref, diode = design.BYPASS_RELAY_REFS[index - 1], f"D{80 + index}3"
+        for pin, net in ((design.RELAY_PINS["COIL+"], "V5"),
+                         (design.RELAY_PINS["COIL-"], "FSD")):
+            if (ref, str(pin)) not in nets.get(net, ()):
+                problems.append(f"{ref}.{pin} is not on {net}")
+        for role, net in (("A", "FSD"), ("K", "V5")):
+            if (diode, str(design.DIODE_PINS[role])) not in nets.get(net, ()):
+                problems.append(
+                    f"{diode}'s {'anode' if role == 'A' else 'cathode'} is not "
+                    f"on {net} -- a flyback the wrong way round is a short "
+                    f"across {design.BYPASS_COIL_V:.0f} V through the drain")
+
+    for diode, anode, cathode in (("D801", "MDGND", "FSAC"),
+                                  ("D802", "FSAC", "FSG"),
+                                  ("D803", "VREFN", "MAGND")):
+        for role, net in (("A", anode), ("K", cathode)):
+            if (diode, str(design.DIODE_PINS[role])) not in nets.get(net, ()):
+                problems.append(
+                    f"{diode}'s {'anode' if role == 'A' else 'cathode'} is not "
+                    f"on {net} -- see design.fail_safe()")
+
+    gate = {ref for ref, _ in nets.get("FSG", ())}
+    if gate != {"C806", "R803", "D802", design.FET_REF}:
+        problems.append(
+            f"FSG carries {sorted(gate)}, expected ['C806', 'D802', 'R803', "
+            f"'{design.FET_REF}'] -- anything else on the hold node moves both "
+            f"of pump_timing()'s time constants")
+    return problems
+
+
+# What the router did not finish, pinned exactly -- for the reason
+# ERC_ALLOWED's counts were: "mostly routed" is something a reader forgives,
+# and 67 missing connections is something that has to reach zero before anybody
+# orders copper.
+#
+# **476 to 67 in one pass, with DRC at zero throughout.** The 67 are named by
+# gen_pcb.py on every run, and they are not scattered: they are the summing
+# junctions and the two rails, which is exactly where a grid router runs out of
+# room. A pin on a SOIC has a neighbour 1.27 mm away on each side, so on a
+# 0.5 mm grid there is no cell between them and every route has to leave
+# outward through the same corridor. What finishes them is either a finer grid
+# with thinner track -- a fab-capability decision, not a routing one -- or
+# rip-up and retry, which this router does not do and says so.
+UNROUTED_ITEMS = 67
+
+
+def read_drc(board, destination):
+    """Run KiCad's own DRC over the board and read the report back."""
+    if not board.exists():
+        raise SystemExit(f"{board} does not exist -- run gen_pcb.py")
+    result = subprocess.run(
+        [str(kicad.KICAD_CLI), "pcb", "drc", "--format", "json",
+         "-o", str(destination), str(board)],
+        capture_output=True, text=True)
+    if not destination.exists():
+        raise SystemExit(f"DRC failed:\n{result.stdout}\n{result.stderr}")
+    return json.loads(destination.read_text())
+
+
+def check_board(report):
+    """The board breaks no design rule, and its unrouted count is declared.
+
+    **DRC is to the board what ERC is to the sheet, and the same argument
+    applies to what it is allowed to still say.** Violations are held at zero
+    -- there is no allow-list here and there should not be one, because
+    everything DRC reports on a *placed* board is a placement fault and
+    placement is cheap to change. The first run said 262: courtyards through
+    each other, silk over pads, and one package landing on another's row.
+
+    Unconnected items are different in kind: they are work not done rather
+    than work done wrong, and the honest thing is to state the number rather
+    than filter the category out. UNROUTED_ITEMS is that statement, and it has
+    come down from 476 to 67 without the violation count ever leaving zero --
+    which is the property worth protecting. A router that trades shorts for
+    completed connections is worse than one that gives up and says so.
+    """
+    problems = []
+    violations = report.get("violations", ())
+    for violation in violations[:8]:
+        items = "; ".join(item.get("description", "")
+                          for item in violation.get("items", ()))
+        problems.append(
+            f"DRC [{violation.get('type')}]: {violation.get('description')} "
+            f"-- {items}")
+    if len(violations) > 8:
+        problems.append(f"... and {len(violations) - 8} more DRC violations")
+
+    unconnected = len(report.get("unconnected_items", ()))
+    if unconnected != UNROUTED_ITEMS:
+        problems.append(
+            f"DRC reports {unconnected} unconnected items and "
+            f"verify.UNROUTED_ITEMS declares {UNROUTED_ITEMS} -- if copper has "
+            f"been routed, bring the number down with it; if a net has "
+            f"appeared, it has not been routed yet")
+    return problems
+
+
+def check_ground_split_on_the_board(board):
+    """The two ground pours do not overlap, which DRC will not tell you.
+
+    **STYLE.md names this one and the mixer's verify.py holds the same
+    property.** Two zones on one layer with different nets fill straight
+    through each other and DRC says nothing -- each zone is, after all,
+    correctly connected to its own net. What you get is MAGND and MDGND shorted
+    over whatever area they share, a board that measures as one ground, and a
+    hum whose cause is invisible in every file the project produces.
+
+    So it is geometry: read the zone outlines back out of the saved board and
+    assert that no MAGND rectangle intersects an MDGND one, on the same layer.
+    Read from the file rather than from placement.py, because what matters is
+    what was written -- the same reason verify.py reads KiCad's netlist rather
+    than design.py's.
+    """
+    tree = sexp.parse(board.read_text())
+    zones = []
+    for zone in sexp.find_all(tree, "zone"):
+        net = sexp.find(zone, "net")
+        layer = sexp.find(zone, "layer")
+        points = sexp.find(sexp.find(zone, "polygon"), "pts")
+        corners = [(float(xy[1]), float(xy[2]))
+                   for xy in sexp.find_all(points, "xy")]
+        xs = [x for x, _ in corners]
+        ys = [y for _, y in corners]
+        zones.append((str(net[1]), str(layer[1]),
+                      (min(xs), min(ys), max(xs), max(ys))))
+
+    problems = []
+    if not zones:
+        problems.append("the board carries no ground zones at all")
+    for index, (net, layer, box) in enumerate(zones):
+        for other, other_layer, box2 in zones[index + 1:]:
+            if layer != other_layer or net == other:
+                continue
+            if (box[0] < box2[2] and box2[0] < box[2]
+                    and box[1] < box2[3] and box2[1] < box[3]):
+                problems.append(
+                    f"{net} and {other} overlap on {layer}: {box} against "
+                    f"{box2} -- two zones on one layer fill through each "
+                    f"other and DRC will not say a word")
+    gap = design.CHANNELS and placement.GROUND_GAP
+    for net, layer, box in zones:
+        if net not in ("MAGND", "MDGND"):
+            problems.append(
+                f"a zone on {layer} belongs to {net}, which is not one of the "
+                f"two grounds -- a pour on a signal net is a plane nobody "
+                f"asked for")
+    return problems
+
+
 def check_reference_load(nets, values):
     """What KiCad found on VREF is a capacitive load the MAX6126 is qualified for.
 
@@ -605,32 +911,32 @@ def run_erc(schematic, destination):
 #
 # **This is an allow-list and it is worth being uncomfortable about, so here is
 # the argument.** "ERC clean" on a half-drawn board cannot mean zero violations,
-# because some of what ERC reports on a half-drawn board is true: three of these
-# say six op-amp sections are not placed, and six op-amp sections are in fact not
-# placed. The choice is between silencing those rules in the project file, where
-# nobody would ever see them again, and writing down what is expected so that the
-# *seventh* one fails the build. Pinning the count is what makes this stricter
-# than "ignore missing_unit" -- placing the rectifiers wrong, or leaving a
-# seventh section unplaced, moves the number and this stops.
+# because some of what ERC reports on a half-drawn board is true. The choice is
+# between silencing those rules in the project file, where nobody would ever see
+# them again, and writing down what is expected so that the *next* one fails the
+# build. Pinning the count is what makes this stricter than "ignore
+# missing_unit": one more unplaced section moves the number and this stops.
 #
 # What it does not do is tolerate errors. Any violation at error severity fails
 # regardless of type, because there is no error in this list and there should
 # never be one: the four that were here (two power-flag conflicts, the spare
 # cells' grounded outputs, two unconnected '541 outputs) were all real, and all
 # four were fixed rather than listed.
-ERC_ALLOWED = {
-    "missing_unit": (
-        3, "U2, U4 and U6 each have C and D unplaced. Those are the six "
-           "sections design.OPAMP_NEEDED counts for the six envelope "
-           "rectifiers, and the rectifier is in design.DEFERRED because its "
-           "time constant is not derivable from the spec. Drawing them with "
-           "no-connect flags would assert they are unused, which is the "
-           "opposite of true, so the warning stands and says so."),
-    "missing_input_pin": (
-        3, "the same six sections, reported once per package from the other "
-           "direction. Not an independent fact and counted separately because "
-           "ERC counts it separately."),
-}
+#
+# **It is empty, and emptying it is the check earning its keep.** It carried two
+# entries -- `missing_unit` and `missing_input_pin`, three of each -- both
+# describing the same six op-amp sections: U2, U4 and U6 C and D, reserved for
+# the envelope rectifier and not drawn. The rectifier is drawn now and those six
+# sections carry its summing stages, so the warnings are gone. Because the counts
+# were pinned rather than the classes silenced, this file *failed* on the next
+# run instead of passing quietly with a stale excuse, and the message it printed
+# was the instruction: "if that is because the block landed, delete the entry".
+#
+# Zero errors and zero warnings is a stronger claim than the six-warning version
+# and a more fragile one. The next deferred block to land will probably reopen
+# this table; what matters when it does is that the count goes back in with it.
+ERC_ALLOWED = {}
+
 
 
 def check_erc(violations):
@@ -744,10 +1050,16 @@ CHECKS = (
     ("5  shielded pairs, one end [practice]", check_triads, ("nets",)),
     ("   R_IN fixed, equal to R_OUT, unloaded", check_gain_chain,
      ("nets", "values")),
+    ("   envelope diodes point the right way", check_rectifier_polarity,
+     ("nets", "values")),
+    ("   de-energised is bypass", check_fail_safe, ("nets", "values")),
     ("   open pins are the declared ones", check_open_pins, ("open_pins",)),
     ("   ERC finds only declared residue", check_erc, ("violations",)),
     ("   VREF load inside the MAX6126's range", check_reference_load,
      ("nets", "values")),
+    ("   DRC clean, unrouted count declared", check_board, ("drc",)),
+    ("   the two pours do not overlap", check_ground_split_on_the_board,
+     ("board",)),
 )
 
 
@@ -757,7 +1069,9 @@ def main():
     values = read_components(NETLIST)
     context = {"nets": nets, "values": values,
                "open_pins": read_open_pins(NETLIST),
-               "violations": run_erc(SHEET, ERC)}
+               "violations": run_erc(SHEET, ERC),
+               "drc": read_drc(PCB, DRC),
+               "board": PCB}
 
     print(f"verify: {SHEET.name} -> {NETLIST.name}, against "
           f"hardware-spec-v0.md section 5")

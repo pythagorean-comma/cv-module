@@ -147,6 +147,74 @@ MODELS = (
         "doubtful."),
 
     Guess(
+        "A bowed onset is slower than a picked one, and never faster.",
+        "The target instrument is a modern arpeggione -- six strings, standard "
+        "guitar tuning, bowed as well as picked -- and no bowed envelope is "
+        "measured anywhere in this project. hexsim's only measured profile is "
+        "a picked electric, and its sustained_stems() models an ebow-like "
+        "source with a 0.6-1.5 s swell rather than a bow.",
+        "Nothing, and that is the point of recording it. envelope_filter() is "
+        "bounded above by the *picked* transient and below by ripple, so a bow "
+        "that rises more slowly only ever asks for more smoothing than tau "
+        "already gives. If a bowed attack were somehow faster than 20 ms the "
+        "bound would move, and nothing else in the block would.",
+        "The detector would read a bowed onset late by up to a few "
+        "milliseconds, which is inside the 8 ms the firmware averages over "
+        "anyway.",
+        "Record one bowed note off the Nexus at Phase 0.5 and run it through "
+        "hexsim --stems. It is the same recording session the picked stems "
+        "need."),
+
+    Guess(
+        "The musical attack and release belong in firmware, not in the RC.",
+        "envelope_filter() shows a symmetric 4.7 ms one-pole falls 46x faster "
+        "than the fastest musical decay, so there is no release the analogue "
+        "side has to be asked for. Bowed and picked want opposite shaping and "
+        "the instrument does both, which a fixed RC cannot serve and a "
+        "constant at the 2 kHz frame can.",
+        "Where a musical decision lives. The board is identical either way; "
+        "what changes is whether the decision costs a soldering iron.",
+        "If firmware shaping turns out not to be enough -- a case nobody has "
+        "described -- the fallback is a diode and a second resistor per "
+        "channel, which is the asymmetric detector spec section 4.4 implies. "
+        "It is two parts per channel, added later, on a board that already "
+        "has the sections.",
+        "Set it by ear against hexsim's renders, which is how corrections 7 "
+        "and 8 were found. It needs no hardware."),
+
+    Guess(
+        "The Schottky forward drop, in three places that need it small.",
+        "0.3 V is assumed for a BAT54-class part at the microamps this "
+        "circuit draws, and no datasheet was opened this session. It is not "
+        "one figure doing one job: it sets how much gate voltage the charge "
+        "pump can produce (3.3 - 2*Vf), and it *is* the clamped voltage on "
+        "the inverted reference.",
+        "pump_timing()'s whole margin, and clamp_gain()'s +7.4 dB against the "
+        "mixer's 7.84 dB of headroom -- which is 0.44 dB of room, so this is "
+        "the assumption in this repo with the least slack behind it.",
+        "At 0.4 V the clamp gives +9.8 dB and the summer clips on the fault "
+        "it was fitted to prevent; at 0.25 V it gives +6.1 dB and the pump "
+        "gains 0.14 V of gate. The direction that hurts is the one a hot "
+        "junction moves in.",
+        "Read the curve at 10 uA and 25 C for the specific part, before the "
+        "BOM is ordered. It is the one reading this pass left undone."),
+
+    Guess(
+        "A 5 V signal DPDT relay coil draws 25-40 mA.",
+        "An envelope for the class, not a part: the relay is in "
+        "design.UNSPECIFIED with its requirements and coil current is a "
+        "property of whichever one is fitted.",
+        "coil_budget(), and through it the deferred supply -- 75 to 120 mA "
+        "continuous on V5, against 78 mA for every amplifier and VCA on the "
+        "board.",
+        "The supply is sized wrong, which is a DC-DC that has not been chosen "
+        "yet rather than a board change. Nothing on the schematic moves: the "
+        "FET's requirement is stated as 200 mA, which covers the top of a "
+        "wide error.",
+        "Choose the relay. It is now the only part on this board whose "
+        "*current* matters to another block."),
+
+    Guess(
         "X7R is acceptable for the CV filter's 56 nF and 22 nF.",
         "Assumed, not computed. At 2 V on a 50 V part the bias derating is a "
         "few per cent and f0 goes as 1/sqrt(C1 C2), so the corner moves a "

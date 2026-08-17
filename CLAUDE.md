@@ -245,7 +245,7 @@ Two different mechanisms there, and they should not be conflated:
 | | how | in the mixer |
 |---|---|---|
 | netlist and schematic | **s-expressions written directly.** No API involved — `sexp.py` is a tokeniser, a parser and a pretty printer, about a hundred lines | `sexp.py`, `kisch.py`, `gen_sch.py` |
-| board | **the deprecated SWIG `pcbnew` bindings**, run under KiCad's own bundled interpreter | `gen_pcb.py`, invoked by `build.sh` |
+| board | **the deprecated SWIG `pcbnew` bindings**, run under KiCad's own bundled interpreter | `gen_pcb.py`, invoked by `build.sh` upstream; here `gen_pcb.py` relaunches itself |
 
 So:
 
@@ -302,6 +302,13 @@ So:
 - **Use the deprecated `pcbnew` bindings for board work**, as `gen_pcb.py`
   does. Deprecated is a schedule, not a defect; when removal lands, that is a
   problem for both repos at once and they should solve it together.
+  **This is done now**, and two things about it are worth carrying: the board
+  generator has to run under KiCad's own interpreter (`gen_pcb.py` relaunches
+  itself, rather than adding a `build.sh`), and `SaveBoard()` rewrites the
+  project file with KiCad's defaults, so `gen_project.py` must run *after* it
+  or every design rule is silently gone. The placement itself lives in
+  `placement.py`, which imports no KiCad at all — a placement that can only be
+  read inside the thing that needs `pcbnew` is a placement nobody can check.
 - **No third-party packages.** The mixer's README makes a point of it — *"there
   is no virtual environment and no `requirements.txt`, because there is nothing
   to install"* — and it is what lets the verification loop run anywhere KiCad
@@ -369,9 +376,13 @@ cv-module/
   constraints.py         does each constraint have a mechanism? one did not
   delta.py               this module's effect, via the mixer's own functions
   floorplan.py           zones, ground domains, boundary crossings
+  placement.py           the floorplan as coordinates. No KiCad import
+  route.py               a maze router: pads in, polylines out. No KiCad
   verify.py              the constraints, checked against KiCad's own netlist
   test_verify.py         plants faults to prove verify.py's checks can fail
 
+  gen_pcb.py             -> out/cv-module.kicad_pcb, through pcbnew. Relaunches
+                         itself under KiCad's Python, then re-runs gen_project
   gen_netlist.py         -> out/cv-module.net
   gen_sch.py             -> out/cv-module.kicad_sch
   gen_project.py         -> out/cv-module.kicad_pro, the lib tables, out/cv.kicad_sym
@@ -380,9 +391,10 @@ cv-module/
   constraints.py         -> docs/constraints.md
   floorplan.py           -> docs/floorplan.md
 
-  out/                   for machines: the sheet, the project, the netlist, the
-                         BOM as CSV, and from-kicad.net / from-kicad-erc.json,
-                         which verify.py regenerates on every run
+  out/                   for machines: the sheet, the board, the project, the
+                         netlist, the BOM as CSV, and from-kicad.net /
+                         from-kicad-erc.json / from-kicad-drc.json, which
+                         verify.py regenerates on every run
 ```
 
 **The split between `out/` and `docs/` is by audience, not by file type.** `out/`
@@ -399,10 +411,17 @@ Run order, and each step reads the one before:
 
 ```bash
 python3 design.py && python3 gen_netlist.py && python3 gen_sch.py \
-  && python3 gen_project.py && python3 verify.py && python3 test_verify.py \
+  && python3 gen_project.py && python3 placement.py && python3 gen_pcb.py \
+  && python3 verify.py && python3 test_verify.py \
   && python3 constraints.py && python3 delta.py && python3 floorplan.py \
   && python3 gen_bom.py && python3 gen_assumptions.py
 ```
+
+**`gen_pcb.py` comes before `verify.py` for the same reason the schematic
+generators do**: verify.py runs `kicad-cli pcb drc` over the board and reads the
+report back, so the board has to exist. It also re-runs `gen_project.py` itself,
+because `SaveBoard()` rewrites the project with KiCad's defaults and takes every
+design rule with it — the mixer's `build.sh` exists for exactly that.
 
 **The two schematic generators come before `verify.py` and that ordering is the
 loop.** `verify.py` runs `kicad-cli sch export netlist` over the sheet and

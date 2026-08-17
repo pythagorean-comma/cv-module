@@ -27,8 +27,13 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | C131–C631 | 150n/50V X7R | `GRM216R71H154KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H154KA01D) |
 | C141–C641 | 56n/50V X7R | `GRM216R71H563KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H563KA01D) |
 | C142–C642 | 22n/50V X7R | `GRM216R71H223KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H223KA01D) |
-| C701–C803 | 100n/50V X7R | `GRM216R71H104KA01D` | 21 | 25 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H104KA01D) |
+| C151–C651 | 470n/50V X7R | `GRM21BR71H474KA88L` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71H474KA88L) |
+| C701–C803 | 100n/50V X7R | `GRM216R71H104KA01D` | 25 | 29 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H104KA01D) |
 | C801 | 100n/50V C0G | `GRM2195C1H104JA01D` | 1 | 5 | GBP 0.15–0.45 | band | [search](https://www.mouser.co.uk/c/?q=GRM2195C1H104JA01D) |
+| C805 | 2n2/50V C0G | `GRM2165C1H222JA01D` | 1 | 5 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H222JA01D) |
+| C806 | 1u/16V X7R | `GRM21BR71C105KA01L` | 1 | 5 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71C105KA01L) |
+| D151–D652 | 1N4148W | `1N4148WS-7-F` | 12 | 13 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=1N4148WS-7-F) |
+| D801–D833 | BAT54 | `BAT54-7-F` | 6 | 7 | GBP 0.05–0.15 | band | [search](https://www.mouser.co.uk/c/?q=BAT54-7-F) |
 | J1 | CH1 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J2 | CH2 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J3 | CH3 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
@@ -38,23 +43,28 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | J8 | PWR | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
 | J9 | CTRL | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
 | J10 | CTRL2 | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
-| J11 | CTRL3 | `61300311121` | 1 | 5 | GBP 0.30–0.70 | band | [search](https://www.mouser.co.uk/c/?q=61300311121) |
+| J11 | CTRL3 | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
+| K801–K803 | NOT CHOSEN | `**not chosen**` | 3 | 4 | — | none | — |
+| Q801 | NOT CHOSEN | `**not chosen**` | 1 | 2 | — | none | — |
 | R101–R802 | 10k 0.1% | `ERA6AEB103V` | 14 | 18 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB103V) |
 | R111–R621 | 12k1 0.1% | `ERA6AEB1212V` | 12 | 16 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB1212V) |
 | R115–R615 | 220R 1% | `RC0805FR-07220RL` | 6 | 10 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-07220RL) |
 | R131–R632 | 1M 1% | `RC0805FR-071ML` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-071ML) |
 | R141–R644 | 22k 1% | `RC0805FR-0722KL` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0722KL) |
 | R142–R643 | 17k8 1% | `RC0805FR-0717K8L` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0717K8L) |
-| R811–R816 | 100k 1% | `RC0805FR-07100KL` | 6 | 10 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-07100KL) |
+| R151–R655 | 10k 1% | `RC0805FR-0710KL` | 24 | 28 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0710KL) |
+| R154–R654 | 4k99 1% | `RC0805FR-074K99L` | 6 | 10 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-074K99L) |
+| R803–R816 | 100k 1% | `RC0805FR-07100KL` | 7 | 11 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-07100KL) |
 | R901, R902 | 0R | `RC0805JR-070RL` | 2 | 6 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805JR-070RL) |
 | U1–U8 | OPA1644 | `OPA1644AIDR` | 8 | 9 | USD 2.40–4.98 | snippet | [search](https://www.mouser.co.uk/c/?q=OPA1644AIDR) |
 | U9, U10 | SSI2164 | `SSI2164S-RT` | 2 | 3 | GBP 3.80 | read | [search](https://www.mouser.co.uk/c/?q=SSI2164S-RT) |
 | U11 | 74AHC541 | `SN74AHC541DWR` | 1 | 2 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=SN74AHC541DWR) |
 | U12 | MAX6126A25 | `MAX6126AASA25+` | 1 | 2 | USD 8.76–9.96 | snippet | [search](https://www.mouser.co.uk/c/?q=MAX6126AASA25+) |
+| U13, U14 | TL074 | `TL074CDR` | 2 | 3 | GBP 0.25–0.70 | band | [search](https://www.mouser.co.uk/c/?q=TL074CDR) |
 
 ## Totals, per currency, fitted quantities
 
-- **GBP 15.62 – 30.45**
+- **GBP 17.27 – 35.68**
 - **USD 27.96 – 49.80**
 
 Kept per currency rather than converted: two lines were priced in dollars because that is the currency the figures were found in, and folding them into a sterling total at a rate nobody looked up would turn two honest figures into one invented one.
@@ -73,9 +83,19 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **C142–C642** — 0805 X7R
 
+**C151–C651** — 0805 X7R
+
 **C701–C803** — 0805 X7R
 
 **C801** — 0805 C0G at 100 nF is a large part for the class and priced accordingly. It is the reference's NR capacitor, which is worth C0G.
+
+**C805** — 0805 C0G
+
+**C806** — 0805 X7R
+
+**D151–D652** — 1N4148WS-7-F or any 1N4148 in SOD-123. Inside an op-amp's feedback loop, so the forward drop does not reach the answer.
+
+**D801–D833** — BAT54-7-F or any small Schottky in SOD-123. Six of them do three different jobs -- pump clamp, pump rectifier, coil flyback and the inverted reference's clamp -- and the low forward drop matters in two of the three: the pump has only 3.3 V to work with, and the clamp's +7.4 dB against the summer's 7.84 dB of margin is a 0.3 V figure. A silicon 1N4148 would fail both.
 
 **J1** — Wurth WR-PHD 1x02 vertical, gold-plated: CONN_MPN[2]. Two ways because the loom is a shielded pair -- the shield lands at the mixer end only, so it has no pin here. See design.FRONT_R.
 
@@ -95,7 +115,7 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **J10** — Wurth WR-PHD 1x05 vertical, gold-plated: CONN_MPN[5].
 
-**J11** — Wurth WR-PHD 1x03 vertical, gold-plated: the mixer's own CONN_MPN[3], so the same part is at both ends of the loom. Gold because these are signal contacts in a box that will be opened.
+**J11** — Wurth WR-PHD 1x05 vertical, gold-plated: CONN_MPN[5].
 
 **R101–R802** — Panasonic ERA-6A thin film, 0.1 %, 25 ppm. Thin film is the specification and not the tolerance -- see FRONT_R.
 
@@ -109,7 +129,11 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **R142–R643** — 0805 thick film, E96
 
-**R811–R816** — 0805 thick film
+**R151–R655** — 0805 thick film. The envelope rectifier's ratios are 1 %, not the 0.1 % the audio path uses: a 2 % ratio error is 0.17 dB on a *reported level*, which is inside what envelope_balance() already allows for the E96 half-value.
+
+**R154–R654** — 0805 thick film, E96
+
+**R803–R816** — 0805 thick film
 
 **R901, R902** — 0805 jumper
 
@@ -121,12 +145,12 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **U12** — The exact A-grade 2.5 V part (MAX6126AASA25+) was not priced directly; this brackets it with the B grade at the same voltage and the A grade at a different one. ADR4525C/D is the second source spec section 4.2 names and is not priced here at all.
 
+**U13, U14** — TL074CDR, SOIC-14. About a tenth of the OPA1644 and stocked everywhere; the SSI2164's own datasheet uses its dual in the same position.
+
 ## Not on this BOM
 
 The deferred blocks, each with its reason. None of them is costed here, so the totals above are a floor for the module and not its price.
 
-- **bypass relay and fail-safe** — the AC-coupled charge pump, section 4.5.
 - **controller** — RP2040 and its QSPI flash, crystal, USB and MIDI: shared block, and the scope statement puts shared blocks after one channel is complete.
-- **envelope ADC** — ADS131M08 or MCP3564, undecided in spec section 4.4.
-- **envelope rectifier** — the smoothing time constant is not derivable -- spec section 4.4 gives a sampling rate and no attack/release target. The tap net BUF{n} exists and is driven; the rectifier hangs off it.
+- **envelope ADC** — ADS131M08 or MCP3564, undecided in spec section 4.4 -- but its sample rate is decided now, at 2 kHz rather than the 1-2 kHz the spec offers, and the six ENV{n} nets exist and are driven. See envelope_sample_rate(); the ADC hangs off them, in the analogue section, so that only SPI crosses the domain boundary.
 - **supply** — isolated DC-DC at >=300 kHz per section 1.1; the topology is decided and the part is not.

@@ -65,6 +65,7 @@ engine core), `hexsim/demos/` and `hexsim/demos-arp/` (rendered audio).
 
 | | Current position |
 |---|---|
+| **The instrument** | A modern interpretation of the **arpeggione**: six strings, standard guitar tuning, **bowed as well as picked**. Recorded here because it was not written down anywhere for the first several passes and it decides things — it is what settles the envelope detector's topology, and it is new evidence in the element bench-off. See `design.envelope_filter()` and [`element-revisit.md`](element-revisit.md) |
 | **Lead feature** | **Sequenced per-string gating.** Reads as a sequence of *timbres at constant level*, not a chopped rhythm — the arpeggio pattern opens exactly one string per step, so summed gain is constant (measured 1.0500 min and max) |
 | Drone bed | Depth is really a "how much chord stays present" knob. Useful range **15–35 dB**; below ~14 dB the pattern vanishes into the chord |
 | Polymeter | Six rows on their own loop lengths {5,7,4,3,8,6} → 840 steps, 105 s at 8 steps/s vs 2 s for a fixed 16-step row. One modulo per string |
@@ -94,7 +95,8 @@ For 40 dB of musical gate depth: per-channel depth **≥47 dB**, per-pair isolat
 | **CV filter** | **2-pole, 200–400 Hz, per channel. Mandatory.** Worth 15–20 dB of AM noise and doubles as the de-click | 2 kHz single-pole, treated as cosmetic |
 | **Resolution** | **Non-issue.** 10-bit = 0.074 dB/LSB on a dB-linear port | 12 vs 16 bit analysed at length |
 | **Dominant noise mechanism** | **Multiplicative** — control noise × 3.48/V, breathing with the signal | Additive, from the VCA |
-| **Envelope ADC** | **External SPI ADC** in the analogue section (ADS131M08 / MCP3564) | On-chip; drove the wrong "must be RP2350B" conclusion |
+| **Envelope ADC** | **External SPI ADC** in the analogue section (ADS131M08 / MCP3564), **at 2 kHz** — derived, not chosen, and 1 kHz fails | On-chip; drove the wrong "must be RP2350B" conclusion |
+| **Envelope detector** | Six precision **full-wave** rectifiers into a symmetric 4.7 ms one-pole, drawn. The musical attack/release is a firmware constant at the frame rate, because bowed and picked want opposite shaping | Not decided; recorded as needing a musical target it turned out not to need |
 | **Reference** | 35–41 nV/√Hz (MAX6126 + NR cap, or ADR4525C/D), shared by DAC and ADC. Reference noise is **correlated across strings**, so it is the most perceptible kind | Not considered |
 | **Feature 12, compression** | **Analogue sidechain.** dB-out RMS detector (6.1 mV/dB) into the dB-in port ⇒ ratio is one resistor ratio | Software, in the sensing layer |
 | **Fail-safe** | **AC-coupled charge pump** driving the bypass relay (any stuck state drops it) + DAC CLR-to-full-scale = hardware mute in ~1 µs | Watchdog + latching relay |
@@ -137,7 +139,14 @@ None is the controller, and none is DAC resolution:
 4. **Whether the 74AHC-powered-from-a-reference topology is sound.** No vendor app
    note exists; the reasoning is sound but unpublished.
 5. **Whether a 250 Hz CV filter is fast enough** for the gate feel you want.
-6. Whether 1–2 kHz envelope sampling is enough for the swell to feel responsive.
+6. ~~Whether 1–2 kHz envelope sampling is enough for the swell to feel
+   responsive.~~ **Half-answered, and the half that moved was not the musical
+   one.** It is not a range: at 1 kHz the top string's own rectified
+   fundamental (659 Hz) is above Nyquist and folds back at −29 dB, −33 dB of it
+   landing near DC where no averaging removes it. **2 kHz**, and then the
+   unremovable residue is −53 dB. `design.envelope_sample_rate()`. Whether it
+   *feels* responsive is still open and is now a firmware constant rather than
+   a hardware one.
 
 ---
 

@@ -101,6 +101,17 @@ DOMAINS = (
     (r"^J9$|^J10$|^J11$", DIGITAL, "PWM and OE from the controller"),
     (r"^R[1-6]0[12]$", ANALOGUE, "front-end inverting stage"),
     (r"^R[1-6]1[15]$", ANALOGUE, "R_IN and the VCA input RC"),
+    (r"^R[1-6]5[1-5]$", ANALOGUE, "envelope rectifier, both stages"),
+    (r"^D[1-6]5[12]$", ANALOGUE, "envelope rectifier diodes -- inside A1's "
+                                 "loop"),
+    (r"^C[1-6]51$", ANALOGUE, "envelope one-pole, 4.7 ms"),
+    (r"^K80[1-3]$", "STRADDLE", "bypass relays: contacts audio, coil digital"),
+    (r"^Q801$", DIGITAL, "the fail-safe's sink"),
+    (r"^D80[12]$", DIGITAL, "the fail-safe's charge pump"),
+    (r"^D803$", ANALOGUE, "the inverted reference's clamp"),
+    (r"^D8[123]3$", DIGITAL, "coil flyback diodes"),
+    (r"^C80[56]$", DIGITAL, "the fail-safe's pump and hold capacitors"),
+    (r"^R803$", DIGITAL, "the fail-safe's bleed -- its time constant"),
     (r"^R[1-6]2[12]$", ANALOGUE, "I-V"),
     (r"^R[1-6]3[12]$", ANALOGUE, "DC servo"),
     (r"^R[1-6]4[1-4]$", ANALOGUE, "CV filter -- referenced to the VCA's GND"),
@@ -109,6 +120,9 @@ DOMAINS = (
     (r"^C[1-6]31$", ANALOGUE, "servo integrator"),
     (r"^C[1-6]4[12]$", ANALOGUE, "CV filter poles"),
     (r"^U[1-8]$", ANALOGUE, "quad op-amps"),
+    (r"^U1[34]$", ANALOGUE, "the envelope half-wave stages -- their outputs "
+                            "slew across two diode drops at every zero "
+                            "crossing, which is why they are not on U1-U8"),
     (r"^U9$|^U10$", ANALOGUE, "the VCAs -- and the MAGND star point is pin 8"),
     (r"^U11$", "STRADDLE", "the '541: Vcc = VREF, GND = MAGND, inputs from "
                            "the digital side"),
@@ -172,11 +186,19 @@ the '541 does, coil return on MDGND and contacts carrying audio. Spec section
 until it burns -- "the highest-probability field failure in the design", and
 bounds it with a one-shot.
 
-With the pad struck, the only part that straddles is the '541, whose crossing
-is a logic threshold rather than 40 mA of inductive current, and the
-highest-probability field failure in the design is now something else's
-problem. That is the largest single thing pad_benefit() bought and it is not a
-noise figure.
+With the pad struck, the only part that straddled was the '541 -- and **the
+bypass relays have put three back**, which is worth being precise about because
+they are not the pad's relays returning under another name.
+
+The pad's coils were pulsed by a shift register that could hold one energised
+until it burned, which is why section 4.5 wanted a one-shot around them. The
+bypass coils are *continuously* energised by a MOSFET whose gate is a charge
+pump, so there is no stuck-on failure to design against: the failure mode is
+the coil dropping out, which is the safe state. What they cost instead is
+current -- 75 to 120 mA on V5, held for as long as the module works, against
+about 78 mA for every amplifier and VCA on the board. See design.coil_budget();
+it is a requirement on the deferred supply and it belongs in this file because
+the return path for it crosses at R902 like everything else digital.
 """
 
 
@@ -226,6 +248,32 @@ ZONES = (
      "under the pour rather than back across A1.",
      "East of A3, with the SIN{n} return routed south of A1 rather than "
      "through it."),
+
+    ("A5", "envelope detectors", ANALOGUE,
+     "Twelve amplifier sections, twelve diodes, thirty resistors and six "
+     "capacitors. **Split across two part types on purpose**: the half-wave "
+     "stages are on U13-U14, whose outputs slew across two diode drops at "
+     "every zero crossing, and the summing stages are on the six sections "
+     "U2/U4/U6 C and D -- which sit in A1, A4 and A4 respectively, because a "
+     "quad package is one placement and those packages' other sections are "
+     "front ends, I-V and servos. See design.ENV_OPAMP.",
+     "East of A4, with U13-U14 as far from A1 as the board allows. The "
+     "consequence of the split is a long run from HW{n} back to whichever "
+     "package holds that channel's summing stage, and it is tolerable for a "
+     "computable reason: ENVN{n} is a virtual earth whose feedback capacitor "
+     "is 470 nF, so a few picofarads of stray on it is 1e-5 of the pole. The "
+     "same run on the CV filter's own summing node would not be."),
+
+    ("F", "the fail-safe", "STRADDLE",
+     "Three bypass relays, the charge pump, the sink and the flyback diodes, "
+     "plus D803 on the inverted reference. **The relays straddle** -- coils "
+     "on MDGND, contacts carrying six channels of audio -- and they are the "
+     "only parts on this board that switch anything in the audio path.",
+     "Between A0 and D2: the contacts have to reach the loom, and the coils "
+     "have to reach the digital domain, so the block sits on the boundary "
+     "with its contact side facing west. D803 is the exception and belongs "
+     "in R, at the reference inverter's own output pin, because what it "
+     "clamps is that amplifier and a long run would clamp the trace instead."),
 
     ("C1", "CV filters", ANALOGUE,
      "U7-U8 and the six MFB stages. Referenced to the VCA ground pins, which "
@@ -398,7 +446,7 @@ def check_crossings():
 # Courtyard area per footprint, mm^2, from the footprint names this design
 # actually uses.
 COURTYARD = {
-    "R_0805": 3.0, "C_0805": 3.0, "C_1210": 10.0,
+    "R_0805": 3.0, "C_0805": 3.0, "C_1210": 10.0, "D_SOD-123": 4.0,
     "SOIC-14": 58.0, "SOIC-16": 66.0, "SOIC-20W": 145.0,
     "PinHeader_1x03": 21.0, "PinHeader_1x05": 34.0,
     "TestPoint": 6.0,
@@ -418,6 +466,19 @@ PAD_RESISTORS_KEPT = 6
 # mixed-signal board with two ground domains; it was written down while there
 # was also a relay field on it, and it is left alone rather than trimmed
 # towards the answer now that there is not. It is a judgement either way.
+#
+# **And it is now measurable, which is better than arguable: placement.py's
+# real board is 18242 mm2 against this estimate's 4135.** A factor of 4.4, and
+# the estimate is not what is wrong -- 2.5 is a fair packing factor for a dense
+# hand layout, and placement.py is not one. It is a *systematic* placement: one
+# part per grid slot on a 4 mm column pitch and a 7.62 mm row, which trades area
+# for being derivable and checkable. A designer laying this out by eye would
+# beat it and would not be able to prove anything about the result.
+#
+# Both numbers are kept, because they answer different questions. area() says
+# how much copper the parts need. placement.area() says how big the board this
+# repo can *generate* is. The gap between them is the price of generating it,
+# and it is worth knowing before an enclosure is made around either.
 PACKING = 2.5
 
 
@@ -501,20 +562,25 @@ BLOCKED = """
 | beside the mixer in its 1590J | {beside_area:.0f} mm² | {needed:.0f} mm² | **{beside_slack:.0f} mm² spare** |
 | as a mezzanine on the mixer's own outline | {mixer_area:.0f} mm² | {needed:.0f} mm² | **{mezzanine_slack:.0f} mm² spare** |
 
-Both rows read the other way one pass ago — 7225 mm² needed against 6189 for the
-mixer's whole 122.8 × 50.4 outline, so the module was about a quarter *larger*
-than the board it hangs off, and the mezzanine placement was recorded here as
-arithmetically dead rather than merely a height question.
+Both rows read the other way two passes ago — 7225 mm² needed against 6189 for
+the mixer's whole 122.8 × 50.4 outline, so the module was about a quarter
+*larger* than the board it hangs off, and the mezzanine placement was recorded
+here as arithmetically dead rather than merely a height question.
 
 **Striking the coarse pad is what turned it round**, and it was not the reason
 for striking it: `design.pad_benefit()` argues from the cell's noise, and Tim's
 decision that the enclosure is bespoke had already taken area out of the verdict
 before that. The area is a consequence, and it is a large one — the pad was
-about 55 % of the placed courtyard.
+about 55 % of the placed courtyard of the board it was on.
 
-So the mezzanine is back on the table on area alone: directly over the `RV{n}01`
-column, six near-zero-length pairs, a trivial bond to TP6. It has never been the
-easy option for another reason, and that reason is unchanged and mechanical.
+**Drawing the envelope rectifier has since spent a fifth of that back**, which
+is the honest way to read the two rows: 48 parts for the sensing layer, against
+36 removed for the pad. The mezzanine survives it and the space beside the mixer
+in its 1590J does not, which is the first time those two rows have disagreed.
+
+The mezzanine is directly over the `RV{n}01` column, six near-zero-length pairs,
+a trivial bond to TP6. It has never been the easy option for another reason, and
+that reason is unchanged and mechanical.
 Recorded in FINDINGS.md: the mixer's published `stack.above` is 13.00 mm and its
 mechanical contract has no field for what plugs into a connector, so a vertical
 header with a crimp housing exceeds the envelope the mixer's own enclosure was
@@ -587,8 +653,9 @@ def _report():
         f"about {math.sqrt(a['with_packing']):.0f} mm square — before any of "
         f"the deferred blocks.")
     out()
-    out(f"**It was {pad['with_packing_was']:.0f} mm² one pass ago.** The coarse "
-        f"pad occupied {pad['removed']:.0f} mm² of placed courtyard — "
+    out(f"**With the coarse pad still fitted this board would be "
+        f"{pad['with_packing_was']:.0f} mm².** It occupied "
+        f"{pad['removed']:.0f} mm² of placed courtyard — "
         f"{pad['relays']:.0f} of relay envelope and {pad['resistors']:.0f} of "
         f"resistors that are not coming back — which was "
         f"**{pad['share_of_was'] * 100:.0f}%** of the board, the relays alone "
@@ -627,9 +694,12 @@ def main():
         f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: str(kv[0]))))
     pad = pad_area()
     print(f"  minimum area {a['with_packing']:.0f} mm2 "
-          f"({math.sqrt(a['with_packing']):.0f} mm square), was "
-          f"{pad['with_packing_was']:.0f} with the pad")
+          f"({math.sqrt(a['with_packing']):.0f} mm square), "
+          f"{pad['with_packing_was']:.0f} if the pad were still fitted")
     e = enclosure_check()
+    import placement
+    print(f"  placement.py's real outline: {placement.area():.0f} mm2, "
+          f"{placement.area() / a['with_packing']:.1f}x this estimate")
     print(f"  fits on the mixer's own outline: "
           f"{'yes' if e['fits_mezzanine'] else 'no'}, beside it in the 1590J: "
           f"{'yes' if e['fits_beside'] else 'no'}")

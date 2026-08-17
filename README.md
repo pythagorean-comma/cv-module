@@ -24,18 +24,22 @@ guessed is in [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
 |---|---|
 | one channel derived | ✅ every value, arithmetic inline |
 | the coarse pad | ✅ **struck** — 0.000 dB of system noise for 36 parts |
-| netlist | ✅ 158 parts, 102 nets, all pins resolved |
+| netlist | ✅ 225 parts, 144 nets, all pins resolved |
 | schematic | ✅ **0 merges, 0 breaks, 0 stranded pins** |
 | the verification loop | ✅ `verify.py` reads **KiCad's** netlist, compared by name |
-| ERC | ✅ 0 errors; 6 declared warnings, held to their exact count |
-| section 5 constraints | ✅ checked mechanically, 34 planted faults caught |
+| ERC | ✅ **0 errors and 0 warnings** — `ERC_ALLOWED` is empty |
+| the envelope rectifier | ✅ derived, drawn and checked — τ from the transient, not from a target |
+| the fail-safe | ✅ drawn: de-energised **is** bypass, and the pump's own rise time is the power-up interlock |
+| section 5 constraints | ✅ checked mechanically, 50 planted faults caught |
 | deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
-| board | ❌ not started |
+| board | ✅ placed, poured and **86 % routed**, 0 DRC violations. ❌ 67 connections left, named |
 
-Five shared blocks are deferred with reasons in `design.DEFERRED`: controller,
-envelope ADC, envelope rectifier, fail-safe and supply. There were six; the
-relay drive is not deferred, it is deleted, along with the pad it drove.
+Three shared blocks are deferred with reasons in `design.DEFERRED`: controller,
+envelope ADC and supply. There were six. The relay drive is not deferred but
+deleted, along with the pad it drove; the envelope rectifier and the fail-safe
+are drawn. Two parts are `UNSPECIFIED` — the bypass relay and its MOSFET — each
+declared by the property that filters it rather than by a guess.
 
 ## Run it
 
@@ -46,10 +50,18 @@ once for ERC, and that is the point rather than a dependency to regret.
 
 ```bash
 python3 design.py && python3 gen_netlist.py && python3 gen_sch.py \
-  && python3 gen_project.py && python3 verify.py && python3 test_verify.py \
+  && python3 gen_project.py && python3 placement.py && python3 gen_pcb.py \
+  && python3 verify.py && python3 test_verify.py \
   && python3 constraints.py && python3 delta.py && python3 floorplan.py \
   && python3 gen_bom.py && python3 gen_assumptions.py
 ```
+
+`gen_pcb.py` is run with the ordinary interpreter and **re-runs itself under
+KiCad's bundled one**, because `pcbnew` is a SWIG extension that exists nowhere
+else. It then re-runs `gen_project.py`, because `SaveBoard()` rewrites the
+project file with KiCad's defaults and takes every design rule with it — the
+mixer's `build.sh` exists for that reason and says several hours were spent
+chasing violations that were only that.
 
 `gen_sch.py` and `gen_project.py` moved ahead of `verify.py` in that list, which
 is the shape of the change this pass made: `verify.py` now reads the netlist
@@ -107,10 +119,12 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | `constraints.py` | does each constraint have a mechanism? One did not |
 | `delta.py` | this module's effect, via the mixer's own functions |
 | `gen_sch.py` / `gen_project.py` | the sheet, and the project KiCad needs to read it |
+| `placement.py` / `route.py` | the floorplan as coordinates, and a maze router. Neither imports KiCad |
+| `gen_pcb.py` | the board, through the deprecated `pcbnew` bindings |
 | `verify.py` / `test_verify.py` | the constraints against KiCad's own netlist, and proof the checks can fail |
 | [`FINDINGS.md`](docs/FINDINGS.md) | things wrong in the mixer repo — noted, never fixed |
 | [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) | everything guessed, with what it costs if wrong |
-| `out/` | for machines: schematic, project, netlist, BOM as CSV. All generated |
+| `out/` | for machines: schematic, board, project, netlist, BOM as CSV. All generated |
 | `docs/` | for people: [floorplan](docs/floorplan.md), [constraint audit](docs/constraints.md), [shopping list](docs/SHOPPING.md). All generated |
 
 ## The results worth knowing
@@ -144,6 +158,112 @@ is false, and an assumption written that way is one nobody will ever compute.
 This repository instruments checks, netlists and drawings; nothing looks at the
 reasoning inside a declaration.
 
+**The envelope rectifier needed no musical target, and finding that out is the
+result.** It sat in `DEFERRED` for two passes with the reason *"the smoothing
+time constant is not derivable — spec §4.4 gives a sampling rate and no
+attack/release target"*. That is true of an **asymmetric** detector, which is
+what "attack and release" describes, and false of a symmetric one:
+`design.envelope_filter()` shows a 4.7 ms one-pole falls at 1.85 dB/ms against
+25 ms/dB for the fastest musical decay — **46× faster than the music, so there
+is no release bound at all**. What is left is bounded on one side only, by the
+picked transient (0.12 dB under the peak at 20 ms, from `hexsim`'s own
+calibration), and on the other by low-E ripple.
+
+The instrument decides the rest. It is a bowed-and-picked arpeggione, and those
+two techniques want opposite shaping — which is the argument for putting the
+musical constant in firmware at the 2 kHz frame, where it can differ per
+technique, rather than in copper where it cannot. Full-wave on the bow's
+account: half-wave leaves **4.67 dB of ripple on a sustained low E**, at the
+string's own pitch, which is exactly the flutter a bowed swell would expose.
+
+Two things fell out that nobody was asking. **The reserved op-amp count had
+quietly chosen half-wave** — six sections, one per channel, where full-wave
+needs two; the second stage now fills those six and the half-wave stages go on
+two TL074, away from the audio front ends because their outputs slew across two
+diode drops at every zero crossing. And **§4.4's "1–2 kHz sampling" is not a
+range**: at 1 kHz the top string's rectified fundamental (659 Hz) is above
+Nyquist and folds to −29 dB, −33 dB of it near DC where no averaging removes it.
+2 kHz, and the unremovable residue is −53 dB. `design.envelope_sample_rate()`.
+
+**The board is placed, poured and DRC-clean, and the floorplan is now held to
+it.** `placement.py` is floorplan.py's zones turned into coordinates — twelve
+rows in two bands, quad packages spanning the channels their sections serve,
+computed from `design.SECTIONS` rather than typed — and `check_zones()` asserts
+that a column's parts are in the ground domain its zone declares, so the two
+files cannot drift apart. `gen_pcb.py` places all 222 footprints through KiCad's
+own `pcbnew`, reserves a courtyard for each of the three unchosen relays, draws
+the derived outline and pours the two grounds either side of the split.
+
+**DRC went 262 → 0.** The first placement put quad packages across rows they do
+not serve, and the fault underneath was a loop counter: `design.SECTIONS` keys
+spare sections `(role, index)`, so U14's two terminated followers read as
+channels 1 and 2 and dragged the package into the wrong band. The last six were
+one text field — the VCAs' designators, which KiCad puts *west* of a
+90°-rotated body, where the stability capacitor is.
+
+**The board is 4.4× the floorplan's own area estimate**, and the estimate is not
+what is wrong: 18242 mm² against 4135. A packing factor of 2.5 is fair for a
+dense hand layout and `placement.py` is not one — it is one part per grid slot,
+which trades area for being derivable and checkable. Both numbers are kept
+because they answer different questions, and the gap between them is the price
+of generating a board rather than drawing one.
+
+**476 connections became 67, and the violation count never left zero.** That
+last clause is the property worth protecting: a router that trades shorts for
+finished connections is worse than one that gives up and says so. `route.py` is
+Lee's algorithm with A* ordering — a uniform grid, two signal layers, a via
+wherever the path changes layer — and it either finds a path or reports the net
+by name. `gen_pcb.py` prints all 23 of them on every run.
+
+Three rules make the result DRC-clean by construction rather than by luck, and
+each of them is a violation that happened first:
+
+| | |
+|---|---|
+| **a pad is on the layers it is on** | blocking every pad on F.Cu alone sent back-side tracks through the connectors' through-holes, started routes on B.Cu with no via under them, and let two nets own one back-side cell — 191 dangling tracks and 199 shorts, from one line |
+| **a pad's box comes from `GetBoundingBox()`** | `GetSize()` reports the pad in the *footprint's* frame, so a SOIC turned 90° hands back 1.95 × 0.6 for a pad that is 0.6 × 1.95 on the board. The router blocked the wrong rectangle and drew tracks exactly along the rows of pad edges it thought were 0.675 mm away |
+| **a via needs its four orthogonal neighbours, not its eight** | at one pitch, via and track copper are 0.075 mm apart — a third of the clearance. At a diagonal they are 0.28 mm apart, which clears. Requiring all eight was the safe version and it cost 27 nets: no via could ever be placed at a package pin, so every route had to escape through the same corridor |
+
+**The two grounds are not routed and must not be.** They are poured on both
+inner layers, so what a ground pad needs is a hole to the plane under it — 104
+pads, 104 vias, no copper on the signal layers. The stitching has three rules of
+its own, and the third is the ground split made physical: a via has to land in
+*its own* pour, so a part that straddles the line — the '541 and the three
+bypass relays, by design — gets a longer stub back across it. `R902` is rotated
+270° rather than 90° for the same reason, and that was the last DRC violation on
+the board: at 90° the star's MAGND pin sits over the digital plane and its MDGND
+pin over the analogue one, so both stitches crossed the line and each other.
+
+**What is left is where a grid router runs out of room, and it is not
+scattered**: the summing junctions and the two rails. A SOIC pin has a
+neighbour 1.27 mm away on each side, so on a 0.5 mm grid there is no cell
+between them. Finishing them is a finer grid with thinner track — a
+fab-capability decision — or rip-up and retry, which this router does not do and
+says so.
+
+**The fail-safe cannot see the one failure that is loud, and one diode can.**
+`design.fail_states()` claimed the bypass relay's charge pump covered the
+inverted reference failing to the positive rail. It does not: the pump collapses
+when the *MCU* stops, and that failure leaves the MCU healthy, still emitting its
+10 kHz, holding the relay in. The one state the fail-safe cannot see is the one
+state that is +20 dB. D803 — a Schottky from `VREFN` to `MAGND`, reverse-biased
+at −2.5 V and doing nothing in normal operation — turns it into **+7.4 dB, inside
+the mixer's own 7.84 dB of headroom**. `design.clamp_gain()`.
+
+**And "bypass" here is six changeover contacts, not one relay.** This module
+replaces six level pots, so taking it out of circuit means six independent links
+back. Three DPDT, non-latching — which is the *opposite* of the coarse pad's
+requirement and for the reason that is the whole block: de-energised has to *be*
+bypass, so losing the rails, the MCU or the pump all land in the same safe
+state. `design.bypass_state()` shows that state is not a new one for the mixer:
+PIN{n} linked to SIN{n} puts `R{n}01` in parallel with the mixer's own RIN,
+which is **5 kΩ — exactly the fabricated pot at full rotation**.
+
+It costs **75–120 mA continuously on V5**, against 78 mA for every amplifier and
+VCA on the board. That is the price of the non-latching relay the mechanism
+forces, and it is a requirement on the deferred supply rather than a detail.
+`design.coil_budget()`.
+
 **The dominant noise mechanism is additive, not multiplicative.**
 `00-current-state.md` records overturning this. Referred to one string: the VCA
 cells sit 84.3 dB down and the CV chain's AM sits 91.7 dB down. The original
@@ -174,7 +294,7 @@ Struck, with the arithmetic, at `design.FRONT_R`. `constraints.py`.
 
 ## The verification loop, and why it is the point
 
-`gen_sch.py` draws all 158 parts. Its own checker builds nets from the geometry
+`gen_sch.py` draws all 225 parts. Its own checker builds nets from the geometry
 the way eeschema does and compares them to `design.py`; then `verify.py` throws
 that away and asks **KiCad** the same question, over
 `kicad-cli sch export netlist`. Both agree, net by net and pin by pin.
@@ -260,9 +380,10 @@ above.
    module's most load-bearing unknown. It decides whether the module costs
    0.11 dB or 0.85 dB quiescent, and 0.56 dB or 3.17 dB while the lead feature
    is running. `DESIGN.md` upstream calls it "the measurement worth taking".
-2. **The envelope rectifier time constant** — not derivable from the spec, and
-   the six op-amp sections reserved for it are the 6 declared ERC warnings.
-   Needs an attack/release target, or a decision to set it by ear.
+2. **The envelope ADC.** The rectifier that feeds it is drawn; the part is
+   still ADS131M08 or MCP3564, and its **sample rate is no longer a range** —
+   2 kHz, because at 1 kHz the top string's own rectified fundamental is above
+   Nyquist. It sits in the analogue section so only SPI crosses the boundary.
 3. **The fail-safe's power-up sequence now has a number to wait for.** The NR
    capacitor costs 20 ms of reference turn-on, and the '541's Vcc *is* VREF, so
    for 20 ms every channel's full scale is ramping from zero — and zero CV is

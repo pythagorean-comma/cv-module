@@ -105,12 +105,33 @@ PRICES = {
         "SN74AHC541DWR, SOIC-20W. An ordinary logic part from any of the four "
         "UK catalogue houses."),
 
+    # The envelope rectifier's two parts, and the point of the first is that it
+    # is not the OPA1644: two TL074 against two more of the largest line on
+    # this BOM, for twelve sections whose specification is offset and slew
+    # rather than noise. See design.ENV_OPAMP.
+    design.ENV_OPAMP: band(
+        0.25, 0.70, "GBP", 10,
+        "TL074CDR, SOIC-14. About a tenth of the OPA1644 and stocked "
+        "everywhere; the SSI2164's own datasheet uses its dual in the same "
+        "position."),
+    design.ENV_DIODE: band(
+        0.02, 0.08, "GBP", 100,
+        "1N4148WS-7-F or any 1N4148 in SOD-123. Inside an op-amp's feedback "
+        "loop, so the forward drop does not reach the answer."),
+
     # -- passives ----------------------------------------------------------
     # Three classes, and the first is the one that costs something.
     "10k 0.1%": band(0.10, 0.30, "GBP", 100,
                      "Panasonic ERA-6A thin film, 0.1 %, 25 ppm. Thin film is "
                      "the specification and not the tolerance -- see FRONT_R."),
     "12k1 0.1%": band(0.10, 0.30, "GBP", 25, "ERA-6A thin film"),
+
+    "10k 1%": band(0.01, 0.03, "GBP", 100,
+                   "0805 thick film. The envelope rectifier's ratios are 1 %, "
+                   "not the 0.1 % the audio path uses: a 2 % ratio error is "
+                   "0.17 dB on a *reported level*, which is inside what "
+                   "envelope_balance() already allows for the E96 half-value."),
+    "4k99 1%": band(0.01, 0.03, "GBP", 100, "0805 thick film, E96"),
 
     "22k 1%": band(0.01, 0.03, "GBP", 100, "0805 thick film"),
     "17k8 1%": band(0.01, 0.03, "GBP", 100, "0805 thick film, E96"),
@@ -129,7 +150,19 @@ PRICES = {
     "56n/50V X7R": band(0.02, 0.08, "GBP", 100, "0805 X7R"),
     "150n/50V X7R": band(0.02, 0.08, "GBP", 100, "0805 X7R"),
     "100n/50V X7R": band(0.01, 0.05, "GBP", 100, "0805 X7R"),
+    "470n/50V X7R": band(0.02, 0.08, "GBP", 100, "0805 X7R"),
     "10u/16V X7R": band(0.08, 0.25, "GBP", 25, "1210 X7R"),
+
+    "2n2/50V C0G": band(0.02, 0.08, "GBP", 100, "0805 C0G"),
+    "1u/16V X7R": band(0.02, 0.08, "GBP", 100, "0805 X7R"),
+    design.CLAMP_DIODE: band(
+        0.05, 0.15, "GBP", 100,
+        "BAT54-7-F or any small Schottky in SOD-123. Six of them do three "
+        "different jobs -- pump clamp, pump rectifier, coil flyback and the "
+        "inverted reference's clamp -- and the low forward drop matters in "
+        "two of the three: the pump has only 3.3 V to work with, and the "
+        "clamp's +7.4 dB against the summer's 7.84 dB of margin is a "
+        "0.3 V figure. A silicon 1N4148 would fail both."),
 
     # -- not chosen --------------------------------------------------------
     None: NONE,
@@ -139,17 +172,19 @@ PRICES = {
 # is what the silkscreen says. The mixer does the same thing -- its J11/J13/J15
 # read "TO JACKS 1/2", "3/4", "5/6" -- and a builder reading CH1..CH6 off six
 # identical headers is the point of them. One part, one price, six labels.
+# **The 1x03 line is gone and that is a real change, not tidying.** It was the
+# mixer's own CONN_MPN[3] on J11, and J11 grew to five ways when the fail-safe
+# needed a pin for its 10 kHz drive with a ground either side. Every connector
+# on this board is now 1x02 or 1x05. The check that noticed is the stale-entry
+# half of check(): a price for a part nobody fits is a BOM line that cannot be
+# ordered wrong because it will never be ordered at all, and it hides the fact
+# that a connector changed.
 PRICES_BY_MPN = {
     "61300211121": band(0.25, 0.60, "GBP", 10,
                         "Wurth WR-PHD 1x02 vertical, gold-plated: CONN_MPN[2]. "
                         "Two ways because the loom is a shielded pair -- the "
                         "shield lands at the mixer end only, so it has no pin "
                         "here. See design.FRONT_R."),
-    "61300311121": band(0.30, 0.70, "GBP", 10,
-                        "Wurth WR-PHD 1x03 vertical, gold-plated: the mixer's "
-                        "own CONN_MPN[3], so the same part is at both ends of "
-                        "the loom. Gold because these are signal contacts in a "
-                        "box that will be opened."),
     "61300511121": band(0.40, 0.90, "GBP", 10,
                         "Wurth WR-PHD 1x05 vertical, gold-plated: CONN_MPN[5]."),
 }

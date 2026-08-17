@@ -62,7 +62,11 @@ VERT, HORIZ = 0, 90
 # the pitch before adding it.
 AUDIO_Y0, AUDIO_PITCH = 38.1, 38.1
 CV_Y0, CV_PITCH = 230 * G, 30 * G
-SHARED_Y = 450 * G
+# The envelope rows sit below the CV rows and above the shared block, on the
+# same 30 * G pitch: a rectifier row is two amplifiers wide but no taller than
+# an MFB stage.
+ENV_Y0, ENV_PITCH = 420 * G, 30 * G
+SHARED_Y = 620 * G
 
 # Column origins along an audio row, in the order the signal runs.
 # Every one is an exact multiple of G: kisch refuses anything else, because a
@@ -74,6 +78,12 @@ X_VCA, X_IV, X_SERVO = 234 * G, 276 * G, 330 * G
 
 # Columns along a CV row.
 CX_IN, CX_INNER, CX_AMP, CX_OUT = 520 * G, 560 * G, 600 * G, 640 * G
+
+# Columns along an envelope row, in signal order: the half-wave stage's input
+# resistor, its amplifier, the two diodes, the feedback resistor, then the
+# summing stage's two inputs and its amplifier.
+EX_IN, EX_A, EX_DIODE = 20 * G, 60 * G, 100 * G
+EX_FB, EX_SUM, EX_B = 140 * G, 180 * G, 230 * G
 
 
 def register(sch):
@@ -207,8 +217,11 @@ def audio_row(sch, n, y):
     """One channel's audio path: loom, front end, coupling, R_IN, VCA, I-V, servo.
 
     The order along the row is the order in the module docstring of design.py,
-    and it runs left to right with one exception: SIN{n} returns to the loom by
-    label rather than by a wire back across the whole row. There used to be a
+    and it runs left to right with one exception: IVOUT{n} leaves by label
+    rather than by a wire back across the whole row. **It leaves to a relay
+    contact, not to the loom** -- SIN{n} is what the mixer's wiper sees and the
+    bypass changeover decides which of the two it is connected to, so the
+    return path is drawn in the fail-safe block. See design.fail_safe(). There used to be a
     second, the pad's four resistors stacked vertically because a 2-bit selector
     is a column, and the two relay symbols beside them are why the row pitch is
     what it is. See design.pad_benefit().
@@ -305,7 +318,7 @@ def audio_row(sch, n, y):
     sch.label(f"IOUT{n}", inv[0] - 7.62, inv[1])
     _feedback(sch, inv, out, (r21, c21))
     sch.wire(out, (out[0] + 7.62, out[1]))
-    sch.label(f"SIN{n}", out[0] + 7.62, out[1])
+    sch.label(f"IVOUT{n}", out[0] + 7.62, out[1])
     _drop_out(sch, iv, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
               dx=-22.86, dy=15.24)
 
@@ -326,7 +339,7 @@ def audio_row(sch, n, y):
     r32 = _r(sch, f"R{n}32", X_SERVO + 38 * G, y + 14 * G, angle=HORIZ)
     ax, ay = r31.pin("1")
     sch.wire((ax - 6.35, ay), (ax, ay))
-    sch.label(f"SIN{n}", ax - 6.35, ay)
+    sch.label(f"IVOUT{n}", ax - 6.35, ay)
     inv = sv.pin(str(circuit.OPAMP_UNITS[unit][1]))
     out = sv.pin(str(circuit.OPAMP_UNITS[unit][0]))
     _to_inverting(sch, r31.pin("2"), inv, f"SVN{n}")
@@ -396,6 +409,94 @@ def cv_row(sch, n, y):
 
     sch.wire(out, (out[0] + 10.16, out[1]))
     sch.label(f"VC{n}", out[0] + 10.16, out[1])
+    _drop_out(sch, amp, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
+              dx=-22.86, dy=15.24)
+
+
+def envelope_row(sch, n, y):
+    """One channel's precision full-wave rectifier and its one-pole.
+
+    Every node is named and every part is stubbed to its own label, which is the
+    pad's old idiom and the right one here: this row has two amplifiers, two
+    diodes and five resistors meeting at four nodes, and a routed version would
+    be a wire crossing an op-amp input in three places. The two exceptions are
+    the ones with helpers written for exactly this -- `_to_inverting()` into
+    each amplifier's -IN, and `_feedback()` for the pair across the second.
+
+    **The diodes are drawn horizontally at angle 0, which puts the cathode on
+    the left**, because KiCad's Device:D is drawn with its triangle pointing
+    left. design.DIODE_PINS names them so this file never has to know that; the
+    labels below are keyed on "A" and "K" and the geometry follows.
+    """
+    package, unit = circuit.SECTIONS[("env_a", n)]
+    lib, value = circuit.package_part(package)
+    amp = sch.place(package, lib, value, EX_A, y,
+                    footprint=circuit.PARTS[package].footprint,
+                    unit="ABCD".index(unit) + 1)
+    inv = amp.pin(str(circuit.OPAMP_UNITS[unit][1]))
+    out = amp.pin(str(circuit.OPAMP_UNITS[unit][0]))
+
+    r51 = _r(sch, f"R{n}51", EX_IN, y, angle=HORIZ)
+    ax, ay = r51.pin("1")
+    sch.wire((ax - 6.35, ay), (ax, ay))
+    sch.label(f"BUF{n}", ax - 6.35, ay)
+    _to_inverting(sch, r51.pin("2"), inv, f"HWN{n}")
+    sch.wire(out, (out[0] + 7.62, out[1]))
+    sch.label(f"AOUT{n}", out[0] + 7.62, out[1])
+    _drop_out(sch, amp, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
+              dx=-22.86, dy=15.24)
+
+    # D{n}51 closes the loop on one polarity, D{n}52 passes the other out to
+    # HW{n}. Their cathodes face opposite ways and that is the whole circuit:
+    # at angle 0 pin 1 (K) is the left-hand pin, so the labels differ, not the
+    # placement.
+    for ref, left, right in ((f"D{n}51", f"HWN{n}", f"AOUT{n}"),
+                             (f"D{n}52", f"AOUT{n}", f"HW{n}")):
+        part = circuit.PARTS[ref]
+        dy = -7.62 if ref.endswith("51") else 7.62
+        d = sch.place(ref, "Device:D", part.value, EX_DIODE, y + dy,
+                      footprint=part.footprint, angle=HORIZ)
+        for pin, net in ((str(circuit.DIODE_PINS["K"]), left),
+                         (str(circuit.DIODE_PINS["A"]), right)):
+            px, py = d.pin(pin)
+            side = -5.08 if px < EX_DIODE else 5.08
+            sch.wire((px, py), (px + side, py))
+            sch.label(net, px + side, py)
+
+    r52 = _r(sch, f"R{n}52", EX_FB, y, angle=HORIZ)
+    for pin, net in (("1", f"HWN{n}"), ("2", f"HW{n}")):
+        px, py = r52.pin(pin)
+        side = -5.08 if pin == "1" else 5.08
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
+
+    # -- the summing stage ------------------------------------------------
+    package, unit = circuit.SECTIONS[("env_b", n)]
+    lib, value = circuit.package_part(package)
+    amp = sch.place(package, lib, value, EX_B, y,
+                    footprint=circuit.PARTS[package].footprint,
+                    unit="ABCD".index(unit) + 1)
+    inv = amp.pin(str(circuit.OPAMP_UNITS[unit][1]))
+    out = amp.pin(str(circuit.OPAMP_UNITS[unit][0]))
+
+    r53 = _r(sch, f"R{n}53", EX_SUM, y - 7.62, angle=HORIZ)
+    r54 = _r(sch, f"R{n}54", EX_SUM, y, angle=HORIZ)
+    for part, net in ((r53, f"BUF{n}"), (r54, f"HW{n}")):
+        px, py = part.pin("1")
+        sch.wire((px - 5.08, py), (px, py))
+        sch.label(net, px - 5.08, py)
+    # R{n}53 arrives by label; R{n}54 is the one routed into -IN, so the node
+    # gets its name at that corner and everything else joins it by name.
+    px, py = r53.pin("2")
+    sch.wire((px, py), (px + 5.08, py))
+    sch.label(f"ENVN{n}", px + 5.08, py)
+    _to_inverting(sch, r54.pin("2"), inv, f"ENVN{n}")
+
+    r55 = _r(sch, f"R{n}55", EX_B, y - 15.24, angle=HORIZ)
+    c51 = _c(sch, f"C{n}51", EX_B, y - 22.86, angle=HORIZ)
+    _feedback(sch, inv, out, (r55, c51))
+    sch.wire(out, (out[0] + 10.16, out[1]))
+    sch.label(f"ENV{n}", out[0] + 10.16, out[1])
     _drop_out(sch, amp, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
               dx=-22.86, dy=15.24)
 
@@ -543,6 +644,126 @@ def shared_block(sch, y):
     sch.wire((px, py), (px, py + 7.62))
     sch.label(socket.AGND, px, py + 7.62)
 
+    # -- the fail-safe: pump, sink, relays, clamp ------------------------
+    #
+    # Drawn as one block rather than distributed, because it *is* one: a single
+    # pump holds a single FET which releases all three relays together. The
+    # contacts reach their channels by label, exactly as the pad's did -- a
+    # relay symbol carries its coil and its contacts on one body, so the
+    # alternative would be six wires crossing the whole sheet to say what
+    # three labels say.
+    # **Below everything, and that is not aesthetics.** The first placement put
+    # this block at y + 63.5 on the same x band as the power flags, whose row
+    # sits at y + 121.92 from 640 * G eastward -- three relays landed on three
+    # flags and merged SIN1 with VA+, SIN4 with MAGND and AGND with a coil.
+    # kisch caught all three, which is the argument for the geometry check in
+    # one line: nothing about the sheet looked wrong.
+    fy = y + 152.4
+    c805 = _c(sch, "C805", 660 * G, fy, angle=HORIZ)
+    ax, ay = c805.pin("1")
+    sch.wire((ax - 6.35, ay), (ax, ay))
+    sch.label("FSDRV", ax - 6.35, ay)
+    bx, by = c805.pin("2")
+    sch.wire((bx, by), (bx + 6.35, by))
+    sch.label("FSAC", bx + 6.35, by)
+
+    # D801 clamps FSAC's negative half to ground, D802 charges the hold cap on
+    # the positive one. Cathode is pin 1 on Device:D, so the two are drawn the
+    # same way round and differ only in which net each end carries -- which is
+    # the whole of a two-diode pump and the whole of what a transposition
+    # would destroy.
+    for ref, left, right, dy in (("D801", "FSAC", "MDGND", 10.16),
+                                 ("D802", "FSG", "FSAC", -10.16)):
+        part = circuit.PARTS[ref]
+        d = sch.place(ref, "Device:D", part.value, 700 * G, fy + dy,
+                      footprint=part.footprint, angle=HORIZ)
+        for pin, net in ((str(circuit.DIODE_PINS["K"]), left),
+                         (str(circuit.DIODE_PINS["A"]), right)):
+            px, py = d.pin(pin)
+            side = -5.08 if px < 700 * G else 5.08
+            sch.wire((px, py), (px + side, py))
+            if net == "MDGND":
+                _gnd(sch, px + side, py, "MDGND")
+            else:
+                sch.label(net, px + side, py)
+
+    for ref, x in (("C806", 740 * G), ("R803", 760 * G)):
+        part = _c(sch, ref, x, fy, angle=VERT) if ref.startswith("C") \
+            else _r(sch, ref, x, fy, angle=VERT)
+        px, py = part.pin("1")
+        sch.wire((px, py - 6.35), (px, py))
+        sch.label("FSG", px, py - 6.35)
+        _drop(sch, part, "2", "MDGND", dy=5.08)
+
+    fet = sch.place(circuit.FET_REF, "cv:Q_NMOS_GSD",
+                    circuit.PARTS[circuit.FET_REF].value, 800 * G, fy,
+                    footprint=circuit.PARTS[circuit.FET_REF].footprint)
+    gx, gy = fet.pin(str(circuit.FET_PINS["G"]))
+    sch.wire((gx - 6.35, gy), (gx, gy))
+    sch.label("FSG", gx - 6.35, gy)
+    dx, dy = fet.pin(str(circuit.FET_PINS["D"]))
+    sch.wire((dx, dy), (dx, dy - 6.35))
+    sch.label("FSD", dx, dy - 6.35)
+    _drop(sch, fet, str(circuit.FET_PINS["S"]), "MDGND", dy=6.35)
+
+    for index, ref in enumerate(circuit.BYPASS_RELAY_REFS):
+        k = sch.place(ref, "cv:Relay", "DPDT", (640 + 40 * index) * G,
+                      fy + 45.72, footprint="")
+        pins = circuit.RELAY_PINS
+        wiring = [(pins["COIL+"], "V5"), (pins["COIL-"], "FSD")]
+        for channel in (2 * index + 1, 2 * index + 2):
+            _, com, nc, no = circuit.bypass_contact(channel)
+            wiring += [(com, f"SIN{channel}"), (nc, f"PIN{channel}"),
+                       (no, f"IVOUT{channel}")]
+        # **The relay's pins point up and down, not left and right**, which is
+        # the one thing about this symbol that has to be read rather than
+        # assumed: the two commons are on the top edge and the four
+        # normally-open/closed contacts on the bottom, 2.54 mm apart in x. A
+        # horizontal stub from 12 lands exactly on 14 -- three nets merged into
+        # one on the first run, on all three relays, and the sheet looked
+        # right. So every stub leaves vertically, and the lengths are staggered
+        # so the labels do not sit on top of each other.
+        origin_y = fy + 45.72
+        stagger = {"12": 7.62, "14": 12.7, "22": 17.78, "24": 22.86}
+        for pin, net in wiring:
+            px, py = k.pin(pin)
+            run = stagger.get(pin, 7.62)
+            step = -run if py < origin_y else run
+            sch.wire((px, py), (px, py + step))
+            sch.label(net, px, py + step)
+        flyback = f"D{80 + index + 1}3"
+        part = circuit.PARTS[flyback]
+        d = sch.place(flyback, "Device:D", part.value,
+                      (640 + 40 * index) * G, fy + 76.2,
+                      footprint=part.footprint, angle=HORIZ)
+        for pin, net in ((str(circuit.DIODE_PINS["K"]), "V5"),
+                         (str(circuit.DIODE_PINS["A"]), "FSD")):
+            px, py = d.pin(pin)
+            side = -5.08 if px < (640 + 40 * index) * G else 5.08
+            sch.wire((px, py), (px + side, py))
+            sch.label(net, px + side, py)
+
+    # The clamp on the inverted reference. One part, and it is the only answer
+    # this board has to the one fail-loud path -- the pump cannot see it,
+    # because a reference inverter that fails leaves the MCU healthy.
+    clamp = sch.place("D803", "Device:D", circuit.PARTS["D803"].value,
+                      860 * G, fy, footprint=circuit.PARTS["D803"].footprint,
+                      angle=HORIZ)
+    for pin, net in ((str(circuit.DIODE_PINS["K"]), "MAGND"),
+                     (str(circuit.DIODE_PINS["A"]), "VREFN")):
+        px, py = clamp.pin(pin)
+        side = -5.08 if px < 860 * G else 5.08
+        sch.wire((px, py), (px + side, py))
+        if net == "MAGND":
+            _gnd(sch, px + side, py, "MAGND")
+        else:
+            sch.label(net, px + side, py)
+
+    sch.text("Fail-safe: any stuck MCU state collapses the pump, the FET "
+             "releases, and de-energised is bypass. D803 covers the one path "
+             "the pump cannot see. See design.fail_safe().",
+             640 * G, fy - 15.24, size=2.0)
+
     # -- the two ground stars --------------------------------------------
     # **Both are drawn at 180 degrees so that pin 1 faces downward**, because
     # design.py puts MAGND on pin 1 of both and MAGND is the node underneath
@@ -585,8 +806,9 @@ def shared_block(sch, y):
         x += 20.32
 
     x = 20 * G
-    for package in circuit.OPAMP_PACKAGES:
-        pwr = sch.place(package, "cv:OPA1644", circuit.OPAMP, x, y + 121.92,
+    for package in circuit.OPAMP_PACKAGES + list(circuit.ENV_PACKAGES_REFS):
+        lib, value = circuit.package_part(package)
+        pwr = sch.place(package, lib, value, x, y + 121.92,
                         footprint=circuit.PARTS[package].footprint,
                         unit=circuit.OPAMP_POWER_UNIT)
         for pin, net in ((circuit.OPAMP_PINS["V+"], "VA+"),
@@ -597,24 +819,33 @@ def shared_block(sch, y):
             sch.label(net, px, py + dy)
         x += 40.64
 
-    # The spare section, as a follower with its input at MAGND. Drawn last of
-    # the amplifiers and next to the power units, because it is a termination
-    # rather than a stage: nothing arrives and nothing leaves.
-    package, unit = circuit.SECTIONS[("spare", 0)]
-    spare_amp = sch.place(package, "cv:OPA1644", circuit.OPAMP, 320 * G,
-                          y + 121.92, footprint=circuit.PARTS[package].footprint,
-                          unit="ABCD".index(unit) + 1)
-    inv_pin = spare_amp.pin(str(circuit.OPAMP_UNITS[unit][1]))
-    out_pin = spare_amp.pin(str(circuit.OPAMP_UNITS[unit][0]))
-    # No part in the loop, so _feedback() has nothing to step around: straight
-    # over the top on its own column, 2.54 clear of the pins on both sides.
-    sch.wire(inv_pin, (inv_pin[0] - 2.54, inv_pin[1]),
-             (inv_pin[0] - 2.54, inv_pin[1] - 15.24),
-             (out_pin[0] + 2.54, inv_pin[1] - 15.24),
-             (out_pin[0] + 2.54, out_pin[1]), out_pin)
-    sch.label("SPARE", inv_pin[0] - 2.54, inv_pin[1] - 15.24)
-    _drop_out(sch, spare_amp, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
-              dx=-22.86, dy=15.24)
+    # The spare sections, as followers with their inputs at MAGND. Drawn last of
+    # the amplifiers and next to the power units, because they are terminations
+    # rather than stages: nothing arrives and nothing leaves.
+    #
+    # **Three of them now and each on its own net**, which is why the label is
+    # keyed on the section rather than being the bare "SPARE" it was. One net
+    # across three followers is three outputs tied together, and it would have
+    # drawn beautifully.
+    for index, key in enumerate(circuit.SPARE_SECTIONS):
+        package, unit = circuit.SECTIONS[key]
+        lib, value = circuit.package_part(package)
+        spare_amp = sch.place(package, lib, value, (320 + 60 * index) * G,
+                              y + 121.92,
+                              footprint=circuit.PARTS[package].footprint,
+                              unit="ABCD".index(unit) + 1)
+        inv_pin = spare_amp.pin(str(circuit.OPAMP_UNITS[unit][1]))
+        out_pin = spare_amp.pin(str(circuit.OPAMP_UNITS[unit][0]))
+        # No part in the loop, so _feedback() has nothing to step around:
+        # straight over the top on its own column, 2.54 clear of the pins on
+        # both sides.
+        sch.wire(inv_pin, (inv_pin[0] - 2.54, inv_pin[1]),
+                 (inv_pin[0] - 2.54, inv_pin[1] - 15.24),
+                 (out_pin[0] + 2.54, inv_pin[1] - 15.24),
+                 (out_pin[0] + 2.54, out_pin[1]), out_pin)
+        sch.label(f"SPARE{key[1]}", inv_pin[0] - 2.54, inv_pin[1] - 15.24)
+        _drop_out(sch, spare_amp, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
+                  dx=-22.86, dy=15.24)
 
     for index, vca_ref in enumerate(circuit.VCA_PACKAGES_REFS):
         v = _vca_cache[vca_ref]
@@ -945,6 +1176,8 @@ def build():
         audio_row(sch, n, AUDIO_Y0 + (n - 1) * AUDIO_PITCH)
     for n in range(1, circuit.CHANNELS + 1):
         cv_row(sch, n, CV_Y0 + (n - 1) * CV_PITCH)
+    for n in range(1, circuit.CHANNELS + 1):
+        envelope_row(sch, n, ENV_Y0 + (n - 1) * ENV_PITCH)
     shared_block(sch, SHARED_Y)
     sch._undrawn_flags = no_connects(sch)
     sch.auto_junctions()
