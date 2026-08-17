@@ -1,0 +1,894 @@
+"""Draw the schematic for the design in design.py.
+
+The sheet is laid out the way `floorplan.py` lays out the board, because they
+are answering the same question and disagreeing would help nobody: six audio
+channel rows across the top, the six CV filters in a band beneath them, and the
+shared block -- reference, logic buffer, rails and the two ground stars -- along
+the bottom. One row is drawn in local coordinates and instantiated six times,
+which is the mixer's own arrangement and is what makes the six channels
+identical by construction rather than by proofreading.
+
+**Why this exists at all**, given that CLAUDE.md used to say not to synthesise a
+`.kicad_sch`: without a schematic, `verify.py` compares `design.py` to a netlist
+written from `design.py`, which cannot catch a transcription error because there
+is no transcription. With one, `kicad-cli` parses geometry -- wires meeting at
+coordinates -- and the comparison becomes real. `gen_sch.py` in the mixer exists
+for exactly that reason and its `verify.py` is the better for it.
+
+Everything is drawn with real wires inside a block and travels by global label
+between blocks. A wire from a loom connector on the far left to a VCA in the
+middle would cross four other blocks to say something the label says better.
+
+Run `python3 gen_sch.py`, then `verify.py --schematic` to close the loop.
+"""
+
+import pathlib
+
+import design as circuit
+import contract.socket as socket
+from kisch import Schematic
+
+OUT = pathlib.Path(__file__).resolve().parent / "out"
+SHEET = OUT / "cv-module.kicad_sch"
+
+# 1.27 mm is eeschema's grid and every coordinate here is a multiple of it.
+# Off-grid pins do not connect and the drawing does not say so.
+G = 1.27
+
+
+def grid(value):
+    return round(value / G) * G
+
+
+# **KiCad's Device:R and Device:C are drawn vertically at angle 0.** Naming the
+# two orientations is not decoration: assuming angle 0 meant horizontal put
+# every feedback resistor back in its amplifier's own column, which is the
+# fault that merged IOUT{n} with SIN{n} on all six channels. A constant cannot
+# be got backwards silently the way a bare 0 can.
+VERT, HORIZ = 0, 90
+
+
+# Row geometry. The audio rows are on a 38.1 mm pitch because a relay symbol is
+# tall; the CV rows are tighter because an MFB stage is not.
+AUDIO_Y0, AUDIO_PITCH = 38.1, 38.1
+CV_Y0, CV_PITCH = 230 * G, 30 * G
+SHARED_Y = 450 * G
+
+# Column origins along an audio row, in the order the signal runs.
+# Every one is an exact multiple of G: kisch refuses anything else, because a
+# pin a tenth of a millimetre off the grid does not connect and the drawing
+# does not say so.
+X_LOOM, X_FRONT, X_BLOCK = 20 * G, 44 * G, 88 * G
+X_PAD, X_RELAY, X_RC = 108 * G, 150 * G, 205 * G
+X_VCA, X_IV, X_SERVO = 234 * G, 276 * G, 330 * G
+
+# Columns along a CV row.
+CX_IN, CX_INNER, CX_AMP, CX_OUT = 520 * G, 560 * G, 600 * G, 640 * G
+
+
+def register(sch):
+    """Every symbol this sheet uses, from design.LIBS.
+
+    `patch` is the mixer's mechanism for a borrowed symbol and it does two jobs
+    here. The OPA1644 needs only its properties corrected so the sheet says what
+    the BOM says. The MAX6126 needs its pins rewritten: ADR4525 carries NC on
+    1, 3, 5, 7 and 8, and the MAX6126 puts NR, GND, GNDS and OUTF on four of
+    them. Repinning by name is the only honest way to borrow a symbol whose
+    pin *positions* are right and whose pin *meanings* are not.
+    """
+    def patch(lib_id, definition):
+        if lib_id.endswith(":OPA1644"):
+            _set(definition, "Datasheet",
+                 "https://www.ti.com/lit/ds/symlink/opa1644.pdf")
+            _set(definition, "Description",
+                 "Quad JFET audio op-amp, 3.3 nV/rtHz, SOIC-14")
+        elif lib_id.endswith(":MAX6126"):
+            _set(definition, "Datasheet",
+                 "https://www.analog.com/en/products/max6126.html")
+            _set(definition, "Description",
+                 "2.5 V ultra-low-noise reference, Kelvin-sensed, SOIC-8")
+            for name, kind in (("NR", "passive"), ("GND", "power_in"),
+                               ("GNDS", "passive"), ("OUTS", "passive"),
+                               ("OUTF", "output"), ("IN", "power_in")):
+                _repin(definition, str(circuit.REF_PINS[name]), name, kind)
+        return definition
+
+    for lib_id, (nick, libname, symname, rename) in circuit.LIBS.items():
+        sch.use(nick, libname, symname, rename=rename, patch=patch)
+
+
+def _set(definition, key, value):
+    for item in definition:
+        if isinstance(item, list) and str(item[0]) == "property" and item[1] == key:
+            item[2] = value
+
+
+def _repin(definition, number, name, kind):
+    """Rename a pin and change its electrical type, in place.
+
+    Lifted in shape from the mixer's own `_repin`, which exists because the
+    ICL7660S differs from the ICL7660 by one pin. Walks unit bodies rather than
+    the top level, because that is where pins live once a symbol is flattened.
+    """
+    for unit in definition:
+        if not (isinstance(unit, list) and str(unit[0]) == "symbol"):
+            continue
+        for pin in unit:
+            if not (isinstance(pin, list) and str(pin[0]) == "pin"):
+                continue
+            if not any(isinstance(x, list) and str(x[0]) == "number"
+                       and str(x[1]) == number for x in pin):
+                continue
+            pin[1] = type(pin[1])(kind)
+            for item in list(pin):
+                if isinstance(item, list) and str(item[0]) == "name":
+                    item[1] = name
+                elif isinstance(item, list) and str(item[0]) == "hide":
+                    pin.remove(item)
+
+
+def _feedback(sch, inv, out, parts, above=True):
+    """Wire one or more parts in parallel between an amplifier's -IN and output.
+
+    Each part gets its own pair of vertical rails, stepped 2.54 mm further out
+    than the last, so no two parts' routes ever share an x. Overlap *within* a
+    part's own net is harmless -- both rails carry the node they start from --
+    and that is the only overlap this arrangement can produce.
+
+    Stacking two feedback parts in the amplifier's own column, which is what
+    this replaces, put C{n}21's route straight through R{n}21's pins. The sheet
+    looked fine; KiCad merged IOUT, SIN, SVN, SRV and CVN across all six
+    channels into a single 254-node net.
+    """
+    for index, part in enumerate(parts):
+        left = inv[0] - (index + 1) * 2.54
+        right = out[0] + (index + 1) * 2.54
+        one, two = part.pin("1"), part.pin("2")
+        near, far = (one, two) if one[0] <= two[0] else (two, one)
+        sch.wire(inv, (left, inv[1]), (left, near[1]), near)
+        sch.wire(far, (right, far[1]), (right, out[1]), out)
+
+
+def _r(sch, ref, x, y, angle=0):
+    part = circuit.PARTS[ref]
+    return sch.place(ref, "Device:R", part.value, x, y,
+                     footprint=part.footprint, angle=angle)
+
+
+def _c(sch, ref, x, y, angle=0):
+    part = circuit.PARTS[ref]
+    return sch.place(ref, "Device:C", part.value, x, y,
+                     footprint=part.footprint, angle=angle)
+
+
+def _gnd(sch, x, y, net="MAGND"):
+    lib = "power:GNDD" if net == "MDGND" else "power:GNDA"
+    return sch.power(lib, x, y, value=net)
+
+
+def _drop(sch, part, pin, net, dy=7.62):
+    """Take a pin down to a ground symbol. The commonest gesture on the sheet."""
+    x, y = part.pin(pin)
+    sch.wire((x, y), (x, y + dy))
+    _gnd(sch, x, y + dy, net)
+
+
+def _drop_out(sch, part, pin, net, dx=6.35, dy=6.35):
+    """Route a pin clear of its neighbours, then down to ground.
+
+    A straight drop from a pin in the middle of a package's row passes through
+    the pins below it, and eeschema reads a pin sitting mid-wire as connected --
+    silently. kisch.auto_junctions() refuses to render that, which is how the
+    first three cases were found: the spare VCA cell's I_IN/I_OUT either side of
+    its V_C, and the MAX6126's GNDS with an internally-connected pin beneath it.
+
+    **The fourth case is worse and auto_junctions() could not see it.** An
+    op-amp's +IN and -IN sit in the same column 5.08 mm apart, so dropping +IN
+    to ground by 5.08 lands its *wire end* exactly on -IN -- a legal junction,
+    not a stranded pin. Every I-V stage had its two inputs shorted, MAGND merged
+    with IOUT1, and 34 nets collapsed into one. Nothing on the sheet looked
+    wrong; only KiCad's own netlist said so, which is the entire argument for
+    generating the schematic rather than stopping at design.py.
+    """
+    x, y = part.pin(pin)
+    sch.wire((x, y), (x + dx, y), (x + dx, y + dy))
+    _gnd(sch, x + dx, y + dy, net)
+
+# The op-amp +IN drops use dx = -22.86 rather than the -5.08 that would clear
+# the pin beside them. -5.08 is where _feedback() puts its second rail, so the
+# two shared a column: C{n}21 ended up shorted end to end and MAGND merged into
+# IOUT1 across all six channels. Offsets on this sheet have to clear each
+# other, not just the pins.
+
+
+def _leave_down(sch, part, pin, dy, dx):
+    """Take a pin vertically clear of its row, then sideways. Returns the end.
+
+    The SSI2164 puts GND on pin 8 and V- on pin 9 **2.54 mm apart on the same
+    y**, so any horizontal route from one runs through the other. Leaving
+    vertically first, on each pin's own column, is the only way out of that --
+    and it is the general answer for a pin whose neighbour shares its row.
+    """
+    x, y = part.pin(pin)
+    sch.wire((x, y), (x, y + dy), (x + dx, y + dy))
+    return (x + dx, y + dy)
+
+
+def audio_row(sch, n, y):
+    """One channel's audio path: loom, front end, coupling, pad, VCA, I-V, servo.
+
+    The order along the row is the order in the module docstring of design.py,
+    and the two places it does not simply run left to right are both worth a
+    glance: the pad's four resistors stack vertically because a 2-bit selector
+    is a column, and SIN{n} returns to the loom by label rather than by a wire
+    back across the whole row.
+    """
+    # -- loom ------------------------------------------------------------
+    j = sch.place(f"J{n}", "Connector_Generic:Conn_01x02",
+                  circuit.PARTS[f"J{n}"].value, X_LOOM, y,
+                  footprint=circuit.PARTS[f"J{n}"].footprint)
+    for pin, net in (("1", f"PIN{n}"), ("2", f"SIN{n}")):
+        x, py = j.pin(pin)
+        sch.wire((x, py), (x + 5.08, py))
+        sch.label(net, x + 5.08, py)
+
+    # -- front end: inverting unity --------------------------------------
+    package, unit = circuit.SECTIONS[("front", n)]
+    amp = sch.place(package, "cv:OPA1644", circuit.OPAMP,
+                    X_FRONT + 20.32, y, footprint=circuit.PARTS[package].footprint,
+                    unit="ABCD".index(unit) + 1)
+    r01 = _r(sch, f"R{n}01", X_FRONT, y - 6 * G, angle=HORIZ)
+    r02 = _r(sch, f"R{n}02", X_FRONT + 20.32, y - 14 * G, angle=HORIZ)
+
+    ax, ay = r01.pin("1")
+    sch.wire((ax - 7.62, ay), (ax, ay))
+    sch.label(f"PIN{n}", ax - 7.62, ay)
+
+    inv = amp.pin(str(circuit.OPAMP_UNITS[unit][1]))
+    out = amp.pin(str(circuit.OPAMP_UNITS[unit][0]))
+    bx, by = r01.pin("2")
+    sch.wire((bx, by), (bx, inv[1]), inv)
+    _feedback(sch, inv, out, (r02,))
+    ox, oy = out
+    sch.wire((ox, oy), (ox + 7.62, oy))
+    sch.label(f"BUF{n}", ox + 7.62, oy)
+    # non-inverting to MAGND
+    _drop_out(sch, amp, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
+              dx=-22.86, dy=15.24)
+
+    # -- coupling into the VCA -------------------------------------------
+    c01 = _c(sch, f"C{n}01", X_BLOCK, y, angle=VERT)
+    cx, cy = c01.pin("1")
+    sch.wire((cx, cy - 7.62), (cx, cy))
+    sch.label(f"BUF{n}", cx, cy - 7.62)
+    dx, dy = c01.pin("2")
+    sch.wire((dx, dy), (dx, dy + 5.08))
+    sch.label(f"PADI{n}", dx, dy + 5.08)
+
+    # -- the pad: four input resistors, stacked --------------------------
+    for index, letter in enumerate("ABCD"):
+        rr = _r(sch, f"R{n}1{index + 1}", X_PAD, y - 7.62 + index * 5.08,
+                 angle=HORIZ)
+        px, py = rr.pin("1")
+        sch.wire((px - 5.08, py), (px, py))
+        sch.label(f"PADI{n}", px - 5.08, py)
+        qx, qy = rr.pin("2")
+        sch.wire((qx, qy), (qx + 5.08, qy))
+        sch.label(f"PS{n}{letter}", qx + 5.08, qy)
+
+    # -- the two relays --------------------------------------------------
+    for index, (com, a, b) in enumerate(
+            ((f"IIN{n}", f"PSEL{n}X", f"PSEL{n}Y"),
+             (None, None, None))):
+        ref = f"K{n}0{index + 1}"
+        k = sch.place(ref, "cv:Relay", "DPDT latch", X_RELAY + index * 30.48,
+                      y, footprint="")
+        pins = circuit.RELAY_PINS
+        if index == 0:
+            wiring = ((pins["COM_A"], f"IIN{n}"), (pins["NC_A"], f"PSEL{n}X"),
+                      (pins["NO_A"], f"PSEL{n}Y"))
+        else:
+            wiring = ((pins["COM_A"], f"PSEL{n}X"), (pins["NC_A"], f"PS{n}A"),
+                      (pins["NO_A"], f"PS{n}B"), (pins["COM_B"], f"PSEL{n}Y"),
+                      (pins["NC_B"], f"PS{n}C"), (pins["NO_B"], f"PS{n}D"))
+        for pin, net in wiring:
+            px, py = k.pin(pin)
+            sch.wire((px, py), (px + 3.81, py))
+            sch.label(net, px + 3.81, py)
+        # Coils are the deferred relay driver's business; label them out.
+        for role, net in (("SET+", f"K{ref}S"), ("SET-", "MDGND"),
+                          ("RESET+", f"K{ref}R"), ("RESET-", "MDGND")):
+            px, py = k.pin(pins[role])
+            sch.wire((px, py), (px - 3.81, py))
+            if net == "MDGND":
+                _gnd(sch, px - 3.81, py, "MDGND")
+            else:
+                sch.label(net, px - 3.81, py)
+        if index == 0:
+            for role in ("COM_B", "NC_B", "NO_B"):
+                sch.no_connect(*k.pin(pins[role]))
+
+    # -- the stability RC ------------------------------------------------
+    r15 = _r(sch, f"R{n}15", X_RC, y, angle=90)
+    c02 = _c(sch, f"C{n}02", X_RC + 8 * G, y + 12.7, angle=VERT)
+    ex, ey = r15.pin("1")
+    sch.wire((ex - 6.35, ey), (ex, ey))
+    sch.label(f"IIN{n}", ex - 6.35, ey)
+    bx, by = r15.pin("2")
+    cx, cy = c02.pin("1")
+    sch.wire((bx, by), (cx, by), (cx, cy))
+    _drop(sch, c02, "2", "MAGND", dy=5.08)
+
+    # -- the VCA cell ----------------------------------------------------
+    vca_ref, cell = circuit.VCA_CELL[n]
+    if n in (1, 4):                      # one symbol per package, at its first
+        v = sch.place(vca_ref, "cv:SSI2164", circuit.VCA, X_VCA, y + 19.05,
+                      footprint=circuit.PARTS[vca_ref].footprint)
+        _vca_cache[vca_ref] = v
+    v = _vca_cache[vca_ref]
+    pins = circuit.VCA_CHANNEL_PINS[cell]
+    for role, net in (("IIN", f"IIN{n}"), ("IOUT", f"IOUT{n}"),
+                      ("VC", f"VC{n}")):
+        px, py = v.pin(str(pins[role]))
+        side = -5.08 if px < v.pin(str(circuit.VCA_PINS["GND"]))[0] else 5.08
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
+
+    # -- I-V -------------------------------------------------------------
+    package, unit = circuit.SECTIONS[("iv", n)]
+    iv = sch.place(package, "cv:OPA1644", circuit.OPAMP, X_IV + 20.32, y,
+                   footprint=circuit.PARTS[package].footprint,
+                   unit="ABCD".index(unit) + 1)
+    inv = iv.pin(str(circuit.OPAMP_UNITS[unit][1]))
+    out = iv.pin(str(circuit.OPAMP_UNITS[unit][0]))
+    r21 = _r(sch, f"R{n}21", X_IV + 20.32, y - 12 * G, angle=HORIZ)
+    c21 = _c(sch, f"C{n}21", X_IV + 20.32, y - 18 * G, angle=HORIZ)
+    sch.wire((inv[0] - 7.62, inv[1]), inv)
+    sch.label(f"IOUT{n}", inv[0] - 7.62, inv[1])
+    _feedback(sch, inv, out, (r21, c21))
+    sch.wire(out, (out[0] + 7.62, out[1]))
+    sch.label(f"SIN{n}", out[0] + 7.62, out[1])
+    _drop_out(sch, iv, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
+              dx=-22.86, dy=15.24)
+
+    # -- servo -----------------------------------------------------------
+    package, unit = circuit.SECTIONS[("servo", n)]
+    sv = sch.place(package, "cv:OPA1644", circuit.OPAMP, X_SERVO + 25.4, y,
+                   footprint=circuit.PARTS[package].footprint,
+                   unit="ABCD".index(unit) + 1)
+    r31 = _r(sch, f"R{n}31", X_SERVO, y - 6 * G, angle=HORIZ)
+    c31 = _c(sch, f"C{n}31", X_SERVO + 25.4, y - 12 * G, angle=HORIZ)
+    r32 = _r(sch, f"R{n}32", X_SERVO + 25.4, y + 14 * G, angle=HORIZ)
+    ax, ay = r31.pin("1")
+    sch.wire((ax - 6.35, ay), (ax, ay))
+    sch.label(f"SIN{n}", ax - 6.35, ay)
+    inv = sv.pin(str(circuit.OPAMP_UNITS[unit][1]))
+    out = sv.pin(str(circuit.OPAMP_UNITS[unit][0]))
+    bx, by = r31.pin("2")
+    sch.wire((bx, by), (inv[0], by), inv)
+    _feedback(sch, inv, out, (c31,))
+    # The injection resistor leaves the loop and goes back to IOUT{n} by label.
+    ex, ey = r32.pin("1")
+    sch.wire(out, (out[0], ey), (ex, ey))
+    fx, fy = r32.pin("2")
+    sch.wire((fx, fy), (fx + 5.08, fy))
+    sch.label(f"IOUT{n}", fx + 5.08, fy)
+    _drop_out(sch, sv, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
+              dx=-22.86, dy=15.24)
+
+
+_vca_cache = {}
+
+
+def cv_row(sch, n, y):
+    """One channel's CV filter: the 2-pole MFB with the offset summed in.
+
+    Drawn as the datasheet's Figure 10 is drawn -- two input resistors into the
+    inner node, one of them from the inverted reference -- because that is what
+    it is, and a reader who knows that figure should recognise this.
+    """
+    package, unit = circuit.SECTIONS[("cv", n)]
+    amp = sch.place(package, "cv:OPA1644", circuit.OPAMP, CX_AMP, y,
+                    footprint=circuit.PARTS[package].footprint,
+                    unit="ABCD".index(unit) + 1)
+    r41 = _r(sch, f"R{n}41", CX_IN, y - 5.08, angle=HORIZ)
+    r44 = _r(sch, f"R{n}44", CX_IN, y + 5.08, angle=HORIZ)
+    r43 = _r(sch, f"R{n}43", CX_INNER + 12.7, y - 5.08, angle=HORIZ)
+    r42 = _r(sch, f"R{n}42", CX_INNER + 12.7, y - 17.78, angle=HORIZ)
+    c41 = _c(sch, f"C{n}41", CX_INNER, y + 7.62, angle=VERT)
+    c42 = _c(sch, f"C{n}42", CX_AMP, y - 25.4, angle=HORIZ)
+
+    for part, net in ((r41, f"LOGO{n}"), (r44, "VREFN")):
+        ax, ay = part.pin("1")
+        sch.wire((ax - 6.35, ay), (ax, ay))
+        sch.label(net, ax - 6.35, ay)
+
+    inner = (CX_INNER, y)
+    for part in (r41, r44):
+        bx, by = part.pin("2")
+        sch.wire((bx, by), (inner[0], by), inner)
+    sch.wire(inner, c41.pin("1"))
+    _drop(sch, c41, "2", "MAGND", dy=5.08)
+
+    inv = amp.pin(str(circuit.OPAMP_UNITS[unit][1]))
+    out = amp.pin(str(circuit.OPAMP_UNITS[unit][0]))
+    cx, cy = r43.pin("1")
+    dx, dy = r43.pin("2")
+    sch.wire(inner, (inner[0], cy), (cx, cy))
+    sch.wire((dx, dy), (inv[0], dy), inv)
+
+    # R{n}42 spans the inner node to the output; C{n}42 spans -IN to the
+    # output. Different left-hand nodes, so they route independently.
+    ex, ey = r42.pin("1")
+    fx, fy = r42.pin("2")
+    sch.wire(inner, (inner[0], ey), (ex, ey))
+    sch.wire((fx, fy), (out[0] + 5.08, fy), (out[0] + 5.08, out[1]), out)
+    _feedback(sch, inv, out, (c42,))
+
+    sch.wire(out, (out[0] + 10.16, out[1]))
+    sch.label(f"VC{n}", out[0] + 10.16, out[1])
+    _drop_out(sch, amp, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
+              dx=-22.86, dy=15.24)
+
+
+def shared_block(sch, y):
+    """Reference, logic buffer, rails, decoupling and the two ground stars."""
+    # -- the reference ---------------------------------------------------
+    ref = sch.place(circuit.REF_REF, "cv:MAX6126", circuit.VREF_PART,
+                    48 * G, y, footprint=circuit.PARTS[circuit.REF_REF].footprint)
+    P = circuit.REF_PINS
+    for name, net in (("IN", "V5"), ("OUTS", "VREF"), ("OUTF", "VREF"),
+                      ("NR", "VNR")):
+        px, py = ref.pin(str(P[name]))
+        side = 7.62 if px > ref.pin(str(P["GND"]))[0] else -7.62
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
+    for name, dx in (("GND", -8.89), ("GNDS", -11.43)):
+        _drop_out(sch, ref, str(P[name]), "MAGND", dx=dx, dy=12.7)
+    for name in ("IC1", "IC2"):
+        sch.no_connect(*ref.pin(str(P[name])))
+
+    c801 = _c(sch, "C801", 20 * G, y, angle=VERT)
+    ax, ay = c801.pin("1")
+    sch.wire((ax, ay - 6.35), (ax, ay))
+    sch.label("VNR", ax, ay - 6.35)
+    _drop(sch, c801, "2", "MAGND", dy=5.08)
+
+    c802 = _c(sch, "C802", 88 * G, y, angle=VERT)
+    bx, by = c802.pin("1")
+    sch.wire((bx, by - 6.35), (bx, by))
+    sch.label("VREF", bx, by - 6.35)
+    _drop(sch, c802, "2", "MAGND", dy=5.08)
+
+    # -- the reference inverter ------------------------------------------
+    package, unit = circuit.SECTIONS[("refinv", 0)]
+    inv = sch.place(package, "cv:OPA1644", circuit.OPAMP, 150 * G, y,
+                    footprint=circuit.PARTS[package].footprint,
+                    unit="ABCD".index(unit) + 1)
+    r801 = _r(sch, "R801", 120 * G, y - 2.54, angle=HORIZ)
+    r802 = _r(sch, "R802", 150 * G, y - 15.24, angle=HORIZ)
+    cx, cy = r801.pin("1")
+    sch.wire((cx - 6.35, cy), (cx, cy))
+    sch.label("VREF", cx - 6.35, cy)
+    inv_pin = inv.pin(str(circuit.OPAMP_UNITS[unit][1]))
+    out_pin = inv.pin(str(circuit.OPAMP_UNITS[unit][0]))
+    dx, dy = r801.pin("2")
+    sch.wire((dx, dy), (inv_pin[0], dy), inv_pin)
+    ex, ey = r802.pin("1")
+    fx, fy = r802.pin("2")
+    sch.wire(inv_pin, (inv_pin[0], ey), (ex, ey))
+    sch.wire((fx, fy), (out_pin[0], fy), out_pin)
+    sch.wire(out_pin, (out_pin[0] + 10.16, out_pin[1]))
+    sch.label("VREFN", out_pin[0] + 10.16, out_pin[1])
+    _drop_out(sch, inv, str(circuit.OPAMP_UNITS[unit][2]), "MAGND",
+              dx=-22.86, dy=15.24)
+
+    # -- the logic buffer, straddling the boundary -----------------------
+    logic = sch.place(circuit.LOGIC_REF, "cv:74AHC541", circuit.LOGIC,
+                      240 * G, y + 5.08,
+                      footprint=circuit.PARTS[circuit.LOGIC_REF].footprint)
+    L = circuit.LOGIC_PINS
+    body = logic.pin(str(L["GND"]))[0]
+    for pin, net in ((L["VCC"], "VREF"), (L["OE1"], "OE"), (L["OE2"], "OE")):
+        px, py = logic.pin(str(pin))
+        if pin == L["VCC"]:
+            sch.wire((px, py), (px, py - 14 * G))
+            sch.label(net, px, py - 14 * G)
+        else:
+            # Sideways, away from the package: a vertical here runs down the
+            # A-pin column and joins OE to whichever inputs it passes.
+            dx = -22 * G if px <= body else 22 * G
+            sch.wire((px, py), (px + dx, py))
+            sch.label(net, px + dx, py)
+    _drop_out(sch, logic, str(L["GND"]), "MAGND", dx=-8 * G, dy=10 * G)
+    for n in range(1, circuit.CHANNELS + 1):
+        px, py = logic.pin(str(circuit.LOGIC_A[n]))
+        sch.wire((px, py), (px - 6.35, py))
+        sch.label(f"PWM{n}", px - 6.35, py)
+        qx, qy = logic.pin(str(circuit.LOGIC_Y[n]))
+        sch.wire((qx, qy), (qx + 6.35, qy))
+        sch.label(f"LOGO{n}", qx + 6.35, qy)
+    for n, dx in ((7, -16 * G), (8, -20 * G)):
+        _drop_out(sch, logic, str(circuit.LOGIC_A[n]), "MAGND",
+                  dx=dx, dy=16 * G)
+
+    # C803 at the Vcc pin supplies the edges; C804 is the reservoir the steady
+    # 684 uA comes out of. **The Kelvin sense pair closes here**, not at the
+    # package -- the MAX6126 datasheet says to short OUTF to OUTS "as close to
+    # the load as possible", and C804 is the load.
+    for ref_name, dx in (("C803", -4 * G), ("C804", 4 * G)):
+        cap = _c(sch, ref_name, 240 * G + dx, y + 30 * G, angle=VERT)
+        px, py = cap.pin("1")
+        sch.wire((px, py - 5.08), (px, py))
+        sch.label("VREF", px, py - 5.08)
+        _drop(sch, cap, "2", "MAGND", dy=5.08)
+
+    sch.text("The boundary runs through U11: A-side from the digital domain, "
+             "Y-side precision analogue, GND on MAGND. See floorplan.py.",
+             200 * G, y - 38.1, size=2.0)
+
+    # -- pull-downs and the controller headers ---------------------------
+    for n in range(1, circuit.CHANNELS + 1):
+        rr = _r(sch, f"R81{n}", 140 * G, y + 38.1 + n * 16 * G, angle=VERT)
+        px, py = rr.pin("1")
+        sch.wire((px, py - 5.08), (px, py))
+        sch.label(f"PWM{n}", px, py - 5.08)
+        _drop(sch, rr, "2", "MDGND", dy=5.08)
+
+    for ref_name, x in (("J8", 330 * G), ("J9", 370 * G), ("J10", 410 * G),
+                        ("J11", 450 * G)):
+        part = circuit.PARTS[ref_name]
+        lib = ("Connector_Generic:Conn_01x03" if "1x03" in part.footprint
+               else "Connector_Generic:Conn_01x05")
+        conn = sch.place(ref_name, lib, part.value, x, y + 45.72,
+                         footprint=part.footprint)
+        for pin, net in sorted(_conn_nets(ref_name).items(), key=lambda kv: int(kv[0])):
+            px, py = conn.pin(pin)
+            sch.wire((px, py), (px + 7.62, py))
+            if net in ("MAGND", "MDGND"):
+                _gnd(sch, px + 7.62, py, net)
+            else:
+                sch.label(net, px + 7.62, py)
+
+    # -- the loom bond pad -----------------------------------------------
+    bond = sch.place("J7", "Connector:TestPoint", "BOND", 520 * G, y + 45.72,
+                     footprint=circuit.PARTS["J7"].footprint)
+    px, py = bond.pin("1")
+    sch.wire((px, py), (px, py + 7.62))
+    sch.label(socket.AGND, px, py + 7.62)
+
+    # -- the two ground stars --------------------------------------------
+    star = _r(sch, circuit.GROUND_STAR, 560 * G, y + 45.72)
+    ax, ay = star.pin("1")
+    sch.wire((ax - 7.62, ay), (ax, ay))
+    sch.label(socket.AGND, ax - 7.62, ay)
+    _drop(sch, star, "2", "MAGND", dy=7.62)
+
+    domain = _r(sch, circuit.DOMAIN_STAR, 600 * G, y + 45.72)
+    bx, by = domain.pin("1")
+    sch.wire((bx, by), (bx, by - 7.62))
+    _gnd(sch, bx, by - 7.62, "MDGND")
+    _drop(sch, domain, "2", "MAGND", dy=7.62)
+
+    sch.text("R901 is THE bond, to the mixer's TP6. R902 is internal. "
+             "Constraint 2 allows exactly one of the first.",
+             520 * G, y + 63.5, size=2.0)
+
+    # -- rail decoupling and op-amp power --------------------------------
+    x = 20 * G
+    for ref_name in sorted(circuit.PARTS, key=_sort_key):
+        if not ref_name.startswith("C7"):
+            continue
+        part = circuit.PARTS[ref_name]
+        cap = _c(sch, ref_name, x, y + 88.9, angle=VERT)
+        px, py = cap.pin("1")
+        sch.wire((px, py - 6.35), (px, py))
+        rail = "VA+" if "V+" in part.description else "VA-"
+        sch.label(rail, px, py - 6.35)
+        _drop(sch, cap, "2", "MAGND", dy=5.08)
+        x += 20.32
+
+    x = 20 * G
+    for package in circuit.OPAMP_PACKAGES:
+        pwr = sch.place(package, "cv:OPA1644", circuit.OPAMP, x, y + 121.92,
+                        footprint=circuit.PARTS[package].footprint,
+                        unit=circuit.OPAMP_POWER_UNIT)
+        for pin, net in ((circuit.OPAMP_PINS["V+"], "VA+"),
+                         (circuit.OPAMP_PINS["V-"], "VA-")):
+            px, py = pwr.pin(str(pin))
+            dy = -6.35 if net == "VA+" else 6.35
+            sch.wire((px, py), (px, py + dy))
+            sch.label(net, px, py + dy)
+        x += 40.64
+
+    for index, vca_ref in enumerate(circuit.VCA_PACKAGES_REFS):
+        v = _vca_cache[vca_ref]
+        # V+ is alone on its row and leaves sideways. V- shares a row with GND
+        # 2.54 mm away, so both leave vertically first, on opposite sides.
+        px, py = v.pin(str(circuit.VCA_PINS["V+"]))
+        sch.wire((px, py), (px + 24 * G, py))
+        sch.label("VA+", px + 24 * G, py)
+        end = _leave_down(sch, v, str(circuit.VCA_PINS["V-"]), 14 * G, -20 * G)
+        sch.label("VA-", *end)
+        end = _leave_down(sch, v, str(circuit.VCA_PINS["GND"]), 20 * G, 12 * G)
+        _gnd(sch, *end, net="MAGND")
+        # MODE open is Class AB -- datasheet page 3, and it is a decision.
+        sch.no_connect(*v.pin(str(circuit.VCA_PINS["MODE"])))
+        spare = circuit.VCA_CHANNEL_PINS[circuit.VCA_SPARE_CELLS[vca_ref]]
+        for role, dx in (("IIN", 8.89), ("IOUT", 11.43)):
+            _drop_out(sch, v, str(spare[role]), "MAGND", dx=dx, dy=11 * G)
+        sch.no_connect(*v.pin(str(spare["VC"])))
+
+    # -- power flags, so ERC knows where the rails come from -------------
+    for index, net in enumerate(("VA+", "VA-", "V5", "VREF", "VREFN",
+                                 "MAGND", "MDGND", socket.AGND)):
+        fx = 640 * G + index * 16 * G
+        flag = sch.place(f"#FLG{index + 1:02d}", "power:PWR_FLAG", "PWR_FLAG",
+                         fx, y + 121.92)
+        px, py = flag.pin("1")
+        sch.wire((px, py), (px, py + 7.62))
+        if net in ("MAGND", "MDGND"):
+            _gnd(sch, px, py + 7.62, net)
+        else:
+            sch.label(net, px, py + 7.62)
+
+
+# ---------------------------------------------------------------------------
+# Does the drawing mean what design.py says?
+# ---------------------------------------------------------------------------
+
+def _between(point, a, b):
+    """Is `point` strictly inside the segment a-b, collinear with it?
+
+    eeschema's rule, and the whole reason this file needs a checker: a wire
+    *end* landing part-way along another wire is a connection. Two wires merely
+    crossing, neither of them ending there, is not.
+    """
+    (px, py), (ax, ay), (bx, by) = point, a, b
+    if (px, py) in (a, b):
+        return False
+    cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+    if abs(cross) > 1e-6:
+        return False
+    dot = (px - ax) * (bx - ax) + (py - ay) * (by - ay)
+    length = (bx - ax) ** 2 + (by - ay) ** 2
+    return 0 < dot < length
+
+
+def connectivity(sch):
+    """Nets as the *geometry* forms them: net name -> {(ref, pin)}.
+
+    Built the way eeschema builds them -- union the ends of every wire, union
+    any endpoint or pin that lands mid-way along another wire, then name each
+    component from whatever labels and power symbols sit on it. Nothing here
+    reads design.NETS, which is the point: this is what the sheet says, and
+    check_against_design() is where the two are made to agree.
+    """
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for a, b in sch.wires:
+        union(a, b)
+
+    anchors = {a for a, _ in sch.wires} | {b for _, b in sch.wires}
+    for part in sch.parts:
+        for _, position in part.drawn_pins():
+            anchors.add(position)
+    for _, point, _, _ in sch.labels:
+        anchors.add(point)
+
+    for point in anchors:
+        for a, b in sch.wires:
+            if _between(point, a, b):
+                union(point, a)
+
+    names, pins = {}, {}
+    for part in sch.parts:
+        for number, position in part.drawn_pins():
+            root = find(position)
+            if part.ref.startswith("#PWR"):
+                names.setdefault(root, set()).add(part.value)
+            elif part.ref.startswith("#FLG"):
+                pass
+            else:
+                pins.setdefault(root, set()).add((part.ref, str(number)))
+    for name, point, _, _ in sch.labels:
+        names.setdefault(find(point), set()).add(name)
+
+    return names, pins
+
+
+def merge_points(sch):
+    """Where two named nets first touch, as coordinates.
+
+    connectivity() says *that* two nets are one; this says *where*, which is
+    the only form of the answer anybody can act on. It replays the same unions
+    one at a time and records the point at which a component already carrying
+    one name acquires a second.
+
+    Naming the coordinate is what turned this from guesswork into a fix. Three
+    rounds were spent moving offsets by hand and watching the merge relocate
+    from IOUT1 to OE to PIN1, because the report said which nets were joined
+    and never where.
+    """
+    parent, label_of = {}, {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for name, point, _, _ in sch.labels:
+        label_of.setdefault(point, set()).add(name)
+    for part in sch.parts:
+        if part.ref.startswith("#PWR"):
+            for _, position in part.drawn_pins():
+                label_of.setdefault(position, set()).add(part.value)
+
+    carried, found = {}, {}
+    for point, names in label_of.items():
+        carried[find(point)] = set(names)
+
+    def union(a, b, where):
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            return
+        left, right = carried.get(ra, set()), carried.get(rb, set())
+        parent[ra] = rb
+        merged = left | right
+        carried[rb] = merged
+        if left and right and left != right:
+            found.setdefault(frozenset(merged), []).append(where)
+
+    for a, b in sch.wires:
+        union(a, b, a)
+    anchors = ({a for a, _ in sch.wires} | {b for _, b in sch.wires}
+               | {q for part in sch.parts for _, q in part.drawn_pins()}
+               | set(label_of))
+    for point in anchors:
+        for a, b in sch.wires:
+            if _between(point, a, b):
+                union(point, a, point)
+    return found
+
+
+def check_against_design(sch):
+    """Every net design.py asks for is the net the geometry forms.
+
+    Two failures, and the second is the one this exists for.
+
+    A component carrying more than one net name is a *merge*: two nets touching
+    somewhere on the sheet. The message names both and the coordinates of every
+    pin caught in it, because the useful question is always "where", and diffing
+    KiCad's exported netlist afterwards answers only "what".
+
+    A net design.py declares that the geometry did not form is a *break*.
+
+    Compared by reference rather than by (ref, pin) for the membership test,
+    which is the mixer's own rule at check_summing_node(): "which pin of a
+    two-pin part faces the node is a drawing convenience". A resistor drawn the
+    other way round is the same circuit.
+    """
+    names, pins = connectivity(sch)
+    problems = []
+
+    culprits = merge_points(sch)
+    for root, labels in sorted(names.items(), key=lambda kv: sorted(kv[1])):
+        if len(labels) > 1:
+            caught = sorted(pins.get(root, ()))
+            where = culprits.get(frozenset(labels), [])
+            problems.append(
+                f"MERGE: {sorted(labels)} are one net on the sheet at "
+                f"{where[:2] or 'an unlocated point'}, carrying "
+                f"{len(caught)} pins -- e.g. {caught[:4]}")
+
+    drawn = {}
+    for root, labels in names.items():
+        for label in labels:
+            drawn.setdefault(label, set()).update(
+                ref for ref, _ in pins.get(root, ()))
+    for net, entries in sorted(circuit.NETS.items()):
+        want = {ref for ref, _ in entries}
+        got = drawn.get(net)
+        if got is None:
+            problems.append(f"BREAK: {net} is not formed on the sheet at all")
+        elif got != want:
+            problems.append(
+                f"BREAK: {net} carries {sorted(got)}, design.py says "
+                f"{sorted(want)}")
+    return problems
+
+
+def _conn_nets(ref):
+    return {pin: net for net, entries in circuit.NETS.items()
+            for r, pin in entries if r == ref}
+
+
+def _sort_key(ref):
+    head = "".join(c for c in ref if c.isalpha())
+    tail = "".join(c for c in ref if c.isdigit())
+    return head, int(tail or 0)
+
+
+def build():
+    sch = Schematic(
+        "cv-module",
+        title="cv-module: per-string CV generation, six channels",
+        rev="spike",
+        company=f"mates with summing-mixer @ {socket.PIN[:7]}",
+        paper="A0")
+    register(sch)
+    for n in range(1, circuit.CHANNELS + 1):
+        audio_row(sch, n, AUDIO_Y0 + (n - 1) * AUDIO_PITCH)
+    for n in range(1, circuit.CHANNELS + 1):
+        cv_row(sch, n, CV_Y0 + (n - 1) * CV_PITCH)
+    shared_block(sch, SHARED_Y)
+    sch.auto_junctions()
+    return sch
+
+
+def report(sch):
+    """Print the comparison, and say which half of it is fatal.
+
+    **A merge and a break are not the same severity and are not treated as
+    such.** A merge is two nets touching: the sheet looks right, ERC passes, the
+    netlist is well-formed, and the circuit is different -- the first run of
+    this file merged 34 nets into one and nothing but this comparison said so.
+    A break is a missing wire, which this check, KiCad's ERC and anybody reading
+    the sheet all notice.
+
+    So merges fail the build and breaks are reported loudly and let through.
+    That is the same asymmetry design.check_stuffing() records upstream:
+    "populating both shorts out the capacitor, which is a fault that measures as
+    working; populating neither opens the channel, which at least announces
+    itself."
+    """
+    problems = check_against_design(sch)
+    merges = [p for p in problems if p.startswith("MERGE")]
+    breaks = [p for p in problems if p.startswith("BREAK")]
+    print(f"  {len(merges)} merges (fatal), {len(breaks)} breaks (reported)")
+    for problem in merges[:8]:
+        print(f"    {problem}")
+    for problem in breaks[:8]:
+        print(f"    {problem}")
+    if len(breaks) > 8:
+        print(f"    ... and {len(breaks) - 8} more breaks")
+    return merges, breaks
+
+
+def main():
+    OUT.mkdir(exist_ok=True)
+    sch = build()
+    sch.save(SHEET)
+    print(f"{SHEET.name}: {len(sch.parts)} symbols, {len(sch.wires)} wires, "
+          f"{len(sch.labels)} labels, {len(sch.junctions)} junctions")
+    drawn = {p.ref for p in sch.parts if not p.ref.startswith("#")}
+    missing = sorted(set(circuit.PARTS) - drawn, key=_sort_key)
+    if missing:
+        print(f"  NOT DRAWN: {missing}")
+    merges, breaks = report(sch)
+    if merges:
+        raise SystemExit(f"{len(merges)} merges: two nets touch on the sheet, "
+                         f"which is a different circuit that passes every "
+                         f"other check")
+    if breaks:
+        print(f"  the sheet is saved and incomplete: {len(breaks)} nets in "
+              f"design.py are not formed by the geometry yet")
+    return sch
+
+
+if __name__ == "__main__":
+    main()

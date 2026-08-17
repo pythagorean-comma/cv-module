@@ -1,0 +1,4207 @@
+(export
+	(version E)
+	(design
+		(source "design.py")
+		(tool "cv-module gen_netlist.py")
+		(sheet
+			(title_block
+				(title "cv-module: per-string CV, one channel x6")
+				(comment
+					(number 1)
+					(value "mates with summing-mixer @ 4bc7ddb")
+				)
+				(comment
+					(number 2)
+					(value "0 parts carry pin ROLES not numbers (see design.UNSPECIFIED); not loadable by KiCad until resolved")
+				)
+				(comment
+					(number 3)
+					(value "deferred blocks: bypass relay and fail-safe, controller, envelope ADC, envelope rectifier, relay drive, supply")
+				)
+			)
+		)
+	)
+	(components
+		(comp
+			(ref "C101")
+			(value "10u/16V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM21BR61C106KE15L")
+			(property "Description" "Channel 1 VCA input block -- control feedthrough")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C102")
+			(value "1200p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H122JA01D")
+			(property "Description" "Channel 1 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C121")
+			(value "100p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H101JA01D")
+			(property "Description" "Channel 1 I-V compensation")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C131")
+			(value "150n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H154KA01D")
+			(property "Description" "Channel 1 servo integrator")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C141")
+			(value "56n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H563KA01D")
+			(property "Description" "Channel 1 CV pole 1")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C142")
+			(value "22n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H223KA01D")
+			(property "Description" "Channel 1 CV pole 2")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C201")
+			(value "10u/16V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM21BR61C106KE15L")
+			(property "Description" "Channel 2 VCA input block -- control feedthrough")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C202")
+			(value "1200p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H122JA01D")
+			(property "Description" "Channel 2 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C221")
+			(value "100p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H101JA01D")
+			(property "Description" "Channel 2 I-V compensation")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C231")
+			(value "150n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H154KA01D")
+			(property "Description" "Channel 2 servo integrator")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C241")
+			(value "56n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H563KA01D")
+			(property "Description" "Channel 2 CV pole 1")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C242")
+			(value "22n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H223KA01D")
+			(property "Description" "Channel 2 CV pole 2")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C301")
+			(value "10u/16V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM21BR61C106KE15L")
+			(property "Description" "Channel 3 VCA input block -- control feedthrough")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C302")
+			(value "1200p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H122JA01D")
+			(property "Description" "Channel 3 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C321")
+			(value "100p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H101JA01D")
+			(property "Description" "Channel 3 I-V compensation")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C331")
+			(value "150n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H154KA01D")
+			(property "Description" "Channel 3 servo integrator")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C341")
+			(value "56n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H563KA01D")
+			(property "Description" "Channel 3 CV pole 1")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C342")
+			(value "22n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H223KA01D")
+			(property "Description" "Channel 3 CV pole 2")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C401")
+			(value "10u/16V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM21BR61C106KE15L")
+			(property "Description" "Channel 4 VCA input block -- control feedthrough")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C402")
+			(value "1200p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H122JA01D")
+			(property "Description" "Channel 4 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C421")
+			(value "100p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H101JA01D")
+			(property "Description" "Channel 4 I-V compensation")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C431")
+			(value "150n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H154KA01D")
+			(property "Description" "Channel 4 servo integrator")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C441")
+			(value "56n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H563KA01D")
+			(property "Description" "Channel 4 CV pole 1")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C442")
+			(value "22n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H223KA01D")
+			(property "Description" "Channel 4 CV pole 2")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C501")
+			(value "10u/16V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM21BR61C106KE15L")
+			(property "Description" "Channel 5 VCA input block -- control feedthrough")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C502")
+			(value "1200p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H122JA01D")
+			(property "Description" "Channel 5 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C521")
+			(value "100p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H101JA01D")
+			(property "Description" "Channel 5 I-V compensation")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C531")
+			(value "150n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H154KA01D")
+			(property "Description" "Channel 5 servo integrator")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C541")
+			(value "56n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H563KA01D")
+			(property "Description" "Channel 5 CV pole 1")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C542")
+			(value "22n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H223KA01D")
+			(property "Description" "Channel 5 CV pole 2")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C601")
+			(value "10u/16V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM21BR61C106KE15L")
+			(property "Description" "Channel 6 VCA input block -- control feedthrough")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C602")
+			(value "1200p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H122JA01D")
+			(property "Description" "Channel 6 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C621")
+			(value "100p/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2165C1H101JA01D")
+			(property "Description" "Channel 6 I-V compensation")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C631")
+			(value "150n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H154KA01D")
+			(property "Description" "Channel 6 servo integrator")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C641")
+			(value "56n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H563KA01D")
+			(property "Description" "Channel 6 CV pole 1")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C642")
+			(value "22n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H223KA01D")
+			(property "Description" "Channel 6 CV pole 2")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C701")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U1 V+ bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C702")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U1 V- bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C703")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U2 V+ bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C704")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U2 V- bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C705")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U3 V+ bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C706")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U3 V- bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C707")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U4 V+ bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C708")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U4 V- bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C709")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U5 V+ bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C710")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U5 V- bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C711")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U6 V+ bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C712")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U6 V- bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C713")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U7 V+ bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C714")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U7 V- bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C715")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U8 V+ bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C716")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U8 V- bypass")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C717")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U9 V+ decoupling -- at the package")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C718")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U9 V- decoupling -- at the package")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C719")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U10 V+ decoupling -- at the package")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C720")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "U10 V- decoupling -- at the package")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C801")
+			(value "100n/50V C0G")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM2195C1H104JA01D")
+			(property "Description" "Reference noise reduction -- 75 -> 45 nV/rtHz")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C802")
+			(value "10u/16V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM21BR61C106KE15L")
+			(property "Description" "Reference reservoir")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C803")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "'541 local decoupling -- at the package")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C804")
+			(value "10u/16V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM21BR61C106KE15L")
+			(property "Description" "'541 charge reservoir -- keeps the switching transient off the reference")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J1")
+			(value "CH1")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical")
+			(property "MPN" "61300211121")
+			(property "Description" "Shielded twisted pair to mixer RV101: 1=PIN1 (socket pin 1), 2=SIN1 (socket pin 2); shield to socket pin 3 at the main-board end only, cut back here")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J10")
+			(value "CTRL2")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical")
+			(property "MPN" "61300511121")
+			(property "Description" "From the RP2040 (DEFERRED), continued")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J11")
+			(value "CTRL3")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical")
+			(property "MPN" "61300311121")
+			(property "Description" "From the RP2040 (DEFERRED), continued: 1=PWM6, 2=MDGND, 3=OE")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J2")
+			(value "CH2")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical")
+			(property "MPN" "61300211121")
+			(property "Description" "Shielded twisted pair to mixer RV201: 1=PIN2 (socket pin 1), 2=SIN2 (socket pin 2); shield to socket pin 3 at the main-board end only, cut back here")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J3")
+			(value "CH3")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical")
+			(property "MPN" "61300211121")
+			(property "Description" "Shielded twisted pair to mixer RV301: 1=PIN3 (socket pin 1), 2=SIN3 (socket pin 2); shield to socket pin 3 at the main-board end only, cut back here")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J4")
+			(value "CH4")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical")
+			(property "MPN" "61300211121")
+			(property "Description" "Shielded twisted pair to mixer RV401: 1=PIN4 (socket pin 1), 2=SIN4 (socket pin 2); shield to socket pin 3 at the main-board end only, cut back here")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J5")
+			(value "CH5")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical")
+			(property "MPN" "61300211121")
+			(property "Description" "Shielded twisted pair to mixer RV501: 1=PIN5 (socket pin 1), 2=SIN5 (socket pin 2); shield to socket pin 3 at the main-board end only, cut back here")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J6")
+			(value "CH6")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical")
+			(property "MPN" "61300211121")
+			(property "Description" "Shielded twisted pair to mixer RV601: 1=PIN6 (socket pin 1), 2=SIN6 (socket pin 2); shield to socket pin 3 at the main-board end only, cut back here")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J7")
+			(value "BOND")
+			(footprint "TestPoint:TestPoint_Pad_D2.0mm")
+			(property "Description" "Solder pad: single ground bond to the mixer's TP6, and the six triad shields land here too")
+			(property "InBOM" no)
+		)
+		(comp
+			(ref "J8")
+			(value "PWR")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical")
+			(property "MPN" "61300511121")
+			(property "Description" "From the isolated DC-DC (DEFERRED): 1=VA+, 2=VA-, 3=MAGND, 4=V5, 5=MDGND")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "J9")
+			(value "CTRL")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical")
+			(property "MPN" "61300511121")
+			(property "Description" "From the RP2040 (DEFERRED): 6 x PWM, OE, and MDGND between every pair -- the same GND-between-signals rule design.LINK_FP makes upstream")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K101")
+			(value "")
+			(property "Description" "Channel 1 pad bit 0, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K102")
+			(value "")
+			(property "Description" "Channel 1 pad bit 1, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K201")
+			(value "")
+			(property "Description" "Channel 2 pad bit 0, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K202")
+			(value "")
+			(property "Description" "Channel 2 pad bit 1, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K301")
+			(value "")
+			(property "Description" "Channel 3 pad bit 0, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K302")
+			(value "")
+			(property "Description" "Channel 3 pad bit 1, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K401")
+			(value "")
+			(property "Description" "Channel 4 pad bit 0, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K402")
+			(value "")
+			(property "Description" "Channel 4 pad bit 1, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K501")
+			(value "")
+			(property "Description" "Channel 5 pad bit 0, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K502")
+			(value "")
+			(property "Description" "Channel 5 pad bit 1, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K601")
+			(value "")
+			(property "Description" "Channel 6 pad bit 0, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "K602")
+			(value "")
+			(property "Description" "Channel 6 pad bit 1, dual-coil latching DPDT; contacts carry <=102 uA")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R101")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 1 socket load -- constraint 4")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R102")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 1 front-end feedback")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R111")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 1 R_IN, +0 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R112")
+			(value "24k3 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB2432V")
+			(property "Description" "Channel 1 R_IN, -6 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R113")
+			(value "48k7 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB4872V")
+			(property "Description" "Channel 1 R_IN, -12 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R114")
+			(value "97k6 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB9762V")
+			(property "Description" "Channel 1 R_IN, -18 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R115")
+			(value "220R 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07220RL")
+			(property "Description" "Channel 1 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R121")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 1 I-V -- unity at the 0 dB pad step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R131")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 1 servo sense")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R132")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 1 servo injection")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R141")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 1 CV input")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R142")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 1 CV feedback -- sets the span")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R143")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 1 CV inner")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R144")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 1 CV offset -- = R141 by construction")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R201")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 2 socket load -- constraint 4")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R202")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 2 front-end feedback")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R211")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 2 R_IN, +0 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R212")
+			(value "24k3 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB2432V")
+			(property "Description" "Channel 2 R_IN, -6 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R213")
+			(value "48k7 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB4872V")
+			(property "Description" "Channel 2 R_IN, -12 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R214")
+			(value "97k6 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB9762V")
+			(property "Description" "Channel 2 R_IN, -18 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R215")
+			(value "220R 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07220RL")
+			(property "Description" "Channel 2 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R221")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 2 I-V -- unity at the 0 dB pad step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R231")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 2 servo sense")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R232")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 2 servo injection")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R241")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 2 CV input")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R242")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 2 CV feedback -- sets the span")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R243")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 2 CV inner")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R244")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 2 CV offset -- = R241 by construction")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R301")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 3 socket load -- constraint 4")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R302")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 3 front-end feedback")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R311")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 3 R_IN, +0 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R312")
+			(value "24k3 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB2432V")
+			(property "Description" "Channel 3 R_IN, -6 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R313")
+			(value "48k7 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB4872V")
+			(property "Description" "Channel 3 R_IN, -12 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R314")
+			(value "97k6 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB9762V")
+			(property "Description" "Channel 3 R_IN, -18 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R315")
+			(value "220R 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07220RL")
+			(property "Description" "Channel 3 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R321")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 3 I-V -- unity at the 0 dB pad step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R331")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 3 servo sense")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R332")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 3 servo injection")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R341")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 3 CV input")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R342")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 3 CV feedback -- sets the span")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R343")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 3 CV inner")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R344")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 3 CV offset -- = R341 by construction")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R401")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 4 socket load -- constraint 4")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R402")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 4 front-end feedback")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R411")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 4 R_IN, +0 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R412")
+			(value "24k3 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB2432V")
+			(property "Description" "Channel 4 R_IN, -6 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R413")
+			(value "48k7 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB4872V")
+			(property "Description" "Channel 4 R_IN, -12 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R414")
+			(value "97k6 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB9762V")
+			(property "Description" "Channel 4 R_IN, -18 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R415")
+			(value "220R 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07220RL")
+			(property "Description" "Channel 4 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R421")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 4 I-V -- unity at the 0 dB pad step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R431")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 4 servo sense")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R432")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 4 servo injection")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R441")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 4 CV input")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R442")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 4 CV feedback -- sets the span")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R443")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 4 CV inner")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R444")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 4 CV offset -- = R441 by construction")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R501")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 5 socket load -- constraint 4")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R502")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 5 front-end feedback")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R511")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 5 R_IN, +0 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R512")
+			(value "24k3 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB2432V")
+			(property "Description" "Channel 5 R_IN, -6 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R513")
+			(value "48k7 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB4872V")
+			(property "Description" "Channel 5 R_IN, -12 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R514")
+			(value "97k6 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB9762V")
+			(property "Description" "Channel 5 R_IN, -18 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R515")
+			(value "220R 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07220RL")
+			(property "Description" "Channel 5 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R521")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 5 I-V -- unity at the 0 dB pad step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R531")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 5 servo sense")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R532")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 5 servo injection")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R541")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 5 CV input")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R542")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 5 CV feedback -- sets the span")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R543")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 5 CV inner")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R544")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 5 CV offset -- = R541 by construction")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R601")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 6 socket load -- constraint 4")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R602")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Channel 6 front-end feedback")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R611")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 6 R_IN, +0 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R612")
+			(value "24k3 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB2432V")
+			(property "Description" "Channel 6 R_IN, -6 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R613")
+			(value "48k7 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB4872V")
+			(property "Description" "Channel 6 R_IN, -12 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R614")
+			(value "97k6 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB9762V")
+			(property "Description" "Channel 6 R_IN, -18 dB step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R615")
+			(value "220R 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07220RL")
+			(property "Description" "Channel 6 VCA input RC -- stability")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R621")
+			(value "12k1 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB1212V")
+			(property "Description" "Channel 6 I-V -- unity at the 0 dB pad step")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R631")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 6 servo sense")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R632")
+			(value "1M 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-071ML")
+			(property "Description" "Channel 6 servo injection")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R641")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 6 CV input")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R642")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 6 CV feedback -- sets the span")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R643")
+			(value "17k8 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0717K8L")
+			(property "Description" "Channel 6 CV inner")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R644")
+			(value "22k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-0722KL")
+			(property "Description" "Channel 6 CV offset -- = R641 by construction")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R801")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Reference inverter input")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R802")
+			(value "10k 0.1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "ERA6AEB103V")
+			(property "Description" "Reference inverter feedback")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R811")
+			(value "100k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07100KL")
+			(property "Description" "Channel 1 PWM pull-down -- fail-silent")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R812")
+			(value "100k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07100KL")
+			(property "Description" "Channel 2 PWM pull-down -- fail-silent")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R813")
+			(value "100k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07100KL")
+			(property "Description" "Channel 3 PWM pull-down -- fail-silent")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R814")
+			(value "100k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07100KL")
+			(property "Description" "Channel 4 PWM pull-down -- fail-silent")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R815")
+			(value "100k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07100KL")
+			(property "Description" "Channel 5 PWM pull-down -- fail-silent")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R816")
+			(value "100k 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-07100KL")
+			(property "Description" "Channel 6 PWM pull-down -- fail-silent")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R901")
+			(value "0R")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805JR-070RL")
+			(property "Description" "THE bond: module audio ground to mixer AGND at TP6 -- constraint 2, exactly one")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R902")
+			(value "0R")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805JR-070RL")
+			(property "Description" "Module analogue/digital star -- internal, not a bond to the mixer")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U1")
+			(value "OPA1644")
+			(footprint "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm")
+			(property "MPN" "OPA1644AIDR")
+			(property "Description" "Quad JFET, front end / I-V / servo / CV")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U10")
+			(value "SSI2164")
+			(footprint "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm")
+			(property "MPN" "SSI2164S-RT")
+			(property "Description" "Quad VCA, Class AB")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U11")
+			(value "74AHC541")
+			(footprint "Package_SO:SOIC-20W_7.5x12.8mm_P1.27mm")
+			(property "MPN" "SN74AHC541DWR")
+			(property "Description" "Octal buffer, Vcc = VREF, GND = MAGND: its outputs are a precision voltage, so it sits in the analogue domain and straddles the boundary")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U12")
+			(value "MAX6126A25")
+			(footprint "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
+			(property "MPN" "MAX6126AASA25+")
+			(property "Description" "2.5 V band-gap reference, 45 nV/rtHz with C_NR; Kelvin-sensed, OUTF/OUTS shorted at C804; also feeds the ADC")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U2")
+			(value "OPA1644")
+			(footprint "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm")
+			(property "MPN" "OPA1644AIDR")
+			(property "Description" "Quad JFET, front end / I-V / servo / CV")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U3")
+			(value "OPA1644")
+			(footprint "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm")
+			(property "MPN" "OPA1644AIDR")
+			(property "Description" "Quad JFET, front end / I-V / servo / CV")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U4")
+			(value "OPA1644")
+			(footprint "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm")
+			(property "MPN" "OPA1644AIDR")
+			(property "Description" "Quad JFET, front end / I-V / servo / CV")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U5")
+			(value "OPA1644")
+			(footprint "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm")
+			(property "MPN" "OPA1644AIDR")
+			(property "Description" "Quad JFET, front end / I-V / servo / CV")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U6")
+			(value "OPA1644")
+			(footprint "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm")
+			(property "MPN" "OPA1644AIDR")
+			(property "Description" "Quad JFET, front end / I-V / servo / CV")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U7")
+			(value "OPA1644")
+			(footprint "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm")
+			(property "MPN" "OPA1644AIDR")
+			(property "Description" "Quad JFET, front end / I-V / servo / CV")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U8")
+			(value "OPA1644")
+			(footprint "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm")
+			(property "MPN" "OPA1644AIDR")
+			(property "Description" "Quad JFET, front end / I-V / servo / CV")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U9")
+			(value "SSI2164")
+			(footprint "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm")
+			(property "MPN" "SSI2164S-RT")
+			(property "Description" "Quad VCA, Class AB")
+			(property "InBOM" yes)
+		)
+	)
+	(nets
+		(net
+			(code 1)
+			(name "AGND")
+			(node
+				(ref "J7")
+				(pin "1")
+			)
+			(node
+				(ref "R901")
+				(pin "2")
+			)
+		)
+		(net
+			(code 2)
+			(name "BUF1")
+			(node
+				(ref "C101")
+				(pin "1")
+			)
+			(node
+				(ref "R102")
+				(pin "2")
+			)
+			(node
+				(ref "U1")
+				(pin "1")
+			)
+		)
+		(net
+			(code 3)
+			(name "BUF2")
+			(node
+				(ref "C201")
+				(pin "1")
+			)
+			(node
+				(ref "R202")
+				(pin "2")
+			)
+			(node
+				(ref "U1")
+				(pin "7")
+			)
+		)
+		(net
+			(code 4)
+			(name "BUF3")
+			(node
+				(ref "C301")
+				(pin "1")
+			)
+			(node
+				(ref "R302")
+				(pin "2")
+			)
+			(node
+				(ref "U1")
+				(pin "8")
+			)
+		)
+		(net
+			(code 5)
+			(name "BUF4")
+			(node
+				(ref "C401")
+				(pin "1")
+			)
+			(node
+				(ref "R402")
+				(pin "2")
+			)
+			(node
+				(ref "U1")
+				(pin "14")
+			)
+		)
+		(net
+			(code 6)
+			(name "BUF5")
+			(node
+				(ref "C501")
+				(pin "1")
+			)
+			(node
+				(ref "R502")
+				(pin "2")
+			)
+			(node
+				(ref "U2")
+				(pin "1")
+			)
+		)
+		(net
+			(code 7)
+			(name "BUF6")
+			(node
+				(ref "C601")
+				(pin "1")
+			)
+			(node
+				(ref "R602")
+				(pin "2")
+			)
+			(node
+				(ref "U2")
+				(pin "7")
+			)
+		)
+		(net
+			(code 8)
+			(name "CVN1")
+			(node
+				(ref "C142")
+				(pin "1")
+			)
+			(node
+				(ref "R143")
+				(pin "2")
+			)
+			(node
+				(ref "U7")
+				(pin "2")
+			)
+		)
+		(net
+			(code 9)
+			(name "CVN2")
+			(node
+				(ref "C242")
+				(pin "1")
+			)
+			(node
+				(ref "R243")
+				(pin "2")
+			)
+			(node
+				(ref "U7")
+				(pin "6")
+			)
+		)
+		(net
+			(code 10)
+			(name "CVN3")
+			(node
+				(ref "C342")
+				(pin "1")
+			)
+			(node
+				(ref "R343")
+				(pin "2")
+			)
+			(node
+				(ref "U7")
+				(pin "9")
+			)
+		)
+		(net
+			(code 11)
+			(name "CVN4")
+			(node
+				(ref "C442")
+				(pin "1")
+			)
+			(node
+				(ref "R443")
+				(pin "2")
+			)
+			(node
+				(ref "U7")
+				(pin "13")
+			)
+		)
+		(net
+			(code 12)
+			(name "CVN5")
+			(node
+				(ref "C542")
+				(pin "1")
+			)
+			(node
+				(ref "R543")
+				(pin "2")
+			)
+			(node
+				(ref "U8")
+				(pin "2")
+			)
+		)
+		(net
+			(code 13)
+			(name "CVN6")
+			(node
+				(ref "C642")
+				(pin "1")
+			)
+			(node
+				(ref "R643")
+				(pin "2")
+			)
+			(node
+				(ref "U8")
+				(pin "6")
+			)
+		)
+		(net
+			(code 14)
+			(name "CVX1")
+			(node
+				(ref "C141")
+				(pin "1")
+			)
+			(node
+				(ref "R141")
+				(pin "2")
+			)
+			(node
+				(ref "R142")
+				(pin "1")
+			)
+			(node
+				(ref "R143")
+				(pin "1")
+			)
+			(node
+				(ref "R144")
+				(pin "2")
+			)
+		)
+		(net
+			(code 15)
+			(name "CVX2")
+			(node
+				(ref "C241")
+				(pin "1")
+			)
+			(node
+				(ref "R241")
+				(pin "2")
+			)
+			(node
+				(ref "R242")
+				(pin "1")
+			)
+			(node
+				(ref "R243")
+				(pin "1")
+			)
+			(node
+				(ref "R244")
+				(pin "2")
+			)
+		)
+		(net
+			(code 16)
+			(name "CVX3")
+			(node
+				(ref "C341")
+				(pin "1")
+			)
+			(node
+				(ref "R341")
+				(pin "2")
+			)
+			(node
+				(ref "R342")
+				(pin "1")
+			)
+			(node
+				(ref "R343")
+				(pin "1")
+			)
+			(node
+				(ref "R344")
+				(pin "2")
+			)
+		)
+		(net
+			(code 17)
+			(name "CVX4")
+			(node
+				(ref "C441")
+				(pin "1")
+			)
+			(node
+				(ref "R441")
+				(pin "2")
+			)
+			(node
+				(ref "R442")
+				(pin "1")
+			)
+			(node
+				(ref "R443")
+				(pin "1")
+			)
+			(node
+				(ref "R444")
+				(pin "2")
+			)
+		)
+		(net
+			(code 18)
+			(name "CVX5")
+			(node
+				(ref "C541")
+				(pin "1")
+			)
+			(node
+				(ref "R541")
+				(pin "2")
+			)
+			(node
+				(ref "R542")
+				(pin "1")
+			)
+			(node
+				(ref "R543")
+				(pin "1")
+			)
+			(node
+				(ref "R544")
+				(pin "2")
+			)
+		)
+		(net
+			(code 19)
+			(name "CVX6")
+			(node
+				(ref "C641")
+				(pin "1")
+			)
+			(node
+				(ref "R641")
+				(pin "2")
+			)
+			(node
+				(ref "R642")
+				(pin "1")
+			)
+			(node
+				(ref "R643")
+				(pin "1")
+			)
+			(node
+				(ref "R644")
+				(pin "2")
+			)
+		)
+		(net
+			(code 20)
+			(name "FEN1")
+			(node
+				(ref "R101")
+				(pin "2")
+			)
+			(node
+				(ref "R102")
+				(pin "1")
+			)
+			(node
+				(ref "U1")
+				(pin "2")
+			)
+		)
+		(net
+			(code 21)
+			(name "FEN2")
+			(node
+				(ref "R201")
+				(pin "2")
+			)
+			(node
+				(ref "R202")
+				(pin "1")
+			)
+			(node
+				(ref "U1")
+				(pin "6")
+			)
+		)
+		(net
+			(code 22)
+			(name "FEN3")
+			(node
+				(ref "R301")
+				(pin "2")
+			)
+			(node
+				(ref "R302")
+				(pin "1")
+			)
+			(node
+				(ref "U1")
+				(pin "9")
+			)
+		)
+		(net
+			(code 23)
+			(name "FEN4")
+			(node
+				(ref "R401")
+				(pin "2")
+			)
+			(node
+				(ref "R402")
+				(pin "1")
+			)
+			(node
+				(ref "U1")
+				(pin "13")
+			)
+		)
+		(net
+			(code 24)
+			(name "FEN5")
+			(node
+				(ref "R501")
+				(pin "2")
+			)
+			(node
+				(ref "R502")
+				(pin "1")
+			)
+			(node
+				(ref "U2")
+				(pin "2")
+			)
+		)
+		(net
+			(code 25)
+			(name "FEN6")
+			(node
+				(ref "R601")
+				(pin "2")
+			)
+			(node
+				(ref "R602")
+				(pin "1")
+			)
+			(node
+				(ref "U2")
+				(pin "6")
+			)
+		)
+		(net
+			(code 26)
+			(name "IIN1")
+			(node
+				(ref "K101")
+				(pin "11")
+			)
+			(node
+				(ref "R115")
+				(pin "1")
+			)
+			(node
+				(ref "U9")
+				(pin "2")
+			)
+		)
+		(net
+			(code 27)
+			(name "IIN2")
+			(node
+				(ref "K201")
+				(pin "11")
+			)
+			(node
+				(ref "R215")
+				(pin "1")
+			)
+			(node
+				(ref "U9")
+				(pin "7")
+			)
+		)
+		(net
+			(code 28)
+			(name "IIN3")
+			(node
+				(ref "K301")
+				(pin "11")
+			)
+			(node
+				(ref "R315")
+				(pin "1")
+			)
+			(node
+				(ref "U9")
+				(pin "10")
+			)
+		)
+		(net
+			(code 29)
+			(name "IIN4")
+			(node
+				(ref "K401")
+				(pin "11")
+			)
+			(node
+				(ref "R415")
+				(pin "1")
+			)
+			(node
+				(ref "U10")
+				(pin "2")
+			)
+		)
+		(net
+			(code 30)
+			(name "IIN5")
+			(node
+				(ref "K501")
+				(pin "11")
+			)
+			(node
+				(ref "R515")
+				(pin "1")
+			)
+			(node
+				(ref "U10")
+				(pin "7")
+			)
+		)
+		(net
+			(code 31)
+			(name "IIN6")
+			(node
+				(ref "K601")
+				(pin "11")
+			)
+			(node
+				(ref "R615")
+				(pin "1")
+			)
+			(node
+				(ref "U10")
+				(pin "10")
+			)
+		)
+		(net
+			(code 32)
+			(name "IOUT1")
+			(node
+				(ref "C121")
+				(pin "1")
+			)
+			(node
+				(ref "R121")
+				(pin "1")
+			)
+			(node
+				(ref "R132")
+				(pin "2")
+			)
+			(node
+				(ref "U3")
+				(pin "2")
+			)
+			(node
+				(ref "U9")
+				(pin "4")
+			)
+		)
+		(net
+			(code 33)
+			(name "IOUT2")
+			(node
+				(ref "C221")
+				(pin "1")
+			)
+			(node
+				(ref "R221")
+				(pin "1")
+			)
+			(node
+				(ref "R232")
+				(pin "2")
+			)
+			(node
+				(ref "U3")
+				(pin "6")
+			)
+			(node
+				(ref "U9")
+				(pin "5")
+			)
+		)
+		(net
+			(code 34)
+			(name "IOUT3")
+			(node
+				(ref "C321")
+				(pin "1")
+			)
+			(node
+				(ref "R321")
+				(pin "1")
+			)
+			(node
+				(ref "R332")
+				(pin "2")
+			)
+			(node
+				(ref "U3")
+				(pin "9")
+			)
+			(node
+				(ref "U9")
+				(pin "12")
+			)
+		)
+		(net
+			(code 35)
+			(name "IOUT4")
+			(node
+				(ref "C421")
+				(pin "1")
+			)
+			(node
+				(ref "R421")
+				(pin "1")
+			)
+			(node
+				(ref "R432")
+				(pin "2")
+			)
+			(node
+				(ref "U10")
+				(pin "4")
+			)
+			(node
+				(ref "U3")
+				(pin "13")
+			)
+		)
+		(net
+			(code 36)
+			(name "IOUT5")
+			(node
+				(ref "C521")
+				(pin "1")
+			)
+			(node
+				(ref "R521")
+				(pin "1")
+			)
+			(node
+				(ref "R532")
+				(pin "2")
+			)
+			(node
+				(ref "U10")
+				(pin "5")
+			)
+			(node
+				(ref "U4")
+				(pin "2")
+			)
+		)
+		(net
+			(code 37)
+			(name "IOUT6")
+			(node
+				(ref "C621")
+				(pin "1")
+			)
+			(node
+				(ref "R621")
+				(pin "1")
+			)
+			(node
+				(ref "R632")
+				(pin "2")
+			)
+			(node
+				(ref "U10")
+				(pin "12")
+			)
+			(node
+				(ref "U4")
+				(pin "6")
+			)
+		)
+		(net
+			(code 38)
+			(name "LOGO1")
+			(node
+				(ref "R141")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "18")
+			)
+		)
+		(net
+			(code 39)
+			(name "LOGO2")
+			(node
+				(ref "R241")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "17")
+			)
+		)
+		(net
+			(code 40)
+			(name "LOGO3")
+			(node
+				(ref "R341")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "16")
+			)
+		)
+		(net
+			(code 41)
+			(name "LOGO4")
+			(node
+				(ref "R441")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "15")
+			)
+		)
+		(net
+			(code 42)
+			(name "LOGO5")
+			(node
+				(ref "R541")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "14")
+			)
+		)
+		(net
+			(code 43)
+			(name "LOGO6")
+			(node
+				(ref "R641")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "13")
+			)
+		)
+		(net
+			(code 44)
+			(name "MAGND")
+			(node
+				(ref "C102")
+				(pin "2")
+			)
+			(node
+				(ref "C141")
+				(pin "2")
+			)
+			(node
+				(ref "C202")
+				(pin "2")
+			)
+			(node
+				(ref "C241")
+				(pin "2")
+			)
+			(node
+				(ref "C302")
+				(pin "2")
+			)
+			(node
+				(ref "C341")
+				(pin "2")
+			)
+			(node
+				(ref "C402")
+				(pin "2")
+			)
+			(node
+				(ref "C441")
+				(pin "2")
+			)
+			(node
+				(ref "C502")
+				(pin "2")
+			)
+			(node
+				(ref "C541")
+				(pin "2")
+			)
+			(node
+				(ref "C602")
+				(pin "2")
+			)
+			(node
+				(ref "C641")
+				(pin "2")
+			)
+			(node
+				(ref "C701")
+				(pin "2")
+			)
+			(node
+				(ref "C702")
+				(pin "2")
+			)
+			(node
+				(ref "C703")
+				(pin "2")
+			)
+			(node
+				(ref "C704")
+				(pin "2")
+			)
+			(node
+				(ref "C705")
+				(pin "2")
+			)
+			(node
+				(ref "C706")
+				(pin "2")
+			)
+			(node
+				(ref "C707")
+				(pin "2")
+			)
+			(node
+				(ref "C708")
+				(pin "2")
+			)
+			(node
+				(ref "C709")
+				(pin "2")
+			)
+			(node
+				(ref "C710")
+				(pin "2")
+			)
+			(node
+				(ref "C711")
+				(pin "2")
+			)
+			(node
+				(ref "C712")
+				(pin "2")
+			)
+			(node
+				(ref "C713")
+				(pin "2")
+			)
+			(node
+				(ref "C714")
+				(pin "2")
+			)
+			(node
+				(ref "C715")
+				(pin "2")
+			)
+			(node
+				(ref "C716")
+				(pin "2")
+			)
+			(node
+				(ref "C717")
+				(pin "2")
+			)
+			(node
+				(ref "C718")
+				(pin "2")
+			)
+			(node
+				(ref "C719")
+				(pin "2")
+			)
+			(node
+				(ref "C720")
+				(pin "2")
+			)
+			(node
+				(ref "C801")
+				(pin "2")
+			)
+			(node
+				(ref "C802")
+				(pin "2")
+			)
+			(node
+				(ref "C803")
+				(pin "2")
+			)
+			(node
+				(ref "C804")
+				(pin "2")
+			)
+			(node
+				(ref "J8")
+				(pin "3")
+			)
+			(node
+				(ref "R901")
+				(pin "1")
+			)
+			(node
+				(ref "R902")
+				(pin "1")
+			)
+			(node
+				(ref "U1")
+				(pin "10")
+			)
+			(node
+				(ref "U1")
+				(pin "12")
+			)
+			(node
+				(ref "U1")
+				(pin "3")
+			)
+			(node
+				(ref "U1")
+				(pin "5")
+			)
+			(node
+				(ref "U10")
+				(pin "13")
+			)
+			(node
+				(ref "U10")
+				(pin "15")
+			)
+			(node
+				(ref "U10")
+				(pin "8")
+			)
+			(node
+				(ref "U11")
+				(pin "10")
+			)
+			(node
+				(ref "U11")
+				(pin "8")
+			)
+			(node
+				(ref "U11")
+				(pin "9")
+			)
+			(node
+				(ref "U12")
+				(pin "3")
+			)
+			(node
+				(ref "U12")
+				(pin "4")
+			)
+			(node
+				(ref "U2")
+				(pin "3")
+			)
+			(node
+				(ref "U2")
+				(pin "5")
+			)
+			(node
+				(ref "U3")
+				(pin "10")
+			)
+			(node
+				(ref "U3")
+				(pin "12")
+			)
+			(node
+				(ref "U3")
+				(pin "3")
+			)
+			(node
+				(ref "U3")
+				(pin "5")
+			)
+			(node
+				(ref "U4")
+				(pin "3")
+			)
+			(node
+				(ref "U4")
+				(pin "5")
+			)
+			(node
+				(ref "U5")
+				(pin "10")
+			)
+			(node
+				(ref "U5")
+				(pin "12")
+			)
+			(node
+				(ref "U5")
+				(pin "3")
+			)
+			(node
+				(ref "U5")
+				(pin "5")
+			)
+			(node
+				(ref "U6")
+				(pin "3")
+			)
+			(node
+				(ref "U6")
+				(pin "5")
+			)
+			(node
+				(ref "U7")
+				(pin "10")
+			)
+			(node
+				(ref "U7")
+				(pin "12")
+			)
+			(node
+				(ref "U7")
+				(pin "3")
+			)
+			(node
+				(ref "U7")
+				(pin "5")
+			)
+			(node
+				(ref "U8")
+				(pin "10")
+			)
+			(node
+				(ref "U8")
+				(pin "3")
+			)
+			(node
+				(ref "U8")
+				(pin "5")
+			)
+			(node
+				(ref "U9")
+				(pin "13")
+			)
+			(node
+				(ref "U9")
+				(pin "15")
+			)
+			(node
+				(ref "U9")
+				(pin "8")
+			)
+		)
+		(net
+			(code 45)
+			(name "MDGND")
+			(node
+				(ref "J10")
+				(pin "2")
+			)
+			(node
+				(ref "J10")
+				(pin "4")
+			)
+			(node
+				(ref "J11")
+				(pin "2")
+			)
+			(node
+				(ref "J8")
+				(pin "5")
+			)
+			(node
+				(ref "J9")
+				(pin "1")
+			)
+			(node
+				(ref "J9")
+				(pin "3")
+			)
+			(node
+				(ref "J9")
+				(pin "5")
+			)
+			(node
+				(ref "R811")
+				(pin "2")
+			)
+			(node
+				(ref "R812")
+				(pin "2")
+			)
+			(node
+				(ref "R813")
+				(pin "2")
+			)
+			(node
+				(ref "R814")
+				(pin "2")
+			)
+			(node
+				(ref "R815")
+				(pin "2")
+			)
+			(node
+				(ref "R816")
+				(pin "2")
+			)
+			(node
+				(ref "R902")
+				(pin "2")
+			)
+		)
+		(net
+			(code 46)
+			(name "OE")
+			(node
+				(ref "J11")
+				(pin "3")
+			)
+			(node
+				(ref "U11")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "19")
+			)
+		)
+		(net
+			(code 47)
+			(name "PADI1")
+			(node
+				(ref "C101")
+				(pin "2")
+			)
+			(node
+				(ref "R111")
+				(pin "1")
+			)
+			(node
+				(ref "R112")
+				(pin "1")
+			)
+			(node
+				(ref "R113")
+				(pin "1")
+			)
+			(node
+				(ref "R114")
+				(pin "1")
+			)
+		)
+		(net
+			(code 48)
+			(name "PADI2")
+			(node
+				(ref "C201")
+				(pin "2")
+			)
+			(node
+				(ref "R211")
+				(pin "1")
+			)
+			(node
+				(ref "R212")
+				(pin "1")
+			)
+			(node
+				(ref "R213")
+				(pin "1")
+			)
+			(node
+				(ref "R214")
+				(pin "1")
+			)
+		)
+		(net
+			(code 49)
+			(name "PADI3")
+			(node
+				(ref "C301")
+				(pin "2")
+			)
+			(node
+				(ref "R311")
+				(pin "1")
+			)
+			(node
+				(ref "R312")
+				(pin "1")
+			)
+			(node
+				(ref "R313")
+				(pin "1")
+			)
+			(node
+				(ref "R314")
+				(pin "1")
+			)
+		)
+		(net
+			(code 50)
+			(name "PADI4")
+			(node
+				(ref "C401")
+				(pin "2")
+			)
+			(node
+				(ref "R411")
+				(pin "1")
+			)
+			(node
+				(ref "R412")
+				(pin "1")
+			)
+			(node
+				(ref "R413")
+				(pin "1")
+			)
+			(node
+				(ref "R414")
+				(pin "1")
+			)
+		)
+		(net
+			(code 51)
+			(name "PADI5")
+			(node
+				(ref "C501")
+				(pin "2")
+			)
+			(node
+				(ref "R511")
+				(pin "1")
+			)
+			(node
+				(ref "R512")
+				(pin "1")
+			)
+			(node
+				(ref "R513")
+				(pin "1")
+			)
+			(node
+				(ref "R514")
+				(pin "1")
+			)
+		)
+		(net
+			(code 52)
+			(name "PADI6")
+			(node
+				(ref "C601")
+				(pin "2")
+			)
+			(node
+				(ref "R611")
+				(pin "1")
+			)
+			(node
+				(ref "R612")
+				(pin "1")
+			)
+			(node
+				(ref "R613")
+				(pin "1")
+			)
+			(node
+				(ref "R614")
+				(pin "1")
+			)
+		)
+		(net
+			(code 53)
+			(name "PIN1")
+			(node
+				(ref "J1")
+				(pin "1")
+			)
+			(node
+				(ref "R101")
+				(pin "1")
+			)
+		)
+		(net
+			(code 54)
+			(name "PIN2")
+			(node
+				(ref "J2")
+				(pin "1")
+			)
+			(node
+				(ref "R201")
+				(pin "1")
+			)
+		)
+		(net
+			(code 55)
+			(name "PIN3")
+			(node
+				(ref "J3")
+				(pin "1")
+			)
+			(node
+				(ref "R301")
+				(pin "1")
+			)
+		)
+		(net
+			(code 56)
+			(name "PIN4")
+			(node
+				(ref "J4")
+				(pin "1")
+			)
+			(node
+				(ref "R401")
+				(pin "1")
+			)
+		)
+		(net
+			(code 57)
+			(name "PIN5")
+			(node
+				(ref "J5")
+				(pin "1")
+			)
+			(node
+				(ref "R501")
+				(pin "1")
+			)
+		)
+		(net
+			(code 58)
+			(name "PIN6")
+			(node
+				(ref "J6")
+				(pin "1")
+			)
+			(node
+				(ref "R601")
+				(pin "1")
+			)
+		)
+		(net
+			(code 59)
+			(name "PS1A")
+			(node
+				(ref "K102")
+				(pin "12")
+			)
+			(node
+				(ref "R111")
+				(pin "2")
+			)
+		)
+		(net
+			(code 60)
+			(name "PS1B")
+			(node
+				(ref "K102")
+				(pin "14")
+			)
+			(node
+				(ref "R112")
+				(pin "2")
+			)
+		)
+		(net
+			(code 61)
+			(name "PS1C")
+			(node
+				(ref "K102")
+				(pin "22")
+			)
+			(node
+				(ref "R113")
+				(pin "2")
+			)
+		)
+		(net
+			(code 62)
+			(name "PS1D")
+			(node
+				(ref "K102")
+				(pin "24")
+			)
+			(node
+				(ref "R114")
+				(pin "2")
+			)
+		)
+		(net
+			(code 63)
+			(name "PS2A")
+			(node
+				(ref "K202")
+				(pin "12")
+			)
+			(node
+				(ref "R211")
+				(pin "2")
+			)
+		)
+		(net
+			(code 64)
+			(name "PS2B")
+			(node
+				(ref "K202")
+				(pin "14")
+			)
+			(node
+				(ref "R212")
+				(pin "2")
+			)
+		)
+		(net
+			(code 65)
+			(name "PS2C")
+			(node
+				(ref "K202")
+				(pin "22")
+			)
+			(node
+				(ref "R213")
+				(pin "2")
+			)
+		)
+		(net
+			(code 66)
+			(name "PS2D")
+			(node
+				(ref "K202")
+				(pin "24")
+			)
+			(node
+				(ref "R214")
+				(pin "2")
+			)
+		)
+		(net
+			(code 67)
+			(name "PS3A")
+			(node
+				(ref "K302")
+				(pin "12")
+			)
+			(node
+				(ref "R311")
+				(pin "2")
+			)
+		)
+		(net
+			(code 68)
+			(name "PS3B")
+			(node
+				(ref "K302")
+				(pin "14")
+			)
+			(node
+				(ref "R312")
+				(pin "2")
+			)
+		)
+		(net
+			(code 69)
+			(name "PS3C")
+			(node
+				(ref "K302")
+				(pin "22")
+			)
+			(node
+				(ref "R313")
+				(pin "2")
+			)
+		)
+		(net
+			(code 70)
+			(name "PS3D")
+			(node
+				(ref "K302")
+				(pin "24")
+			)
+			(node
+				(ref "R314")
+				(pin "2")
+			)
+		)
+		(net
+			(code 71)
+			(name "PS4A")
+			(node
+				(ref "K402")
+				(pin "12")
+			)
+			(node
+				(ref "R411")
+				(pin "2")
+			)
+		)
+		(net
+			(code 72)
+			(name "PS4B")
+			(node
+				(ref "K402")
+				(pin "14")
+			)
+			(node
+				(ref "R412")
+				(pin "2")
+			)
+		)
+		(net
+			(code 73)
+			(name "PS4C")
+			(node
+				(ref "K402")
+				(pin "22")
+			)
+			(node
+				(ref "R413")
+				(pin "2")
+			)
+		)
+		(net
+			(code 74)
+			(name "PS4D")
+			(node
+				(ref "K402")
+				(pin "24")
+			)
+			(node
+				(ref "R414")
+				(pin "2")
+			)
+		)
+		(net
+			(code 75)
+			(name "PS5A")
+			(node
+				(ref "K502")
+				(pin "12")
+			)
+			(node
+				(ref "R511")
+				(pin "2")
+			)
+		)
+		(net
+			(code 76)
+			(name "PS5B")
+			(node
+				(ref "K502")
+				(pin "14")
+			)
+			(node
+				(ref "R512")
+				(pin "2")
+			)
+		)
+		(net
+			(code 77)
+			(name "PS5C")
+			(node
+				(ref "K502")
+				(pin "22")
+			)
+			(node
+				(ref "R513")
+				(pin "2")
+			)
+		)
+		(net
+			(code 78)
+			(name "PS5D")
+			(node
+				(ref "K502")
+				(pin "24")
+			)
+			(node
+				(ref "R514")
+				(pin "2")
+			)
+		)
+		(net
+			(code 79)
+			(name "PS6A")
+			(node
+				(ref "K602")
+				(pin "12")
+			)
+			(node
+				(ref "R611")
+				(pin "2")
+			)
+		)
+		(net
+			(code 80)
+			(name "PS6B")
+			(node
+				(ref "K602")
+				(pin "14")
+			)
+			(node
+				(ref "R612")
+				(pin "2")
+			)
+		)
+		(net
+			(code 81)
+			(name "PS6C")
+			(node
+				(ref "K602")
+				(pin "22")
+			)
+			(node
+				(ref "R613")
+				(pin "2")
+			)
+		)
+		(net
+			(code 82)
+			(name "PS6D")
+			(node
+				(ref "K602")
+				(pin "24")
+			)
+			(node
+				(ref "R614")
+				(pin "2")
+			)
+		)
+		(net
+			(code 83)
+			(name "PSEL1X")
+			(node
+				(ref "K101")
+				(pin "12")
+			)
+			(node
+				(ref "K102")
+				(pin "11")
+			)
+		)
+		(net
+			(code 84)
+			(name "PSEL1Y")
+			(node
+				(ref "K101")
+				(pin "14")
+			)
+			(node
+				(ref "K102")
+				(pin "21")
+			)
+		)
+		(net
+			(code 85)
+			(name "PSEL2X")
+			(node
+				(ref "K201")
+				(pin "12")
+			)
+			(node
+				(ref "K202")
+				(pin "11")
+			)
+		)
+		(net
+			(code 86)
+			(name "PSEL2Y")
+			(node
+				(ref "K201")
+				(pin "14")
+			)
+			(node
+				(ref "K202")
+				(pin "21")
+			)
+		)
+		(net
+			(code 87)
+			(name "PSEL3X")
+			(node
+				(ref "K301")
+				(pin "12")
+			)
+			(node
+				(ref "K302")
+				(pin "11")
+			)
+		)
+		(net
+			(code 88)
+			(name "PSEL3Y")
+			(node
+				(ref "K301")
+				(pin "14")
+			)
+			(node
+				(ref "K302")
+				(pin "21")
+			)
+		)
+		(net
+			(code 89)
+			(name "PSEL4X")
+			(node
+				(ref "K401")
+				(pin "12")
+			)
+			(node
+				(ref "K402")
+				(pin "11")
+			)
+		)
+		(net
+			(code 90)
+			(name "PSEL4Y")
+			(node
+				(ref "K401")
+				(pin "14")
+			)
+			(node
+				(ref "K402")
+				(pin "21")
+			)
+		)
+		(net
+			(code 91)
+			(name "PSEL5X")
+			(node
+				(ref "K501")
+				(pin "12")
+			)
+			(node
+				(ref "K502")
+				(pin "11")
+			)
+		)
+		(net
+			(code 92)
+			(name "PSEL5Y")
+			(node
+				(ref "K501")
+				(pin "14")
+			)
+			(node
+				(ref "K502")
+				(pin "21")
+			)
+		)
+		(net
+			(code 93)
+			(name "PSEL6X")
+			(node
+				(ref "K601")
+				(pin "12")
+			)
+			(node
+				(ref "K602")
+				(pin "11")
+			)
+		)
+		(net
+			(code 94)
+			(name "PSEL6Y")
+			(node
+				(ref "K601")
+				(pin "14")
+			)
+			(node
+				(ref "K602")
+				(pin "21")
+			)
+		)
+		(net
+			(code 95)
+			(name "PWM1")
+			(node
+				(ref "J9")
+				(pin "2")
+			)
+			(node
+				(ref "R811")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "2")
+			)
+		)
+		(net
+			(code 96)
+			(name "PWM2")
+			(node
+				(ref "J9")
+				(pin "4")
+			)
+			(node
+				(ref "R812")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "3")
+			)
+		)
+		(net
+			(code 97)
+			(name "PWM3")
+			(node
+				(ref "J10")
+				(pin "1")
+			)
+			(node
+				(ref "R813")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "4")
+			)
+		)
+		(net
+			(code 98)
+			(name "PWM4")
+			(node
+				(ref "J10")
+				(pin "3")
+			)
+			(node
+				(ref "R814")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "5")
+			)
+		)
+		(net
+			(code 99)
+			(name "PWM5")
+			(node
+				(ref "J10")
+				(pin "5")
+			)
+			(node
+				(ref "R815")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "6")
+			)
+		)
+		(net
+			(code 100)
+			(name "PWM6")
+			(node
+				(ref "J11")
+				(pin "1")
+			)
+			(node
+				(ref "R816")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "7")
+			)
+		)
+		(net
+			(code 101)
+			(name "RCJ1")
+			(node
+				(ref "C102")
+				(pin "1")
+			)
+			(node
+				(ref "R115")
+				(pin "2")
+			)
+		)
+		(net
+			(code 102)
+			(name "RCJ2")
+			(node
+				(ref "C202")
+				(pin "1")
+			)
+			(node
+				(ref "R215")
+				(pin "2")
+			)
+		)
+		(net
+			(code 103)
+			(name "RCJ3")
+			(node
+				(ref "C302")
+				(pin "1")
+			)
+			(node
+				(ref "R315")
+				(pin "2")
+			)
+		)
+		(net
+			(code 104)
+			(name "RCJ4")
+			(node
+				(ref "C402")
+				(pin "1")
+			)
+			(node
+				(ref "R415")
+				(pin "2")
+			)
+		)
+		(net
+			(code 105)
+			(name "RCJ5")
+			(node
+				(ref "C502")
+				(pin "1")
+			)
+			(node
+				(ref "R515")
+				(pin "2")
+			)
+		)
+		(net
+			(code 106)
+			(name "RCJ6")
+			(node
+				(ref "C602")
+				(pin "1")
+			)
+			(node
+				(ref "R615")
+				(pin "2")
+			)
+		)
+		(net
+			(code 107)
+			(name "RINV")
+			(node
+				(ref "R801")
+				(pin "2")
+			)
+			(node
+				(ref "R802")
+				(pin "1")
+			)
+			(node
+				(ref "U8")
+				(pin "9")
+			)
+		)
+		(net
+			(code 108)
+			(name "SIN1")
+			(node
+				(ref "C121")
+				(pin "2")
+			)
+			(node
+				(ref "J1")
+				(pin "2")
+			)
+			(node
+				(ref "R121")
+				(pin "2")
+			)
+			(node
+				(ref "R131")
+				(pin "1")
+			)
+			(node
+				(ref "U3")
+				(pin "1")
+			)
+		)
+		(net
+			(code 109)
+			(name "SIN2")
+			(node
+				(ref "C221")
+				(pin "2")
+			)
+			(node
+				(ref "J2")
+				(pin "2")
+			)
+			(node
+				(ref "R221")
+				(pin "2")
+			)
+			(node
+				(ref "R231")
+				(pin "1")
+			)
+			(node
+				(ref "U3")
+				(pin "7")
+			)
+		)
+		(net
+			(code 110)
+			(name "SIN3")
+			(node
+				(ref "C321")
+				(pin "2")
+			)
+			(node
+				(ref "J3")
+				(pin "2")
+			)
+			(node
+				(ref "R321")
+				(pin "2")
+			)
+			(node
+				(ref "R331")
+				(pin "1")
+			)
+			(node
+				(ref "U3")
+				(pin "8")
+			)
+		)
+		(net
+			(code 111)
+			(name "SIN4")
+			(node
+				(ref "C421")
+				(pin "2")
+			)
+			(node
+				(ref "J4")
+				(pin "2")
+			)
+			(node
+				(ref "R421")
+				(pin "2")
+			)
+			(node
+				(ref "R431")
+				(pin "1")
+			)
+			(node
+				(ref "U3")
+				(pin "14")
+			)
+		)
+		(net
+			(code 112)
+			(name "SIN5")
+			(node
+				(ref "C521")
+				(pin "2")
+			)
+			(node
+				(ref "J5")
+				(pin "2")
+			)
+			(node
+				(ref "R521")
+				(pin "2")
+			)
+			(node
+				(ref "R531")
+				(pin "1")
+			)
+			(node
+				(ref "U4")
+				(pin "1")
+			)
+		)
+		(net
+			(code 113)
+			(name "SIN6")
+			(node
+				(ref "C621")
+				(pin "2")
+			)
+			(node
+				(ref "J6")
+				(pin "2")
+			)
+			(node
+				(ref "R621")
+				(pin "2")
+			)
+			(node
+				(ref "R631")
+				(pin "1")
+			)
+			(node
+				(ref "U4")
+				(pin "7")
+			)
+		)
+		(net
+			(code 114)
+			(name "SRV1")
+			(node
+				(ref "C131")
+				(pin "2")
+			)
+			(node
+				(ref "R132")
+				(pin "1")
+			)
+			(node
+				(ref "U5")
+				(pin "1")
+			)
+		)
+		(net
+			(code 115)
+			(name "SRV2")
+			(node
+				(ref "C231")
+				(pin "2")
+			)
+			(node
+				(ref "R232")
+				(pin "1")
+			)
+			(node
+				(ref "U5")
+				(pin "7")
+			)
+		)
+		(net
+			(code 116)
+			(name "SRV3")
+			(node
+				(ref "C331")
+				(pin "2")
+			)
+			(node
+				(ref "R332")
+				(pin "1")
+			)
+			(node
+				(ref "U5")
+				(pin "8")
+			)
+		)
+		(net
+			(code 117)
+			(name "SRV4")
+			(node
+				(ref "C431")
+				(pin "2")
+			)
+			(node
+				(ref "R432")
+				(pin "1")
+			)
+			(node
+				(ref "U5")
+				(pin "14")
+			)
+		)
+		(net
+			(code 118)
+			(name "SRV5")
+			(node
+				(ref "C531")
+				(pin "2")
+			)
+			(node
+				(ref "R532")
+				(pin "1")
+			)
+			(node
+				(ref "U6")
+				(pin "1")
+			)
+		)
+		(net
+			(code 119)
+			(name "SRV6")
+			(node
+				(ref "C631")
+				(pin "2")
+			)
+			(node
+				(ref "R632")
+				(pin "1")
+			)
+			(node
+				(ref "U6")
+				(pin "7")
+			)
+		)
+		(net
+			(code 120)
+			(name "SVN1")
+			(node
+				(ref "C131")
+				(pin "1")
+			)
+			(node
+				(ref "R131")
+				(pin "2")
+			)
+			(node
+				(ref "U5")
+				(pin "2")
+			)
+		)
+		(net
+			(code 121)
+			(name "SVN2")
+			(node
+				(ref "C231")
+				(pin "1")
+			)
+			(node
+				(ref "R231")
+				(pin "2")
+			)
+			(node
+				(ref "U5")
+				(pin "6")
+			)
+		)
+		(net
+			(code 122)
+			(name "SVN3")
+			(node
+				(ref "C331")
+				(pin "1")
+			)
+			(node
+				(ref "R331")
+				(pin "2")
+			)
+			(node
+				(ref "U5")
+				(pin "9")
+			)
+		)
+		(net
+			(code 123)
+			(name "SVN4")
+			(node
+				(ref "C431")
+				(pin "1")
+			)
+			(node
+				(ref "R431")
+				(pin "2")
+			)
+			(node
+				(ref "U5")
+				(pin "13")
+			)
+		)
+		(net
+			(code 124)
+			(name "SVN5")
+			(node
+				(ref "C531")
+				(pin "1")
+			)
+			(node
+				(ref "R531")
+				(pin "2")
+			)
+			(node
+				(ref "U6")
+				(pin "2")
+			)
+		)
+		(net
+			(code 125)
+			(name "SVN6")
+			(node
+				(ref "C631")
+				(pin "1")
+			)
+			(node
+				(ref "R631")
+				(pin "2")
+			)
+			(node
+				(ref "U6")
+				(pin "6")
+			)
+		)
+		(net
+			(code 126)
+			(name "V5")
+			(node
+				(ref "J8")
+				(pin "4")
+			)
+			(node
+				(ref "U12")
+				(pin "2")
+			)
+		)
+		(net
+			(code 127)
+			(name "VA+")
+			(node
+				(ref "C701")
+				(pin "1")
+			)
+			(node
+				(ref "C703")
+				(pin "1")
+			)
+			(node
+				(ref "C705")
+				(pin "1")
+			)
+			(node
+				(ref "C707")
+				(pin "1")
+			)
+			(node
+				(ref "C709")
+				(pin "1")
+			)
+			(node
+				(ref "C711")
+				(pin "1")
+			)
+			(node
+				(ref "C713")
+				(pin "1")
+			)
+			(node
+				(ref "C715")
+				(pin "1")
+			)
+			(node
+				(ref "C717")
+				(pin "1")
+			)
+			(node
+				(ref "C719")
+				(pin "1")
+			)
+			(node
+				(ref "J8")
+				(pin "1")
+			)
+			(node
+				(ref "U1")
+				(pin "4")
+			)
+			(node
+				(ref "U10")
+				(pin "16")
+			)
+			(node
+				(ref "U2")
+				(pin "4")
+			)
+			(node
+				(ref "U3")
+				(pin "4")
+			)
+			(node
+				(ref "U4")
+				(pin "4")
+			)
+			(node
+				(ref "U5")
+				(pin "4")
+			)
+			(node
+				(ref "U6")
+				(pin "4")
+			)
+			(node
+				(ref "U7")
+				(pin "4")
+			)
+			(node
+				(ref "U8")
+				(pin "4")
+			)
+			(node
+				(ref "U9")
+				(pin "16")
+			)
+		)
+		(net
+			(code 128)
+			(name "VA-")
+			(node
+				(ref "C702")
+				(pin "1")
+			)
+			(node
+				(ref "C704")
+				(pin "1")
+			)
+			(node
+				(ref "C706")
+				(pin "1")
+			)
+			(node
+				(ref "C708")
+				(pin "1")
+			)
+			(node
+				(ref "C710")
+				(pin "1")
+			)
+			(node
+				(ref "C712")
+				(pin "1")
+			)
+			(node
+				(ref "C714")
+				(pin "1")
+			)
+			(node
+				(ref "C716")
+				(pin "1")
+			)
+			(node
+				(ref "C718")
+				(pin "1")
+			)
+			(node
+				(ref "C720")
+				(pin "1")
+			)
+			(node
+				(ref "J8")
+				(pin "2")
+			)
+			(node
+				(ref "U1")
+				(pin "11")
+			)
+			(node
+				(ref "U10")
+				(pin "9")
+			)
+			(node
+				(ref "U2")
+				(pin "11")
+			)
+			(node
+				(ref "U3")
+				(pin "11")
+			)
+			(node
+				(ref "U4")
+				(pin "11")
+			)
+			(node
+				(ref "U5")
+				(pin "11")
+			)
+			(node
+				(ref "U6")
+				(pin "11")
+			)
+			(node
+				(ref "U7")
+				(pin "11")
+			)
+			(node
+				(ref "U8")
+				(pin "11")
+			)
+			(node
+				(ref "U9")
+				(pin "9")
+			)
+		)
+		(net
+			(code 129)
+			(name "VC1")
+			(node
+				(ref "C142")
+				(pin "2")
+			)
+			(node
+				(ref "R142")
+				(pin "2")
+			)
+			(node
+				(ref "U7")
+				(pin "1")
+			)
+			(node
+				(ref "U9")
+				(pin "3")
+			)
+		)
+		(net
+			(code 130)
+			(name "VC2")
+			(node
+				(ref "C242")
+				(pin "2")
+			)
+			(node
+				(ref "R242")
+				(pin "2")
+			)
+			(node
+				(ref "U7")
+				(pin "7")
+			)
+			(node
+				(ref "U9")
+				(pin "6")
+			)
+		)
+		(net
+			(code 131)
+			(name "VC3")
+			(node
+				(ref "C342")
+				(pin "2")
+			)
+			(node
+				(ref "R342")
+				(pin "2")
+			)
+			(node
+				(ref "U7")
+				(pin "8")
+			)
+			(node
+				(ref "U9")
+				(pin "11")
+			)
+		)
+		(net
+			(code 132)
+			(name "VC4")
+			(node
+				(ref "C442")
+				(pin "2")
+			)
+			(node
+				(ref "R442")
+				(pin "2")
+			)
+			(node
+				(ref "U10")
+				(pin "3")
+			)
+			(node
+				(ref "U7")
+				(pin "14")
+			)
+		)
+		(net
+			(code 133)
+			(name "VC5")
+			(node
+				(ref "C542")
+				(pin "2")
+			)
+			(node
+				(ref "R542")
+				(pin "2")
+			)
+			(node
+				(ref "U10")
+				(pin "6")
+			)
+			(node
+				(ref "U8")
+				(pin "1")
+			)
+		)
+		(net
+			(code 134)
+			(name "VC6")
+			(node
+				(ref "C642")
+				(pin "2")
+			)
+			(node
+				(ref "R642")
+				(pin "2")
+			)
+			(node
+				(ref "U10")
+				(pin "11")
+			)
+			(node
+				(ref "U8")
+				(pin "7")
+			)
+		)
+		(net
+			(code 135)
+			(name "VNR")
+			(node
+				(ref "C801")
+				(pin "1")
+			)
+			(node
+				(ref "U12")
+				(pin "1")
+			)
+		)
+		(net
+			(code 136)
+			(name "VREF")
+			(node
+				(ref "C802")
+				(pin "1")
+			)
+			(node
+				(ref "C803")
+				(pin "1")
+			)
+			(node
+				(ref "C804")
+				(pin "1")
+			)
+			(node
+				(ref "R801")
+				(pin "1")
+			)
+			(node
+				(ref "U11")
+				(pin "20")
+			)
+			(node
+				(ref "U12")
+				(pin "6")
+			)
+			(node
+				(ref "U12")
+				(pin "7")
+			)
+		)
+		(net
+			(code 137)
+			(name "VREFN")
+			(node
+				(ref "R144")
+				(pin "1")
+			)
+			(node
+				(ref "R244")
+				(pin "1")
+			)
+			(node
+				(ref "R344")
+				(pin "1")
+			)
+			(node
+				(ref "R444")
+				(pin "1")
+			)
+			(node
+				(ref "R544")
+				(pin "1")
+			)
+			(node
+				(ref "R644")
+				(pin "1")
+			)
+			(node
+				(ref "R802")
+				(pin "2")
+			)
+			(node
+				(ref "U8")
+				(pin "8")
+			)
+		)
+	)
+)

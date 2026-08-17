@@ -1,0 +1,96 @@
+{
+  "_comment": "Drop in cv-module/.claude/settings.json. Replace ABSOLUTE paths before use.",
+  "permissions": {
+    "defaultMode": "auto",
+
+    "additionalDirectories": [
+      "/Users/troup/code/summing-mixer"
+    ],
+
+    "deny": [
+      "Edit(//Users/troup/code/summing-mixer/**)",
+      "Write(//Users/troup/code/summing-mixer/**)",
+      "Bash(rm -rf *)",
+      "Bash(git push *)",
+      "Bash(git commit *)",
+      "Bash(* /Users/troup/code/summing-mixer/*)"
+    ],
+
+    "allow": [
+      "Edit(//Users/troup/code/cv-module/**)",
+      "Write(//Users/troup/code/cv-module/**)",
+      "Read(//Users/troup/code/summing-mixer/**)",
+
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(pip install *)",
+      "Bash(pytest *)",
+      "Bash(uv *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(rg *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(mkdir *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(kicad-cli *)",
+
+      "WebFetch(domain:ti.com)",
+      "WebFetch(domain:*.ti.com)",
+      "WebFetch(domain:analog.com)",
+      "WebFetch(domain:*.analog.com)",
+      "WebFetch(domain:soundsemiconductor.com)",
+      "WebFetch(domain:thatcorp.com)",
+      "WebFetch(domain:microchip.com)",
+      "WebFetch(domain:*.microchip.com)",
+      "WebFetch(domain:st.com)",
+      "WebFetch(domain:*.st.com)",
+      "WebFetch(domain:nxp.com)",
+      "WebFetch(domain:renesas.com)",
+      "WebFetch(domain:infineon.com)",
+      "WebFetch(domain:cirrus.com)",
+      "WebFetch(domain:*.cirrus.com)",
+      "WebFetch(domain:raspberrypi.com)",
+      "WebFetch(domain:*.raspberrypi.com)",
+      "WebFetch(domain:nexperia.com)",
+      "WebFetch(domain:*.nexperia.com)",
+      "WebFetch(domain:onsemi.com)",
+      "WebFetch(domain:diodes.com)",
+      "WebFetch(domain:vishay.com)",
+      "WebFetch(domain:panasonic.com)",
+      "WebFetch(domain:*.panasonic.com)",
+      "WebFetch(domain:omron.com)",
+      "WebFetch(domain:*.omron.com)",
+      "WebFetch(domain:tracopower.com)",
+      "WebFetch(domain:recom-power.com)",
+      "WebFetch(domain:murata.com)",
+      "WebFetch(domain:*.murata.com)",
+
+      "WebFetch(domain:mouser.com)",
+      "WebFetch(domain:*.mouser.com)",
+      "WebFetch(domain:mouser.co.uk)",
+      "WebFetch(domain:digikey.com)",
+      "WebFetch(domain:*.digikey.com)",
+      "WebFetch(domain:farnell.com)",
+      "WebFetch(domain:*.farnell.com)",
+      "WebFetch(domain:uk.rs-online.com)",
+      "WebFetch(domain:lcsc.com)",
+      "WebFetch(domain:*.lcsc.com)",
+      "WebFetch(domain:jlcpcb.com)",
+      "WebFetch(domain:octopart.com)",
+      "WebFetch(domain:thonk.co.uk)",
+
+      "WebFetch(domain:kicad.org)",
+      "WebFetch(domain:*.kicad.org)",
+      "WebFetch(domain:forum.kicad.info)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:readthedocs.io)",
+      "WebFetch(domain:*.readthedocs.io)",
+      "WebFetch(domain:pypi.org)"
+    ]
+  }
+}

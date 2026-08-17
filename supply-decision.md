@@ -1,0 +1,137 @@
+# The module's supply — decision
+
+Resolves `hardware-spec-v0.md` §1.1, the last genuine blocker before the schematic
+spike.
+
+**Recommendation: one shared DC inlet, an isolated DC-DC for the module, and split
+the module into a small bipolar audio domain and a larger single-supply digital/CV
+domain.**
+
+Three findings drive it, and the third is decisive.
+
+---
+
+## 1. The negative rail is half the size you'd assume
+
+A naive op-amp count gives ~100 mA per rail, which would have ruled out anything
+quiet and simple. But **most of the module doesn't need a negative rail at all.**
+
+Positive CV attenuates, so the CV chain is unipolar. Envelope detector outputs are
+unipolar. Both can run single-supply.
+
+| Domain | Contents | Current |
+|---|---|---|
+| **Bipolar** (audio path only) | 6 front-end buffers, 6 I–V converters, 6 DC servos, 2× SSI2164 | **~44 mA per rail** [D] |
+| **Single +5 V** | 6 CV filter MFB stages, 12 rectifier op-amps | ~32 mA |
+| **+3V3 / +5 V** | MCU, ADC, reference, 74AHC541 | ~60 mA |
+
+*(op-amps at 1.8 mA/ch, OPA1644 class; SSI2164 at ±6 mA typ, class AB [S])*
+
+**Sizing the negative rail for 44 mA rather than 100 mA is what makes a quiet
+solution easy.** At 100 mA a charge pump would have been out; at 44 mA it is
+comfortable — a 10 Ω-class part droops 0.44 V, against 2.44 V for the 55 Ω pump
+the mixer already uses [D].
+
+Design consequence: **draw the domain boundary explicitly on the schematic.** The
+temptation will be to run everything bipolar because it's simpler to think about.
+Resist it — the split is what keeps the negative rail small.
+
+---
+
+## 2. There is already a 45 kHz charge pump in the box, and it sets a hard rule
+
+The parent doc gives V−'s source impedance as *"55 Ω pump + 10 Ω filter"* and warns
+that 20–25 kHz motor PWM *"beats with the 45 kHz pump"*. So the mixer generates its
+negative rail with a switched-capacitor inverter running at ~45 kHz.
+
+This matters more than a purist "no switchers" rule, because **a VCA is a
+multiplier.** Two ripple components reaching the control port do not merely add —
+they intermodulate, and the difference frequency lands in the audio band:
+
+| Module supply frequency | Beat with 45 kHz | |
+|---|---|---|
+| 45 kHz | 0 Hz | **fatal** |
+| 50 kHz | 5 kHz | **fatal — worst possible** |
+| 65 kHz | 20 kHz | marginal |
+| ≥300 kHz | ≥255 kHz | fine, and easy to filter |
+
+**Rule: |f_module − 45 kHz| > 20 kHz, so f_module > 65 kHz; target ≥300 kHz.**
+
+> **Specific trap:** the obvious cheap inverters — ICL7660S, TC1044S, MAX1044 — have
+> a "boost" pin that sets the frequency to **45 kHz**. Choosing the obvious part and
+> the obvious option lands you exactly on the mixer's pump frequency. If a charge
+> pump is used at all, clock it externally from the MCU at a chosen frequency, or
+> pick a part running ≥300 kHz.
+
+---
+
+## 3. Sharing a DC inlet creates a second ground bond — this decides it
+
+The parent doc's rule is absolute: *"Exactly one bond between module audio ground
+and board AGND. Six separate returns to six pin-3s, not commoned in the module."*
+
+Six audio returns via the pin-3s is **one** bond. If the module also shares a DC
+inlet non-isolated, the power ground is a **second** bond — and the two together
+enclose a loop whose area is set by how the looms happen to run.
+
+The parent doc takes this seriously with its own arithmetic: a 200 × 20 mm loop
+(40 cm²) 50 mm from 1 A of switched current picks up **~160 mV** against a
+35 nV/√Hz node. That figure is why the whole one-enclosure argument exists.
+
+**An isolated DC-DC keeps the module's ground referenced only through the audio
+connection, so the one-bond rule survives intact.**
+
+The cost is honest: an isolated converter's barrier capacitance (typically
+10–50 pF) passes common-mode switching current. But that is a small, bounded,
+locatable problem you can attack with a Y-capacitor and placement — as opposed to
+a ground loop, whose area depends on how the wiring was dressed on the day.
+
+---
+
+## The decision
+
+```
+   DC inlet (one, shared)
+        │
+        ├──────────────► mixer, unchanged (its own regulator, its own 45 kHz pump)
+        │
+        └──► isolated DC-DC (≥300 kHz) ──┬──► ±12 V   audio domain, ~44 mA/rail
+                                          ├──► +5 V    CV + sensing
+                                          └──► +3V3    MCU, ADC, reference
+                     ▲
+              isolation barrier: the module's ground touches the mixer
+              ONLY through the six pin-3 audio returns
+```
+
+- **One inlet.** It stays a one-cable product; no mains transformer inside a box
+  with a 35 nV/√Hz node (a 50 Hz magnetic field is a far worse neighbour than a
+  300 kHz switcher).
+- **Isolated**, so the one-bond rule holds by construction rather than by
+  discipline.
+- **≥300 kHz**, so it cannot beat with the mixer's pump.
+- **LDOs after the DC-DC** on the ±12 V rails — an LT3042-class part on the
+  positive rail feeding the reference and the CV chain is cheap insurance, since
+  supply noise there becomes gain modulation.
+- **Domain split enforced on the schematic**, so the negative rail stays at ~44 mA.
+
+### Rejected
+
+| | Why |
+|---|---|
+| Separate mains inlet, linear ±15 | A mains transformer's 50 Hz magnetic field is a worse aggressor in a small enclosure than any switcher, and two inlets is poor product design |
+| Non-isolated shared rail | Second ground bond. Defensible if the loop is deliberately controlled, but it trades a structural guarantee for a discipline you have to maintain |
+| Charge pump from the shared rail | Would work at 44 mA, but doesn't solve the ground bond, and the obvious parts land on 45 kHz |
+| Drawing from `VREG` / `V+` / `V−` | Forbidden. Every mA on V− costs 65 mV through the 55 Ω pump and moves `NEGATIVE_RAIL_DROP`, `output_swing()`, `clipping_peak()` |
+
+---
+
+## Look this up before finalising
+
+**The mixer's actual rail voltages and DC input specification.** I have inferred a
+charge-pump-derived V− from *"55 Ω pump"*, and inferred a single-DC-inlet product
+from that — but the actual input voltage range, the rail voltages, and the headroom
+the summing stage assumes all come from the mixer repo, and they set the DC-DC's
+output voltage and the audio-path headroom.
+
+It is in `design.py` alongside `NEGATIVE_RAIL_DROP`, `output_swing()` and
+`clipping_peak()`. First thing to check when the session mounts that repo.
