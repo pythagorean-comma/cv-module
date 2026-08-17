@@ -9,8 +9,14 @@ no third-party dependencies at all -- its README makes a point of it -- and
 sixty lines without, and would cost the property that makes the upstream
 verification loop possible with nothing installed.
 
-So the s-expression writer is the mixer's own, imported read-only through
-contract/socket.py at the pinned commit. Nothing is copied.
+So the s-expression writer is `toolchain/sexp.py`: the mixer's own file, **copied
+into this repo rather than imported out of it.** That sentence used to end "and
+nothing is copied", which was the intention and was not what happened -- the
+import resolved off the mixer's working tree via `sys.path`, so the writer was
+neither copied nor pinned. `toolchain/PROVENANCE.md` records which commit it came
+from. What must never be copied is the *interface*, and that still is not:
+`socket` above reads `design.py` at the pin, and this file gets every net, part
+and value from `design.py` here, which gets them from there.
 
 The output is `out/cv-module.net` in KiCad's `kicadsexpr` netlist shape, which
 is what verify.py reads. It is not loadable by KiCad while any pin is still a
@@ -23,9 +29,7 @@ import pathlib
 import design
 import contract.socket as socket
 
-sexp = socket.MIXER_DESIGN.__dict__.get("sexp")
-if sexp is None:                      # design.py does not import it; we do
-    import sexp                       # noqa: E402  (MIXER is on the path)
+from toolchain import sexp
 
 Sym = sexp.Sym
 OUT = pathlib.Path(__file__).resolve().parent / "out"

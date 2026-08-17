@@ -389,6 +389,33 @@ def _report():
         out(f"- **{block}** — {reason}")
     out()
 
+    out("### Pins waiting on a deferred block")
+    out()
+    waiting = {}
+    for (ref, pin), block in sorted(design.DEFERRED_PINS.items()):
+        waiting.setdefault(block, []).append(f"{ref}.{pin}")
+    for block, pins in sorted(waiting.items()):
+        out(f"- **{block}** — {len(pins)} pins, "
+            f"`{pins[0]}` … `{pins[-1]}`. They carry a no-connect flag on the "
+            f"schematic because KiCad has no other way to write \"connected by "
+            f"a block that is not drawn yet\", and "
+            f"`verify.check_open_pins()` is what stops the flag from being read "
+            f"as final. **The board must not be fabricated while this list is "
+            f"non-empty.**")
+    out()
+    out("The relay coils are also a **spec correction**, recorded and not "
+        "acted on. Section 4.5 says \"12 coils (six 2-bit pads)\" driven by "
+        "\"2 × TPIC6B595\" — 16 outputs. Twelve coils is twelve *single*-coil "
+        "relays, and a single-coil latching relay latches by reversing its coil "
+        "polarity, which needs a bridge; the TPIC6B595 is an open-drain sink "
+        "and cannot reverse anything. With the dual-coil latching part section "
+        "4.1 asks for, six 2-bit pads are 12 relays and **24 coils, which is "
+        "3 × TPIC6B595 exactly**. Not acted on because the relay is in "
+        "`design.UNSPECIFIED`, the coil supply voltage is a property of the "
+        "relay, and section 6 says not to invent one. See "
+        "`design.DEFERRED_PINS`.")
+    out()
+
     for title, guesses in (("Readings not taken", READINGS),
                            ("Modelling assumptions", MODELS),
                            ("Firmware assumptions", FIRMWARE),
@@ -421,7 +448,7 @@ def _report():
         f"labelled as such in the `basis` column of "
         f"`out/cv-module-bom.csv`.")
     out()
-    out("The totals in `out/SHOPPING.md` are therefore a range, and the range "
+    out("The totals in `docs/SHOPPING.md` are therefore a range, and the range "
         "is honest rather than decorative. They are also a floor: none of the "
         "deferred blocks is costed.")
     out()

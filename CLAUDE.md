@@ -24,6 +24,19 @@ boards exist in physical reality. Nothing you can do here justifies changing it.
 - If something there looks wrong, **write it down in `FINDINGS.md` here**. Do not
   fix it.
 
+### Read-only means the interface, not the code
+
+The mixer repo is a **fabricated hardware interface that this module references**,
+and referencing an interface does not mean importing another project's Python. So
+there are two relationships and they must not be confused:
+
+- **the interface** — `design.py`, `source.py`, `fab/mechanical-*.json` — is
+  consumed at the pinned commit through `contract/socket.py` and never copied;
+- **the KiCad plumbing** — `sexp` `kisch` `symlib` `kicad` `kisim` — is **copied
+  into `toolchain/` and is ours to modify.**
+
+See the Toolchain section for what went wrong with the previous arrangement.
+
 ### Record the fabricated revision
 
 The boards were fabricated from a specific commit. This module must mate with
@@ -94,7 +107,7 @@ heading *"check these mechanically, not by eye"*. **They have now been tested
 for a mechanism and they are not equivalent.** One had none at all.
 
 `constraints.py` computes, for each, the mechanism, the threshold the arithmetic
-supports, and the margin. `out/constraints.md` is its output. Run it before
+supports, and the margin. `docs/constraints.md` is its output. Run it before
 treating any line below as settled.
 
 The distinction that matters: a constraint with thin margin is load-bearing and
@@ -207,9 +220,51 @@ So:
   `kicad-cli`, and compares it to `design.py` net by net — which is the whole
   reason its `verify.py` catches a wire that missed its endpoint. That loop is
   not available any other way.
-- **Import the mixer's `sexp.py` read-only at the pinned commit**, through
-  `contract/socket.py`, rather than writing another one. `gen_netlist.py`
-  already does.
+- **Import the KiCad plumbing from `toolchain/`, never from the mixer.**
+  **This reverses the previous instruction, which was to import the mixer's
+  `sexp.py` read-only at the pinned commit through `contract/socket.py`.** That
+  was followed literally and it did not do what it says. `socket.py` appended
+  the mixer's root to `sys.path`, so `import sexp` resolved off *disk*, at
+  whatever the working tree happened to say — the pin covered `design.py`, read
+  with `git show`, and nothing else. The guard was a clean-tree assertion over a
+  hand-kept list of files, and the list had to grow every time a generator here
+  imported one more: it named `kisim` and `source`, while `sexp`, `kisch`,
+  `symlib` and `kicad` came off disk with nothing asserted about them at all. A
+  sheet written by a modified `kisch` would still have been compared to
+  `design.py` — by a comparison running through the same modified `kisch`.
+
+  `sexp.py`, `kisch.py`, `symlib.py`, `kicad.py` and `kisim.py` are copies in
+  `toolchain/` now, and they are this repo's: modify them as needed and record it
+  in `toolchain/PROVENANCE.md`. There is deliberately **no check that they still
+  match upstream**, because such a check would put the dependency back.
+
+  **The line, and it is the one to hold:**
+
+  | copied into `toolchain/` | referenced at the pin, via `contract/socket.py` |
+  |---|---|
+  | `sexp` `kisch` `symlib` `kicad` `kisim` | `design.py`, `source.py`, `fab/mechanical-*.json` |
+
+  The left column carries no hardware content — no value, no net, no dimension,
+  nothing that has to agree with a board that exists. `kisim.py` argues its own
+  side in its docstring: *"it is copied between repositories unchanged, like
+  kicad.py, sexp.py and symlib.py."* The right column is the interface, and
+  copying it is the mistake the whole arrangement exists to prevent: `delta.py`
+  expresses this module's effect as a delta against *the mixer's own* model, and
+  a forked `source.py` would silently make that a comparison with a copy of
+  itself.
+
+  So **the mixer's root is never on `sys.path`**, and every byte read from it
+  comes through `socket.show()`, which is `git show <pin>:<path>`.
+  `socket.check_pin()` refuses the path entry and
+  `socket.check_no_mixer_imports()` walks `sys.modules` and refuses any module
+  loaded from a file under the mixer — by a provenance marker rather than by a
+  list of names, because a list can only ever name the collisions somebody
+  already thought of. `test_verify.py` plants all four failures.
+
+  Note the one subtlety: the pinned `design.py` imports `source` and `kisim`
+  itself, and those resolve to *pinned* module objects, not to `toolchain/`'s
+  copies. The fabricated design must compute what it always computed, whatever
+  we do to our copy.
 - **Use the deprecated `pcbnew` bindings for board work**, as `gen_pcb.py`
   does. Deprecated is a schedule, not a defect; when removal lands, that is a
   problem for both repos at once and they should solve it together.
@@ -230,8 +285,14 @@ and ground strategy, and an honest `ASSUMPTIONS.md`.
 
 ## Layout of this repo
 
-Everything in `out/` is generated. Everything else is source, and the four
-`gen_*.py` are the only things that write to `out/`.
+Everything in `out/` and `docs/` is generated. Everything else is source.
+
+**The `gen_*.py` prefix is no longer a reliable guide to what writes, and was
+never quite one.** `constraints.py` and `floorplan.py` both emit a document
+alongside their checks — they always did — so "the four `gen_*.py` are the only
+things that write to `out/`", which this said, was wrong when it was written. The
+arrow list below is the authority: if a file appears on the right of an arrow,
+something generates it.
 
 ```
 cv-module/
@@ -247,29 +308,70 @@ cv-module/
     PINNED.md            the fabricated commit hash — socket.py parses it
     socket.py            the only place upstream constants are adapted
 
-  design.py              values, derivations and the netlist, in house style
+  toolchain/             KiCad plumbing, copied from the mixer. Ours to modify
+    PROVENANCE.md        which commit each came from, and what was changed
+    sexp.py kisch.py symlib.py kicad.py kisim.py
+
+  design.py              values, derivations, the netlist and the symbol patch
   constraints.py         does each constraint have a mechanism? one did not
   delta.py               this module's effect, via the mixer's own functions
   floorplan.py           zones, ground domains, boundary crossings
-  verify.py              the constraints, checked against the emitted netlist
+  verify.py              the constraints, checked against KiCad's own netlist
   test_verify.py         plants faults to prove verify.py's checks can fail
 
   gen_netlist.py         -> out/cv-module.net
-  gen_bom.py             -> out/cv-module-bom.csv, out/SHOPPING.md
+  gen_sch.py             -> out/cv-module.kicad_sch
+  gen_project.py         -> out/cv-module.kicad_pro, the lib tables, out/cv.kicad_sym
+  gen_bom.py             -> out/cv-module-bom.csv, docs/SHOPPING.md
   gen_assumptions.py     -> ASSUMPTIONS.md
-  out/                   netlist, BOM, shopping list, floorplan, constraints
+  constraints.py         -> docs/constraints.md
+  floorplan.py           -> docs/floorplan.md
+
+  out/                   for machines: the sheet, the project, the netlist, the
+                         BOM as CSV, and from-kicad.net / from-kicad-erc.json,
+                         which verify.py regenerates on every run
+  docs/                  for people: constraints.md, floorplan.md, SHOPPING.md
 ```
+
+**Everything in `out/` and `docs/` is generated, and the split between them is by
+audience rather than by file type.** `out/` is what another tool reads next —
+KiCad opens the sheet, a quoting tool or an assembly house reads the CSV. `docs/`
+is what a person reads at a screen. Neither is ever hand-edited: an edit there is
+lost on the next run, silently, which is the worst way to lose one.
+
+At the root, `ASSUMPTIONS.md` is generated too. `FINDINGS.md` and every other
+markdown at the root is hand-written source.
 
 Run order, and each step reads the one before:
 
 ```bash
-python3 design.py && python3 gen_netlist.py && python3 verify.py \
-  && python3 test_verify.py && python3 constraints.py && python3 delta.py \
-  && python3 floorplan.py && python3 gen_bom.py && python3 gen_assumptions.py
+python3 design.py && python3 gen_netlist.py && python3 gen_sch.py \
+  && python3 gen_project.py && python3 verify.py && python3 test_verify.py \
+  && python3 constraints.py && python3 delta.py && python3 floorplan.py \
+  && python3 gen_bom.py && python3 gen_assumptions.py
 ```
+
+**The two schematic generators come before `verify.py` and that ordering is the
+loop.** `verify.py` runs `kicad-cli sch export netlist` over the sheet and
+compares what KiCad found in the geometry to `design.py`, by name and pin. It
+used to read `out/cv-module.net`, written by `gen_netlist.py` from the same
+`design.py` its checks import — a comparison that could not fail for a
+transcription error because there was no transcription. It also runs
+`kicad-cli sch erc`, and `verify.ERC_ALLOWED` declares the residue with a reason
+and an exact count, so a new violation of a declared class still fails.
 
 **`test_verify.py` is not optional and is the reason `verify.py` means
 anything.** A green check proves nothing on its own — the failure this project
 keeps finding is a check that passes and covers less than its name. That file
 mutates the netlist into each fault the constraints exist to prevent and fails
-if any check does not notice.
+if any check does not notice. 27 faults now, and three of the new ones are
+*drawing* faults — a wire that missed its endpoint, two nets touching, an
+interior node that lost its label — which were not reachable at all while both
+sides of the comparison came out of `design.py`.
+
+Its own fixtures leaked, and that is worth keeping written down: three cases
+mutate `design` itself and none of them undid it. Nothing showed, because each
+check reads a different part of the module and the cases happened not to overlap.
+Adding one case that compares against `design.NETS` broke it on the first run.
+`_design_restored()` is the fix. A harness whose fixtures leak is the same
+failure one level up: it passes, and it stops meaning what its name says.

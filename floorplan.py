@@ -14,7 +14,7 @@ every net allowed to cross the analogue/digital boundary. The list is checked
 against the netlist, which is the only part of a floorplan a script can hold --
 and it is the part that would otherwise be discovered by a hum.
 
-`python3 floorplan.py` prints it and writes `out/floorplan.md`.
+`python3 floorplan.py` prints it and writes `docs/floorplan.md`.
 
 **The outline is not here, and cannot be.** See BLOCKED at the bottom: the
 module does not fit the mixer's enclosure, and `comma-enclosure` is not
@@ -28,7 +28,7 @@ import pathlib
 import design
 import contract.socket as socket
 
-OUT = pathlib.Path(__file__).resolve().parent / "out"
+DOCS = pathlib.Path(__file__).resolve().parent / "docs"
 
 
 # ---------------------------------------------------------------------------
@@ -558,8 +558,8 @@ def main():
           f"{a['relay_share'] * 100:.0f}% of the placed courtyard")
     print()
 
-    OUT.mkdir(exist_ok=True)
-    path = OUT / "floorplan.md"
+    DOCS.mkdir(exist_ok=True)
+    path = DOCS / "floorplan.md"
     path.write_text(_report() + "\n")
     print(f"  wrote {path.relative_to(path.parent.parent)}")
     if problems:

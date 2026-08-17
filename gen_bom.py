@@ -28,7 +28,7 @@ resolved to a HIWIN linear rail.
 
     python3 gen_bom.py
 
-writes `out/cv-module-bom.csv` and `out/SHOPPING.md`.
+writes `out/cv-module-bom.csv` and `docs/SHOPPING.md`.
 """
 
 import collections
@@ -37,7 +37,14 @@ import pathlib
 
 import design
 
-OUT = pathlib.Path(__file__).resolve().parent / "out"
+HERE = pathlib.Path(__file__).resolve().parent
+
+# Two destinations, and the split is by audience rather than by file type.
+# `out/` is what a machine reads next: the CSV goes to a quoting tool or an
+# assembly house. `docs/` is what a person reads: SHOPPING.md is a page you work
+# from with a browser open. Both are generated and neither is source.
+OUT = HERE / "out"
+DOCS = HERE / "docs"
 
 # Spares policy, inherited verbatim from the mixer's SHOPPING.md: "enough spare
 # to lose a few 0805s off a pair of tweezers, and one spare of each active."
@@ -263,7 +270,7 @@ def write_csv(rows):
 
 
 def write_shopping(rows):
-    path = OUT / "SHOPPING.md"
+    path = DOCS / "SHOPPING.md"
     lines_out = [
         "# cv-module: what to buy, and from where",
         "",
@@ -351,6 +358,7 @@ def write_shopping(rows):
 
 def main():
     OUT.mkdir(exist_ok=True)
+    DOCS.mkdir(exist_ok=True)
     rows = lines()
     problems = check(rows)
     print(f"bom: {len(rows)} order lines, "
@@ -367,7 +375,10 @@ def main():
     if unpriced:
         print(f"  unpriced: {[r['refs'][0] for r in unpriced]}")
 
-    print(f"  wrote {write_csv(rows).name}, {write_shopping(rows).name}")
+    # Both paths named relative to the repo, not by .name, because this file now
+    # writes into two directories and "wrote SHOPPING.md" no longer says where.
+    for path in (write_csv(rows), write_shopping(rows)):
+        print(f"  wrote {path.relative_to(HERE)}")
     if problems:
         raise SystemExit(f"{len(problems)} problems")
 

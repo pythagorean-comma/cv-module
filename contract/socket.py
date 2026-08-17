@@ -15,6 +15,17 @@ Three rules, and the second is the one that makes this file worth having.
 PINNED.md), so `import design` would read a file no board was made from. Every
 byte here comes through `git show <pin>:<path>`.
 
+That sentence was true of `design.py` and false of everything else for most of
+this file's life: it put the mixer's root on `sys.path` so the pinned design.py's
+own `import source` and `import kisim` would resolve, and four more modules came
+along with it -- `sexp`, `kisch`, `symlib`, `kicad` -- read off disk by the
+generators here with nothing asserted about them. Those five are copies in
+`toolchain/` now and the path entry is gone; `source` and `kisim` are executed
+from the commit under their own names, which is what removed the need for it.
+`check_pin()` refuses the path entry and `check_no_mixer_imports()` refuses any
+module loaded from a file under the mixer, so the sentence is now checkable and
+checked. See `toolchain/PROVENANCE.md` for where the line falls and why.
+
 **Derive, do not transcribe.** Where the upstream fact lives in a symbol it is
 imported. Where it lives in a *check* -- the RV{n}01 pin order is a literal
 dict inside `check_attenuators()` and cannot be imported -- it is recovered
@@ -33,6 +44,8 @@ import re
 import subprocess
 import sys
 import types
+
+from toolchain import kisim
 
 HERE = pathlib.Path(__file__).resolve().parent
 PINNED_MD = HERE / "PINNED.md"
@@ -106,97 +119,144 @@ def show(path):
     return _git("show", f"{PIN}:{path}")
 
 
-# Files design.py pulls in at import or during the calls this module makes.
-# kisim is imported inside check_dielectrics(), which runs at import time
-# because design.py ends in DESIGN = build(); source is imported inside
-# system_budget(), which noise deltas call.
+# The mixer files that are read at all, and every one of them through `show()`.
 #
-# They are loaded from the working tree, because they are ordinary imports and
-# rewriting Python's import machinery to serve them from a commit would be a
-# great deal of cleverness for one guarantee. So the guarantee is asserted
-# instead: a clean design.py loaded against a dirty kisim is the same fault one
-# level down, and this is what refuses it.
-DEPENDENCIES = ("kisim.py", "source.py")
+# `design.py` is the interface. `source.py` is the model of what feeds it -- the
+# capsule and the Nexus-GK -- and the pinned design.py imports it inside
+# system_budget(); `kisim.py` likewise, inside check_dielectrics().
+# `fab/mechanical-*.json` is read separately by mechanical(). Nothing else.
+#
+# **`kisim` is served here even though toolchain/kisim.py is a copy of it, and
+# that is deliberate rather than an oversight.** The pinned design.py must run
+# against the code it shipped with: `toolchain/kisim.py` is this repo's now and
+# modifying it is sanctioned, so letting it answer an `import kisim` inside the
+# mixer's own module would mean an edit here changed what the fabricated design
+# computes about itself. Two independent module objects, no shared state, and the
+# separation is what "read-only" means at the level of behaviour rather than of
+# file permissions.
+#
+# **This list used to be longer and the extra entries were the problem.** The
+# mixer's `kisim`, `sexp`, `kisch`, `symlib` and `kicad` were ordinary imports
+# resolved off `sys.path`, which meant off *disk*, at whatever the mixer's
+# working tree happened to say -- while `design.py` came from the commit. The
+# guard was to assert those files were clean and equal to the pin, and the guard
+# had to grow every time a generator here imported one more of them. They are
+# copies in `toolchain/` now, and the guard is gone because the exposure is.
+#
+# What is left is a stronger claim than the guard ever made: **every byte this
+# repo reads from the mixer comes out of one commit**, through the one function
+# below. The mixer's working tree can be as dirty as it likes -- DESIGN.md,
+# design.py and fab/ all are -- and it cannot reach this module.
+PINNED_MODULES = ("design.py", "source.py", "kisim.py")
 
 
 def check_pin():
-    """The pinned commit exists, and everything read from disk matches it.
+    """The pinned commit exists, and nothing upstream is read off disk.
 
     Raises rather than warns. A module built against a mixer that has moved is
     a module that mates with hardware nobody has.
+
+    The second half is the one that replaced a clean-tree assertion. Rather than
+    police which working-tree files are allowed to answer for the pin, this
+    refuses the mechanism: the mixer's root must not be on `sys.path` at all, so
+    an `import sexp` added here in future cannot silently resolve upstream. It
+    fails loudly instead, which is the correct outcome -- `toolchain/` is where
+    that import goes.
     """
     if _git("cat-file", "-t", PIN).strip() != "commit":
         raise SystemExit(f"{PIN} is not a commit in {MIXER}")
 
-    dirty = _git("status", "--porcelain", "--", *DEPENDENCIES).strip()
-    if dirty:
+    on_path = [entry for entry in sys.path
+               if entry and pathlib.Path(entry).resolve() == MIXER]
+    if on_path:
         raise SystemExit(
-            f"{', '.join(DEPENDENCIES)} must be clean: design.py is read at "
-            f"{PIN[:7]} but its imports are read from disk, so a modified one "
-            f"silently answers for the pinned revision.\n{dirty}")
-
-    behind = _git("diff", "--name-only", PIN, "--", *DEPENDENCIES).strip()
-    if behind:
-        raise SystemExit(
-            f"{behind} differs between HEAD and the pinned {PIN[:7]} -- "
-            f"see contract/PINNED.md")
+            f"{MIXER} is on sys.path -- nothing here may import the mixer's "
+            f"modules from disk. The KiCad plumbing lives in toolchain/; the "
+            f"interface comes through this file at {PIN[:7]}. See "
+            f"toolchain/PROVENANCE.md.")
 
 
-def load_design():
-    """design.py as of the pinned commit, as a module.
+def _pinned_module(name, path):
+    """One mixer module, executed from the pinned commit under a private name.
 
-    Executed under its own name rather than imported, so `import design`
-    elsewhere cannot return the working-tree copy by accident. The mixer root
-    goes on sys.path for its unchanged siblings; check_pin() above is what
-    makes that safe.
+    Executed rather than imported, so `import design` elsewhere cannot return
+    the mixer's copy by accident -- the mixer's root is not on `sys.path` and
+    check_pin() refuses to let it be.
+
+    `source` and `kisim` are registered under their own names, because the pinned
+    `design.py` says `import source` and `import kisim` and those have to resolve
+    to *these* objects rather than to files. Registering them first is what lets
+    the mixer's root stay off `sys.path` entirely; before this,
+    `sys.path.append(MIXER)` was there for exactly those two imports, and it
+    brought four more modules with it that nothing had asked for.
+
+    `__pinned__` marks the module as having come from a commit rather than from
+    the tree, which is what check_no_mixer_imports() tests against.
     """
-    check_pin()
-    # **Appended, never inserted.** Both repos have a design.py and a
-    # verify.py, so putting the mixer's root at the front of sys.path makes
-    # `import verify` resolve to *theirs* -- and it does it silently, at
-    # whatever point in the import order this module happens to run, so the
-    # same script works or breaks depending on which import came first.
-    #
-    # That is not hypothetical: it happened, and the symptom was the mixer's
-    # gen_project.py raising AttributeError on our design.py, which is a
-    # confusing way to find out. Appending means this repo's own modules always
-    # win and the mixer's siblings -- kisim, sexp, source -- resolve only
-    # because nothing here is called that.
-    if str(MIXER) not in sys.path:
-        sys.path.append(str(MIXER))
-    module = types.ModuleType("mixer_design")
-    module.__file__ = str(MIXER / "design.py")
-    sys.modules["mixer_design"] = module
-    exec(compile(show("design.py"), module.__file__, "exec"), module.__dict__)
+    module = types.ModuleType(name)
+    module.__file__ = str(MIXER / path)
+    module.__pinned__ = PIN
+    sys.modules[name] = module
+    exec(compile(show(path), module.__file__, "exec"), module.__dict__)
     return module
 
 
-MIXER_DESIGN = load_design()
+def load_design():
+    """design.py and its own imports, all as of the pinned commit."""
+    check_pin()
+    # These two first: the pinned design.py imports them by name, and if they are
+    # not in sys.modules already Python goes looking on the path for them.
+    source_module = _pinned_module("source", "source.py")
+    _pinned_module("kisim", "kisim.py")
+    design_module = _pinned_module("mixer_design", "design.py")
+    return design_module, source_module
 
 
-def check_no_shadowing():
-    """This repo's modules must not resolve to the mixer's.
+MIXER_DESIGN, source = load_design()
 
-    The companion to the append-not-insert note in load_design(). That fixes
-    the ordering; this proves it stayed fixed, because the failure is silent
-    and intermittent -- a module that resolves correctly today resolves to the
-    mixer's copy tomorrow if anything changes the import order.
 
-    Checked by file location rather than by name, since the two files are
-    plausible-looking versions of each other and the wrong one imports fine.
+def check_no_mixer_imports():
+    """No module in this process was loaded from a file in the mixer repo.
+
+    **This replaced a narrower check and the widening is the point.** What was
+    here before named three modules -- design, verify, gen_netlist -- and
+    asserted each resolved to a file in *this* repo, because the mixer's root was
+    on `sys.path` and both repos have a design.py and a verify.py. It was a
+    correct check of a list, and the list was the problem: it could only ever
+    name the collisions somebody had already thought of, and `sexp`, `kisch`,
+    `symlib`, `kicad` and `kisim` were never on it while being imported from
+    upstream on every run.
+
+    So this asks the question from the other end. Walk everything actually
+    loaded, and fail on anything whose file is under the mixer path. No list to
+    keep current, and a module nobody anticipated is caught by the same sentence
+    as one that was.
+
+    The pinned modules are exempt *by a marker they carry*, not by name: `design`
+    and `source` are executed out of `git show` and their `__file__` points at the
+    mixer for the sake of readable tracebacks, so `__pinned__` is what
+    distinguishes "came from the commit" from "came from the tree". Exempting
+    them by name would have re-created the list this check exists to replace.
     """
-    ours = HERE.parent
     wrong = []
-    for name in ("design", "verify", "gen_netlist"):
-        module = sys.modules.get(name)
-        origin = getattr(module, "__file__", None) if module else None
-        if origin and pathlib.Path(origin).resolve().parent != ours:
-            wrong.append(f"{name} resolved to {origin}")
+    for name, module in sorted(sys.modules.items()):
+        if module is None or getattr(module, "__pinned__", None):
+            continue
+        origin = getattr(module, "__file__", None)
+        if not origin:
+            continue
+        try:
+            resolved = pathlib.Path(origin).resolve()
+        except OSError:
+            continue
+        if resolved == MIXER or MIXER in resolved.parents:
+            wrong.append(f"{name} was loaded from {origin}")
     if wrong:
         raise SystemExit(
-            "; ".join(wrong) + f" -- expected {ours}. The mixer repo is on "
-            f"sys.path for its own siblings and both repos have a design.py "
-            f"and a verify.py; see load_design().")
+            "; ".join(wrong) + f" -- nothing in this repo may import a module "
+            f"from {MIXER}. The KiCad plumbing is copied into toolchain/; the "
+            f"hardware interface comes through this file at {PIN[:7]}. See "
+            f"toolchain/PROVENANCE.md.")
 
 
 # ---------------------------------------------------------------------------
@@ -223,11 +283,14 @@ recommended_rf = MIXER_DESIGN.recommended_rf
 # current through the master pot's wiper rather than a voltage across it.
 #
 # design.R_OUT_BLEED is the value *string* "1M", because upstream it is a BOM
-# line and nothing there needs it as a number. Parsed with the mixer's own
-# kisim.magnitude() -- the same parser design.check_dielectrics() uses -- rather
-# than retyped, so this stays a reading and not a copy.
-import kisim                                           # noqa: E402  (needs MIXER on the path)
-
+# line and nothing there needs it as a number. Parsed with kisim.magnitude() --
+# the same parser design.check_dielectrics() uses -- rather than retyped, so the
+# *value* stays a reading and not a copy.
+#
+# The parser itself is now toolchain/kisim.py, a copy. That is the right way
+# round: what must not be retyped is the string "1M", which is a fact about a
+# fabricated board. How a suffix becomes a float is arithmetic, and arithmetic
+# does not have to be borrowed to be correct.
 R_OUT_BLEED = MIXER_DESIGN.R_OUT_BLEED                 # design.R_OUT_BLEED
 OUT_BLEED_OHMS = kisim.magnitude(R_OUT_BLEED)
 

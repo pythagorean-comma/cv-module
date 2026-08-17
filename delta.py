@@ -27,7 +27,7 @@ import math
 
 import design
 import contract.socket as socket
-import source
+from contract.socket import source
 
 ROOT_BW = math.sqrt(socket.BANDWIDTH)
 

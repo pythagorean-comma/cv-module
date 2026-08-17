@@ -1,0 +1,112 @@
+{
+  "board": {
+    "design_settings": {
+      "drc_exclusions": [],
+      "rules": {}
+    }
+  },
+  "boards": [],
+  "cvpcb": {
+    "equivalence_files": []
+  },
+  "libraries": {
+    "pinned_footprint_libs": [],
+    "pinned_symbol_libs": []
+  },
+  "meta": {
+    "filename": "cv-module.kicad_pro",
+    "version": 3
+  },
+  "net_settings": {
+    "classes": [
+      {
+        "bus_width": 12,
+        "clearance": 0.2,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.3,
+        "microvia_drill": 0.1,
+        "name": "Default",
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
+        "priority": 2147483647,
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.25,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "wire_width": 6
+      },
+      {
+        "bus_width": 12,
+        "clearance": 0.2,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.3,
+        "microvia_drill": 0.1,
+        "name": "Power",
+        "pcb_color": "rgba(200, 52, 52, 0.800)",
+        "priority": 1,
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.5,
+        "via_diameter": 0.6,
+        "via_drill": 0.3,
+        "wire_width": 6
+      }
+    ],
+    "meta": {
+      "version": 4
+    },
+    "netclass_patterns": [
+      {
+        "netclass": "Power",
+        "pattern": "VA+"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "VA-"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "V5"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "VREF"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "VREFN"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "MAGND"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "MDGND"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "AGND"
+      }
+    ]
+  },
+  "pcbnew": {
+    "last_paths": {},
+    "page_layout_descr_file": ""
+  },
+  "schematic": {
+    "legacy_lib_dir": "",
+    "legacy_lib_list": []
+  },
+  "sheets": [
+    [
+      "234c64a2-6120-5e9c-89d1-a2d4cf0dfab9",
+      "Root"
+    ]
+  ],
+  "text_variables": {}
+}

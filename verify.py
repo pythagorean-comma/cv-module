@@ -1,22 +1,35 @@
-"""Read the emitted netlist back and check it against section 5.
+"""Read the schematic back through KiCad and check it against section 5.
 
 The five constraints in `hardware-spec-v0.md` section 5 are described there as
 load-bearing rather than stylistic, and CLAUDE.md says to check them
 mechanically rather than by eye. This is that check.
 
-It reads `out/cv-module.net` -- the file, not the module that produced it --
-for the reason the mixer's own verify.py exists: a design that is only ever
-compared to itself proves nothing. That protection is weaker here than it is
-upstream, and the weakness is worth stating plainly rather than leaving to be
-discovered. Upstream, `verify.py` reads a netlist *KiCad* exported from a
-schematic *KiCad* built from geometry, so it catches a wire that missed its
-target by a millimetre. Here the netlist is written by gen_netlist.py from the
-same `design.py` these checks import, so what this catches is a design that
-violates its own constraints -- not a transcription error, because there is no
-transcription yet. When a schematic exists, this file's reader points at
-KiCad's export instead and the rest is unchanged.
+**What it reads changed, and that change is the point of the exercise.** This
+file used to read `out/cv-module.net`, written by gen_netlist.py from the same
+`design.py` these checks import. Every check passed and none of them could ever
+have failed for a transcription error, because there was no transcription: the
+comparison was design.py against itself, laundered through a file. What it
+caught was a design that violates its own constraints, which is worth having and
+is not what its docstring claimed.
 
-What it does catch, today:
+It now runs
+
+    kicad-cli sch export netlist --format kicadsexpr
+
+over `out/cv-module.kicad_sch` and reads that. Every net in it was formed by
+*KiCad* out of geometry -- wire ends meeting at coordinates, pins landing
+mid-wire, labels naming what they touch -- so a route that misses its target by
+1.27 mm now changes the answer. That is the whole argument for synthesising a
+schematic, it is what the mixer's own verify.py does, and it is the reason
+`gen_sch.py` names every interior node: an unlabelled net comes out of the
+export as `Net-(C141-Pad1)`, which compares by node-set and never tells you
+which net moved.
+
+`out/from-kicad.net` is a build artefact and is regenerated on every run.
+`out/cv-module.net` is still written by gen_netlist.py and is still the file the
+BOM and the floorplan read; it is no longer what this file checks.
+
+What it catches:
 
   * a rail this module is forbidden to touch, appearing anywhere;
   * a second bond between the two grounds, which is what one stray ground
@@ -24,7 +37,8 @@ What it does catch, today:
   * a shield landing anywhere but its own pin-3, or at both ends;
   * anything landing on SIN{n} that can put DC into the mixer's summing node;
   * a load at PIN{n} that is not the 10k the DC-block corner was computed for;
-  * an audio conductor leaving the module without a declared pair and shield.
+  * an audio conductor leaving the module without a declared pair and shield;
+  * a pin left open on the sheet that the design has not declared open.
 
 None of those is visible to ERC, to DRC, or to a netlist comparison against
 design.py -- which is the test the mixer's own check_ground_star() docstring
@@ -32,27 +46,83 @@ applies, and the reason these are separate functions rather than assertions
 buried in the generator.
 """
 
+import json
 import pathlib
+import subprocess
 import sys
 
 import design
 import contract.socket as socket
+from toolchain import kicad, sexp
 
-sexp = sys.modules.get("sexp")
-if sexp is None:
-    import sexp                       # noqa: E402  (MIXER is on the path)
+OUT = pathlib.Path(__file__).resolve().parent / "out"
+SHEET = OUT / "cv-module.kicad_sch"
+NETLIST = OUT / "from-kicad.net"
+ERC = OUT / "from-kicad-erc.json"
 
-NETLIST = pathlib.Path(__file__).resolve().parent / "out" / "cv-module.net"
+
+def export_netlist(schematic, destination):
+    """Ask KiCad what the drawing means. Lifted from the mixer's verify.py.
+
+    Regenerated every run rather than read from the tree, so the answer is
+    always about the schematic on disk now. A stale export is the one way this
+    check can go quiet without saying so.
+    """
+    if not schematic.exists():
+        raise SystemExit(f"{schematic} does not exist -- run gen_sch.py")
+    result = subprocess.run(
+        [str(kicad.KICAD_CLI), "sch", "export", "netlist", "--format",
+         "kicadsexpr", "-o", str(destination), str(schematic)],
+        capture_output=True, text=True)
+    if result.returncode != 0 or not destination.exists():
+        raise SystemExit(
+            f"netlist export failed:\n{result.stdout}\n{result.stderr}")
+    return destination
+
+
+# KiCad's own name for a pin that is on nothing. It emits one single-node net
+# per open pin, so `unconnected-(K101-PadA1)` is not a net this design declares
+# and is not a fault either -- it is the export's way of writing "open".
+OPEN = "unconnected-"
+
+
+def _nodes(net):
+    """(ref, pin) for the real parts on one exported net.
+
+    A `#PWR` or `#FLG` symbol names a net; it is not a part on it. The mixer's
+    reader makes the same exclusion and KiCad already omits them, so this is
+    belt and braces against a format that has changed before.
+    """
+    found = set()
+    for node in sexp.find_all(net, "node"):
+        ref = sexp.find(node, "ref")[1]
+        if not ref.startswith("#"):
+            found.add((ref, str(sexp.find(node, "pin")[1])))
+    return found
 
 
 def read_netlist(path):
-    """net name -> set of (ref, pin), as the file actually says."""
+    """net name -> set of (ref, pin), for the nets that are nets."""
     tree = sexp.parse(path.read_text())
-    found = {}
+    return {sexp.find(net, "name")[1]: _nodes(net)
+            for net in sexp.find_all(sexp.find(tree, "nets"), "net")
+            if not str(sexp.find(net, "name")[1]).startswith(OPEN)}
+
+
+def read_open_pins(path):
+    """The pins KiCad found on nothing, as a set of (ref, pin).
+
+    Read separately from the nets rather than filtered out and forgotten,
+    because it is the more interesting half of the export on a partial sheet:
+    check_open_pins() holds it against design.py's own declaration, so KiCad
+    and design.py have to agree about which pins are open and not merely about
+    which are connected.
+    """
+    tree = sexp.parse(path.read_text())
+    found = set()
     for net in sexp.find_all(sexp.find(tree, "nets"), "net"):
-        name = sexp.find(net, "name")[1]
-        found[name] = {(sexp.find(node, "ref")[1], str(sexp.find(node, "pin")[1]))
-                       for node in sexp.find_all(net, "node")}
+        if str(sexp.find(net, "name")[1]).startswith(OPEN):
+            found |= _nodes(net)
     return found
 
 
@@ -66,16 +136,43 @@ def read_components(path):
 
 
 def compare(actual, expected):
-    """The netlist on disk is the netlist design.py asked for, net by net."""
+    """What KiCad found in the geometry is what design.py asked for, by name.
+
+    **Compared by name, not by node-set, and the difference is the whole value
+    of the change.** The node-set form -- match each net's frozenset of
+    (ref, pin) and report the ones with no partner -- was what this file did
+    while both sides came from design.py, and it survives a rename because it
+    never reads the name. Against KiCad's export that is exactly the wrong
+    trade: it reports "some net moved" twice, once as missing and once as
+    unexpected, and leaves the reader to diff two sets of 500 nodes.
+
+    By name, a wire that missed its endpoint says which net lost which pin. The
+    price is that every net has to *have* a name on the sheet, which is why
+    gen_sch.py labels the summing junctions and the integrator nodes that never
+    leave their block. `Net-(C141-Pad1)` is what the alternative looks like, and
+    it changes when a part is renumbered.
+
+    Nets KiCad names for itself are reported separately: those are nets the
+    geometry formed and design.py never declared, which is the shape of an
+    accidental short between two things that were meant to be one node.
+    """
+    expected = {name: set(nodes) for name, nodes in expected.items()}
     problems = []
-    actual_by_nodes = {frozenset(v): k for k, v in actual.items()}
-    expected_by_nodes = {frozenset(v): k for k, v in expected.items()}
-    for nodes, name in expected_by_nodes.items():
-        if nodes not in actual_by_nodes:
-            problems.append(f"net {name} not emitted as designed")
-    for nodes, name in actual_by_nodes.items():
-        if nodes not in expected_by_nodes:
-            problems.append(f"unexpected net {name} = {sorted(nodes)}")
+    for name in sorted(set(expected) - set(actual)):
+        problems.append(
+            f"{name} is in design.py and KiCad found no such net on the sheet")
+    for name in sorted(set(actual) - set(expected)):
+        problems.append(
+            f"KiCad found net {name} = {sorted(actual[name])}, which design.py "
+            f"does not declare")
+    for name in sorted(set(actual) & set(expected)):
+        if actual[name] == expected[name]:
+            continue
+        extra = sorted(actual[name] - expected[name])
+        short = sorted(expected[name] - actual[name])
+        problems.append(
+            f"{name} carries {extra} that design.py does not put on it and is "
+            f"missing {short}")
     return problems
 
 
@@ -348,6 +445,148 @@ def check_triads(nets):
     return problems
 
 
+def run_erc(schematic, destination):
+    """KiCad's own electrical rules check, as JSON. Regenerated every run."""
+    result = subprocess.run(
+        [str(kicad.KICAD_CLI), "sch", "erc", "--severity-all", "--format",
+         "json", "-o", str(destination), str(schematic)],
+        capture_output=True, text=True)
+    if not destination.exists():
+        raise SystemExit(f"erc failed:\n{result.stdout}\n{result.stderr}")
+    report = json.loads(destination.read_text())
+    return [violation for sheet in report.get("sheets", ())
+            for violation in sheet.get("violations", ())]
+
+
+# The ERC violations this sheet is expected to still have, with the reason for
+# each and the exact count. Anything outside this table fails, and so does a
+# different count of anything inside it.
+#
+# **This is an allow-list and it is worth being uncomfortable about, so here is
+# the argument.** "ERC clean" on a half-drawn board cannot mean zero violations,
+# because some of what ERC reports on a half-drawn board is true: three of these
+# say six op-amp sections are not placed, and six op-amp sections are in fact not
+# placed. The choice is between silencing those rules in the project file, where
+# nobody would ever see them again, and writing down what is expected so that the
+# *seventh* one fails the build. Pinning the count is what makes this stricter
+# than "ignore missing_unit" -- placing the rectifiers wrong, or leaving a
+# seventh section unplaced, moves the number and this stops.
+#
+# What it does not do is tolerate errors. Any violation at error severity fails
+# regardless of type, because there is no error in this list and there should
+# never be one: the four that were here (two power-flag conflicts, the spare
+# cells' grounded outputs, two unconnected '541 outputs) were all real, and all
+# four were fixed rather than listed.
+ERC_ALLOWED = {
+    "missing_unit": (
+        3, "U2, U4 and U6 each have C and D unplaced. Those are the six "
+           "sections design.OPAMP_NEEDED counts for the six envelope "
+           "rectifiers, and the rectifier is in design.DEFERRED because its "
+           "time constant is not derivable from the spec. Drawing them with "
+           "no-connect flags would assert they are unused, which is the "
+           "opposite of true, so the warning stands and says so."),
+    "missing_input_pin": (
+        3, "the same six sections, reported once per package from the other "
+           "direction. Not an independent fact and counted separately because "
+           "ERC counts it separately."),
+}
+
+
+def check_erc(violations):
+    """KiCad's ERC finds nothing but the residue this file declares.
+
+    Runs on every build rather than by hand, because the report was unreadable
+    until this pass and unreadable checks stop being read. Before the project
+    file existed it carried 583 violations, 539 of them one per symbol saying
+    the library configuration was missing -- and the three real errors hiding in
+    that were a pin type stated wrong, a power flag on a driven net, and two
+    unconnected outputs.
+    """
+    problems = []
+    counts = {}
+    for violation in violations:
+        kind = violation.get("type", "?")
+        counts[kind] = counts.get(kind, 0) + 1
+        if violation.get("severity") == "error":
+            problems.append(
+                f"ERC error [{kind}]: {violation.get('description')} -- no ERC "
+                f"error is expected on this sheet, and none is listed in "
+                f"ERC_ALLOWED")
+
+    for kind, seen in sorted(counts.items()):
+        if kind not in ERC_ALLOWED:
+            problems.append(
+                f"ERC reports {seen} x [{kind}], which ERC_ALLOWED does not "
+                f"declare -- fix it, or write down why it is expected")
+            continue
+        expected, _ = ERC_ALLOWED[kind]
+        if seen != expected:
+            problems.append(
+                f"ERC reports {seen} x [{kind}] and ERC_ALLOWED expects "
+                f"{expected} -- the residue moved, so something changed that "
+                f"the reason no longer covers")
+    for kind, (expected, _) in sorted(ERC_ALLOWED.items()):
+        if kind not in counts:
+            problems.append(
+                f"ERC_ALLOWED expects {expected} x [{kind}] and ERC reports "
+                f"none -- if that is because the block landed, delete the entry")
+    return problems
+
+
+def check_open_pins(open_pins):
+    """The pins KiCad found open are exactly the pins design.py declares open.
+
+    **The check that stops a no-connect flag from meaning more than it should.**
+    KiCad has two states for a pin, connected and flagged open, so a coil
+    waiting on a driver that is not drawn yet has to borrow the flag that means
+    "open on the finished board". design.NO_CONNECT and design.DEFERRED_PINS are
+    what distinguish them; this is what makes the distinction load-bearing.
+
+    Held as an equality in both directions, which is what makes it worth
+    running. A pin open on the sheet and declared nowhere is a forgotten wire --
+    the sheet flagged two VCA MODE pins and two spare control pins for its whole
+    life without design.py being asked. A pin declared open and not open in
+    KiCad's netlist is the opposite fault and is the one that actually happened:
+    every coil return was quietly wired to MDGND while the design said nothing
+    about coils at all, and each of those pins would fail here.
+
+    Then two things about the declarations themselves. Every deferred pin names
+    a block that is still in design.DEFERRED, so the relay driver landing cannot
+    leave 48 pins still declared as waiting for it. And no pin is in both
+    tuples, because "open on the finished board" and "not connected yet" are
+    contradictory claims and a pin holding both says nothing.
+    """
+    problems = []
+    permanent = {(ref, str(pin)) for ref, pin in design.NO_CONNECT}
+    deferred = {(ref, str(pin)) for ref, pin in design.DEFERRED_PINS}
+    declared = permanent | deferred
+
+    for ref, pin in sorted(open_pins - declared):
+        problems.append(
+            f"KiCad found {ref}.{pin} on nothing, and design.py declares it "
+            f"neither in NO_CONNECT nor in DEFERRED_PINS -- which of the two "
+            f"is it")
+    for ref, pin in sorted(declared - open_pins):
+        problems.append(
+            f"design.py declares {ref}.{pin} open and KiCad did not find it "
+            f"open -- something on the sheet connects a pin the design says is "
+            f"not connected")
+
+    for (ref, pin), block in sorted(design.DEFERRED_PINS.items()):
+        if block not in design.DEFERRED:
+            problems.append(
+                f"{ref}.{pin} waits on {block!r}, which is not in "
+                f"design.DEFERRED -- either that block landed and this pin was "
+                f"not connected with it, or the name is a typo")
+
+    both = sorted(permanent & deferred)
+    if both:
+        problems.append(
+            f"{both} are in both NO_CONNECT and DEFERRED_PINS -- open on the "
+            f"finished board and not connected yet are different claims")
+    return problems
+
+
 CHECKS = (
     ("1  no load on the mixer's rails", check_no_mixer_rail_load, ("nets",)),
     ("2a exactly one ground bond", check_one_ground_bond, ("nets",)),
@@ -356,23 +595,29 @@ CHECKS = (
      ("nets", "values")),
     ("4  PIN{n} load keeps the corner", check_pin_load, ("nets", "values")),
     ("5  shielded pairs, one end [practice]", check_triads, ("nets",)),
+    ("   open pins are the declared ones", check_open_pins, ("open_pins",)),
+    ("   ERC finds only declared residue", check_erc, ("violations",)),
 )
 
 
 def main():
-    if not NETLIST.exists():
-        raise SystemExit(f"{NETLIST} does not exist -- run gen_netlist.py")
+    export_netlist(SHEET, NETLIST)
     nets = read_netlist(NETLIST)
     values = read_components(NETLIST)
-    context = {"nets": nets, "values": values}
+    context = {"nets": nets, "values": values,
+               "open_pins": read_open_pins(NETLIST),
+               "violations": run_erc(SHEET, ERC)}
 
-    print(f"verify: {NETLIST.name} against hardware-spec-v0.md section 5")
-    print(f"        mixer contract at {socket.PIN[:7]}")
+    print(f"verify: {SHEET.name} -> {NETLIST.name}, against "
+          f"hardware-spec-v0.md section 5")
+    print(f"        KiCad {kicad.version()}, mixer contract at {socket.PIN[:7]}")
     print()
 
     problems = compare(nets, design.NETS)
-    print(f"  {'netlist matches design.py':<38} "
+    print(f"  {'KiCad geometry matches design.py':<38} "
           f"{'ok' if not problems else str(len(problems)) + ' problems'}")
+    for problem in problems[:8]:
+        print(f"      {problem}")
 
     failures = list(problems)
     for label, function, wants in CHECKS:

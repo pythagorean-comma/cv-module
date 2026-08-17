@@ -990,6 +990,20 @@ VCA_CHANNEL_PINS = {
     4: {"IIN": 15, "VC": 14, "IOUT": 13},
 }
 
+# Which SSI2164 and which of its four cells carries channel n. 3 + 3, per
+# allocation(): every string gets two die-mates instead of one string getting
+# three and another getting one.
+#
+# Declared beside the pin map rather than beside SECTIONS, where it used to sit,
+# because NO_CONNECT names the spare cell's control pin and NO_CONNECT is
+# earlier in the file. Which is a small thing and worth a sentence: a constant's
+# position in a module is a dependency edge, and this one only pointed the wrong
+# way because nothing had asked the question yet.
+VCA_PACKAGES_REFS = ("U9", "U10")
+VCA_CELL = {n: (VCA_PACKAGES_REFS[(n - 1) // 3], ((n - 1) % 3) + 1)
+            for n in range(1, CHANNELS + 1)}
+VCA_SPARE_CELLS = {ref: 4 for ref in VCA_PACKAGES_REFS}
+
 # OPA1644, 14-pin SOIC/TSSOP, SBOS484D page 5. (out, -in, +in) per section.
 OPAMP_PINS = {"V+": 4, "V-": 11}
 OPAMP_UNITS = {"A": (1, 2, 3), "B": (7, 6, 5), "C": (8, 9, 10),
@@ -1004,6 +1018,7 @@ OPAMP_UNITS = {"A": (1, 2, 3), "B": (7, 6, 5), "C": (8, 9, 10),
 LOGIC_PINS = {"OE1": 1, "GND": 10, "OE2": 19, "VCC": 20}
 LOGIC_A = {n: n + 1 for n in range(1, 9)}
 LOGIC_Y = {n: 19 - n for n in range(1, 9)}
+LOGIC_REF = "U11"
 
 # The pad relay. **The part is still not chosen and the pins now are**, and the
 # distinction is the whole of this comment.
@@ -1083,6 +1098,87 @@ LIBS = {
 # amplifiers on units 1-4 and V+/V- alone on unit 5.
 OPAMP_POWER_UNIT = 5
 
+
+def _set_property(definition, key, value):
+    for item in definition:
+        if (isinstance(item, list) and str(item[0]) == "property"
+                and item[1] == key):
+            item[2] = value
+
+
+def _repin(definition, number, kind, name=None):
+    """Change a pin's electrical type, and its name if given, in place.
+
+    Lifted in shape from the mixer's own `_repin`, which exists because the
+    ICL7660S differs from the ICL7660 by one pin. Walks unit bodies rather than
+    the top level, because that is where pins live once a symbol is flattened.
+    """
+    for unit in definition:
+        if not (isinstance(unit, list) and str(unit[0]) == "symbol"):
+            continue
+        for pin in unit:
+            if not (isinstance(pin, list) and str(pin[0]) == "pin"):
+                continue
+            if not any(isinstance(x, list) and str(x[0]) == "number"
+                       and str(x[1]) == str(number) for x in pin):
+                continue
+            pin[1] = type(pin[1])(kind)
+            for item in list(pin):
+                if isinstance(item, list) and str(item[0]) == "name" and name:
+                    item[1] = name
+                elif isinstance(item, list) and str(item[0]) == "hide":
+                    pin.remove(item)
+
+
+def patch_symbol(lib_id, definition):
+    """Correct a borrowed symbol's properties and pin types, in place.
+
+    Lives here rather than in gen_sch.py because gen_project.py writes the
+    project library through the same function, and the mixer's own
+    gen_project.symbol_library() says why: the schematic embeds a copy of every
+    symbol, so a library patched differently passes ERC, passes verify.py, and
+    surfaces only as a mismatched library when a human opens the project.
+
+    Three parts, and two of the three pin-type corrections were found by ERC
+    rather than by reading -- which is the argument for running ERC on a
+    half-drawn sheet instead of waiting for it to be finished.
+
+    **MAX6126 OUTF is a power output, not an output.** It was `output`, and
+    that is wrong by exactly the thing that makes this design unusual: the
+    '541's Vcc runs off the reference, so OUTF is the pin that powers a chip.
+    Declared as a plain output, ERC reported the '541's Vcc as an input power
+    pin driven by nothing, and the previous answer to that was a PWR_FLAG on
+    VREF -- a second driver on a driven net, which ERC also objected to. One
+    pin type states the fact and both complaints go.
+
+    **SSI2164 I_OUT is passive, not an output.** A Blackmer core's output is a
+    current into a virtual earth: it cannot drive a voltage, and page 5's
+    instruction for an unused channel is to *ground* input and output, which is
+    not something a voltage output tolerates. As `output` it made the two spare
+    cells' grounded I_OUT4 pins a two-driver conflict with each other and with
+    MAGND's own power flag. `passive` is what the pin is.
+    """
+    if lib_id.endswith(":OPA1644"):
+        _set_property(definition, "Datasheet",
+                      "https://www.ti.com/lit/ds/symlink/opa1644.pdf")
+        _set_property(definition, "Description",
+                      "Quad JFET audio op-amp, 3.3 nV/rtHz, SOIC-14")
+    elif lib_id.endswith(":MAX6126"):
+        _set_property(definition, "Datasheet",
+                      "https://www.analog.com/en/products/max6126.html")
+        _set_property(definition, "Description",
+                      "2.5 V ultra-low-noise reference, Kelvin-sensed, SOIC-8")
+        for name, kind in (("NR", "passive"), ("GND", "power_in"),
+                           ("GNDS", "passive"), ("OUTS", "passive"),
+                           ("OUTF", "power_out"), ("IN", "power_in")):
+            _repin(definition, REF_PINS[name], kind, name=name)
+    elif lib_id.endswith(":SSI2164"):
+        _set_property(definition, "Description",
+                      "Quad current-in/current-out VCA, Blackmer core, SOP-16")
+        for cell in VCA_CHANNEL_PINS.values():
+            _repin(definition, cell["IOUT"], "passive")
+    return definition
+
 R_FP = "Resistor_SMD:R_0805_2012Metric"
 C_FP = "Capacitor_SMD:C_0805_2012Metric"
 C_FILM_FP = "Capacitor_SMD:C_1210_3225Metric"
@@ -1149,7 +1245,67 @@ NO_CONNECT = tuple(
     (f"K{n}01", RELAY_PINS[role])
     for n in range(1, CHANNELS + 1)
     for role in ("COM_B", "NC_B", "NO_B")
+) + tuple(
+    # The '541's two unused *outputs*. Its unused inputs are held at MAGND
+    # below, per page 4 note 1, and an output cannot be: tying a driven output
+    # to ground is a short through the driver. So the inputs get a potential and
+    # the outputs get a flag, which is the only pairing that is right at both
+    # ends. Found by ERC, which is the one instrument that looks at pins rather
+    # than at nets and is why it is worth running on a partial sheet.
+    (LOGIC_REF, str(LOGIC_Y[n])) for n in (7, 8)
+) + tuple(
+    # MODE open is Class AB -- SSI2164 page 3, and it is a decision, not an
+    # omission. The spare cell's control pin may float: page 5, "Control pins
+    # can be left open or grounded", where the same sentence requires its input
+    # and output to be *grounded*, which they are.
+    #
+    # Both were flagged on the schematic and declared nowhere. That is the same
+    # drift as the invented coil nets with the sign reversed -- the drawing
+    # deciding something for the design -- and it is why the flags are now
+    # emitted from this tuple rather than written where the part is placed.
+    (ref, str(pin))
+    for ref in VCA_PACKAGES_REFS
+    for pin in (VCA_PINS["MODE"], VCA_CHANNEL_PINS[VCA_SPARE_CELLS[ref]]["VC"])
 )
+
+# Pins this pass does not connect *and must not be read as finished*.
+#
+# **A no-connect flag and a deferred connection are different claims and the
+# sheet cannot tell them apart.** KiCad has exactly two states for a pin --
+# connected, or flagged unconnected -- so a coil pin waiting on a driver that is
+# not drawn yet has to borrow the flag that means "deliberately open". That is
+# the shape of mistake this repository keeps finding: an instrument that passes
+# while covering less than its name. NO_CONNECT above is permanent and this is
+# not, and the two are separated here so that a check can count the second and
+# a build can refuse to fabricate while it is non-empty.
+#
+# What was there before was worse than a flag. The schematic wired every coil's
+# SET-/RESET- to MDGND and labelled SET+/RESET+ out to nets that existed nowhere
+# else -- 24 global labels on 24 one-pin nets, which KiCad reported as
+# `isolated_pin_label` and nothing here read. Two things wrong with it:
+#
+#   * it is not design.py's. The coil nets were invented in the drawing, which
+#     is the one direction STYLE.md rule 1 forbids;
+#   * it is electrically backwards. Section 4.5 specifies the TPIC6B595, an
+#     open-drain *sink*. A sink drives the coil's low side, so the low side
+#     belongs to the driver's drain and the high side to a coil supply. Grounded
+#     low sides need a driver that can source, which the specified part cannot.
+#     A relay that never transfers, from a sheet that draws as correct.
+#
+# And the count does not fit the spec either. Section 4.5 says "12 coils (six
+# 2-bit pads)" and "2 x TPIC6B595" -- 16 outputs. Twelve coils is twelve
+# *single*-coil relays, and a single-coil latching relay latches by reversing
+# the coil polarity, which needs a bridge and not a sink. With the dual-coil
+# latching part section 4.1 asks for, six 2-bit pads are 12 relays and 24 coils,
+# which is 3 x TPIC6B595 exactly. Recorded in ASSUMPTIONS.md rather than acted
+# on: the relay is UNSPECIFIED, the coil supply voltage is a property of the
+# relay, and section 6 says not to invent one.
+DEFERRED_PINS = {
+    (f"K{n}0{index}", RELAY_PINS[role]): "relay drive"
+    for n in range(1, CHANNELS + 1)
+    for index in (1, 2)
+    for role in ("SET+", "SET-", "RESET+", "RESET-")
+}
 DEFERRED = {
     "envelope rectifier": "the smoothing time constant is not derivable -- "
                           "spec section 4.4 gives a sampling rate and no "
@@ -1322,18 +1478,17 @@ for _n in range(1, CHANNELS + 1):
     SECTIONS[("servo", _n)] = (f"U{5 + (_n - 1) // 4}", "ABCD"[(_n - 1) % 4])
     SECTIONS[("cv", _n)] = (f"U{7 + (_n - 1) // 4}", "ABCD"[(_n - 1) % 4])
 SECTIONS[("refinv", 0)] = ("U8", "C")
+# The one genuinely spare section, and it needs terminating rather than leaving.
+# OPAMP_NEEDED counts 31 of the 32 available; six of the seven that this pass
+# does not draw are U2/U4/U6 C and D, reserved above for the six envelope
+# rectifiers and DEFERRED with them. U8 D is the remainder, and an unused JFET
+# section with floating inputs is not neutral: it sits against a rail, draws
+# more than its share of the supply and couples back through the die it shares
+# with the reference inverter and two CV filters. Wired as a unity follower with
+# its input at MAGND, which is the standard answer and costs no parts.
+SECTIONS[("spare", 0)] = ("U8", "D")
 OPAMP_PACKAGES = sorted({pkg for pkg, _ in SECTIONS.values()},
                         key=lambda r: int(r[1:]))
-
-# Which SSI2164 and which of its four cells carries channel n. 3 + 3, per
-# allocation(): every string gets two die-mates instead of one string getting
-# three and another getting one.
-VCA_PACKAGES_REFS = ("U9", "U10")
-VCA_CELL = {n: (VCA_PACKAGES_REFS[(n - 1) // 3], ((n - 1) % 3) + 1)
-            for n in range(1, CHANNELS + 1)}
-VCA_SPARE_CELLS = {ref: 4 for ref in VCA_PACKAGES_REFS}
-
-LOGIC_REF = "U11"
 
 
 # Every net, and what DC it sits at. Single numbers where a net has one,
@@ -1368,6 +1523,9 @@ for _n in range(1, CHANNELS + 1):
 
 # The reference inverter's virtual earth, held at MAGND by feedback.
 NET_DC["RINV"] = 0.0
+# The spare section's own output, shorted to its own inverting input. 0 V
+# because its non-inverting input is at MAGND and it is a follower.
+NET_DC["SPARE"] = 0.0
 # The reference's noise-reduction pin. Declared as a range rather than a number
 # because the MAX6126's pin map has not been read in this session -- see
 # UNSPECIFIED -- so what this node actually sits at is not known here. It is
@@ -1599,6 +1757,14 @@ def shared(design):
               description="Reference inverter feedback")
     design.connect("VREFN", (package, out))
     design.connect("RINV", (package, inverting))
+    design.connect("MAGND", (package, non_inverting))
+
+    # The spare section, terminated. See SECTIONS[("spare", 0)] for why an
+    # unused JFET section is not free. Output to its own inverting input, input
+    # at MAGND: a follower sitting at 0 V, with no external part.
+    package, unit = SECTIONS[("spare", 0)]
+    out, inverting, non_inverting = OPAMP_UNITS[unit]
+    design.connect("SPARE", (package, out), (package, inverting))
     design.connect("MAGND", (package, non_inverting))
 
     # The reference itself. Pins by role, because its map has not been read.

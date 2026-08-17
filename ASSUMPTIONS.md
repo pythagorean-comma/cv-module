@@ -98,6 +98,12 @@ Not assumptions so much as absences, listed because a section 5 check against a 
 - **relay drive** — 2 x TPIC6B595 plus the 74LVC1G123 one-shot, section 4.5.
 - **supply** — isolated DC-DC at >=300 kHz per section 1.1; the topology is decided and the part is not.
 
+### Pins waiting on a deferred block
+
+- **relay drive** — 48 pins, `K101.A1` … `K602.B2`. They carry a no-connect flag on the schematic because KiCad has no other way to write "connected by a block that is not drawn yet", and `verify.check_open_pins()` is what stops the flag from being read as final. **The board must not be fabricated while this list is non-empty.**
+
+The relay coils are also a **spec correction**, recorded and not acted on. Section 4.5 says "12 coils (six 2-bit pads)" driven by "2 × TPIC6B595" — 16 outputs. Twelve coils is twelve *single*-coil relays, and a single-coil latching relay latches by reversing its coil polarity, which needs a bridge; the TPIC6B595 is an open-drain sink and cannot reverse anything. With the dual-coil latching part section 4.1 asks for, six 2-bit pads are 12 relays and **24 coils, which is 3 × TPIC6B595 exactly**. Not acted on because the relay is in `design.UNSPECIFIED`, the coil supply voltage is a property of the relay, and section 6 says not to invent one. See `design.DEFERRED_PINS`.
+
 ## Readings not taken
 
 ### The `MAX6126A25` pin map.
@@ -302,7 +308,7 @@ Not assumptions so much as absences, listed because a section 5 check against a 
 
 Of 34 BOM lines, **1 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 31 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
 
-The totals in `out/SHOPPING.md` are therefore a range, and the range is honest rather than decorative. They are also a floor: none of the deferred blocks is costed.
+The totals in `docs/SHOPPING.md` are therefore a range, and the range is honest rather than decorative. They are also a floor: none of the deferred blocks is costed.
 
 ## What is not assumed
 
