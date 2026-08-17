@@ -443,8 +443,19 @@ for what plugs into a connector — so a vertical header with a crimp housing
 would exceed the envelope the enclosure was designed to whatever else happens.
 The loom is soldered directly into the six hole trios, or right-angle.
 
-**What is needed: the enclosure decision, and `comma-enclosure` to check it
-against.**
+**Not blocked any more, and the reason changes what this section is for.** Tim's
+decision: the enclosure is bespoke and gets made *after* the board is optimised,
+so area does not constrain the outline and `comma-enclosure` is not needed to
+settle it. The arithmetic above stops being a verdict and becomes a cost
+argument — the pad is still 52 % of the placed courtyard, which is worth
+reconsidering on price and part count rather than on whether it fits.
+
+What survives as a real constraint is the loom, and it is mechanical rather than
+area: the mixer's published `stack.above` is 13.00 mm and its contract has no
+field for what plugs into a connector, so a vertical header with a crimp housing
+exceeds the envelope the mixer's own enclosure was designed to. Solder the loom
+directly into the six `RV{n}01` hole trios, or use right-angle. See FINDINGS.md
+F3.
 """
 
 
