@@ -17,12 +17,8 @@ J8,PWR,Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical,61300511121,1,
 J9,CTRL,Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical,61300511121,1,5,0.40,0.90,GBP,10,band,"typical distributor band, not read this session"
 J10,CTRL2,Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical,61300511121,1,5,0.40,0.90,GBP,10,band,"typical distributor band, not read this session"
 J11,CTRL3,Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical,61300311121,1,5,0.30,0.70,GBP,10,band,"typical distributor band, not read this session"
-"K101,K102,K201,K202,K301,K302,K401,K402,K501,K502,K601,K602",NOT CHOSEN,,,12,13,2.50,5.00,GBP,12,band,envelope from a representative signal DPDT latching relay
 "R101,R102,R201,R202,R301,R302,R401,R402,R501,R502,R601,R602,R801,R802",10k 0.1%,Resistor_SMD:R_0805_2012Metric,ERA6AEB103V,14,18,0.10,0.30,GBP,100,band,"typical distributor band, not read this session"
 "R111,R121,R211,R221,R311,R321,R411,R421,R511,R521,R611,R621",12k1 0.1%,Resistor_SMD:R_0805_2012Metric,ERA6AEB1212V,12,16,0.10,0.30,GBP,25,band,"typical distributor band, not read this session"
-"R112,R212,R312,R412,R512,R612",24k3 0.1%,Resistor_SMD:R_0805_2012Metric,ERA6AEB2432V,6,10,0.10,0.30,GBP,25,band,"typical distributor band, not read this session"
-"R113,R213,R313,R413,R513,R613",48k7 0.1%,Resistor_SMD:R_0805_2012Metric,ERA6AEB4872V,6,10,0.10,0.30,GBP,25,band,"typical distributor band, not read this session"
-"R114,R214,R314,R414,R514,R614",97k6 0.1%,Resistor_SMD:R_0805_2012Metric,ERA6AEB9762V,6,10,0.10,0.30,GBP,25,band,"typical distributor band, not read this session"
 "R115,R215,R315,R415,R515,R615",220R 1%,Resistor_SMD:R_0805_2012Metric,RC0805FR-07220RL,6,10,0.01,0.03,GBP,100,band,"typical distributor band, not read this session"
 "R131,R132,R231,R232,R331,R332,R431,R432,R531,R532,R631,R632",1M 1%,Resistor_SMD:R_0805_2012Metric,RC0805FR-071ML,12,16,0.01,0.03,GBP,100,band,"typical distributor band, not read this session"
 "R141,R144,R241,R244,R341,R344,R441,R444,R541,R544,R641,R644",22k 1%,Resistor_SMD:R_0805_2012Metric,RC0805FR-0722KL,12,16,0.01,0.03,GBP,100,band,"typical distributor band, not read this session"

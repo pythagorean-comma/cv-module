@@ -38,7 +38,9 @@ What it catches:
   * anything landing on SIN{n} that can put DC into the mixer's summing node;
   * a load at PIN{n} that is not the 10k the DC-block corner was computed for;
   * an audio conductor leaving the module without a declared pair and shield;
-  * a pin left open on the sheet that the design has not declared open.
+  * a pin left open on the sheet that the design has not declared open;
+  * R_IN switched, loaded, revalued or no longer equal to R_OUT, which is what
+    the coarse pad's deletion rests on -- see design.pad_benefit().
 
 None of those is visible to ERC, to DRC, or to a netlist comparison against
 design.py -- which is the test the mixer's own check_ground_star() docstring
@@ -82,8 +84,9 @@ def export_netlist(schematic, destination):
 
 
 # KiCad's own name for a pin that is on nothing. It emits one single-node net
-# per open pin, so `unconnected-(K101-PadA1)` is not a net this design declares
-# and is not a fault either -- it is the export's way of writing "open".
+# per open pin, so `unconnected-(U9-MODE-Pad1)` is not a net this design
+# declares and is not a fault either -- it is the export's way of writing
+# "open".
 OPEN = "unconnected-"
 
 
@@ -446,6 +449,76 @@ def check_triads(nets):
     return problems
 
 
+def check_gain_chain(nets, values):
+    """R_IN is one resistor, R_OUT equals it, and nothing else is on either node.
+
+    **New with the coarse pad's deletion, and it is the netlist half of that
+    decision.** design.pad_benefit() shows that switching R_IN buys nothing
+    against taking the same attenuation in the control port; what makes that
+    arithmetic *true of this board* is that R_IN is a single fixed resistor
+    with a known value and an unloaded node either side of it. That is a
+    property of connectivity and of values together, so it is checkable here
+    and nowhere else.
+
+    Modelled on the mixer's check_attenuators(), which CLAUDE.md names as the
+    precedent: assert the values, then assert the *membership* of the nets on
+    both sides, because "anything extra landing between them" is the fault that
+    changes a number without changing a wire anybody drew on purpose.
+
+    Four claims:
+
+    R{n}11 is design.VCA_RIN and R{n}21 is design.VCA_ROUT, read off the
+    exported netlist rather than off design.py -- so a value typed onto the
+    sheet, or a pad step fitted where the fixed resistor belongs, fails here.
+
+    The two are *equal*, which is the unity condition. A design where they
+    differ is not wrong, but every noise figure in this repo is quoted at
+    unity, and the datasheet's own noise table is specified at R_IN = R_OUT --
+    so if they ever diverge the figures stop being readings and become
+    extrapolations, which is exactly the mistake the pad was built on.
+
+    CPL{n} carries C{n}01 and R{n}11 and nothing else. It is the coupling node,
+    and a second branch on it is what a pad looks like coming back: four
+    resistors to four selector contacts, all of them on this net.
+
+    IIN{n} carries R{n}11, R{n}15 and the cell's own input pin. Anything else
+    between R_IN and the gain core is either a switch, in which case the gain
+    is not what design.py says, or a load, in which case the input current is
+    not what pad_benefit() priced.
+
+    **What else would pass.** ERC sees every pin connected either way. compare()
+    above catches a *drawing* that disagrees with design.py, and would catch
+    three of the four -- but not a design.py that has changed its own mind,
+    which is the case where both sides agree and the arithmetic in
+    pad_benefit() quietly stops applying to the board.
+    """
+    problems = []
+    if design.VCA_RIN_OHMS != design.VCA_ROUT_OHMS:
+        problems.append(
+            f"design.py has R_IN {design.VCA_RIN_OHMS:.0f} and R_OUT "
+            f"{design.VCA_ROUT_OHMS:.0f} -- not unity, and every noise figure "
+            f"in this repo is quoted at the datasheet's R_IN = R_OUT")
+    for n in range(1, design.CHANNELS + 1):
+        for ref, expected in ((f"R{n}11", design.VCA_RIN),
+                              (f"R{n}21", design.VCA_ROUT)):
+            if values.get(ref) != expected:
+                problems.append(
+                    f"{ref} is {values.get(ref)!r}, expected {expected!r} -- "
+                    f"see design.VCA_RIN, and pad_benefit() for why the pair "
+                    f"is fixed and equal")
+        for name, expected in (
+                (f"CPL{n}", {f"C{n}01", f"R{n}11"}),
+                (f"IIN{n}", {f"R{n}11", f"R{n}15",
+                             design.VCA_CELL[n][0]})):
+            found = {ref for ref, _ in nets.get(name, ())}
+            if found != expected:
+                problems.append(
+                    f"{name} carries {sorted(found)}, expected "
+                    f"{sorted(expected)} -- anything else in series with R_IN "
+                    f"switches the gain, and anything across it loads the cell")
+    return problems
+
+
 def check_reference_load(nets, values):
     """What KiCad found on VREF is a capacitive load the MAX6126 is qualified for.
 
@@ -618,9 +691,15 @@ def check_open_pins(open_pins):
     every coil return was quietly wired to MDGND while the design said nothing
     about coils at all, and each of those pins would fail here.
 
+    **design.DEFERRED_PINS is empty as of the coarse pad's deletion**, since all
+    48 entries were that pad's relay coils. The check is unchanged and both
+    directions still hold; what it has lost is a planted fault for its third
+    clause, which test_verify.py says out loud rather than replacing with a
+    synthetic one.
+
     Then two things about the declarations themselves. Every deferred pin names
-    a block that is still in design.DEFERRED, so the relay driver landing cannot
-    leave 48 pins still declared as waiting for it. And no pin is in both
+    a block that is still in design.DEFERRED, so a block landing cannot leave
+    pins still declared as waiting for it. And no pin is in both
     tuples, because "open on the finished board" and "not connected yet" are
     contradictory claims and a pin holding both says nothing.
     """
@@ -663,6 +742,8 @@ CHECKS = (
      ("nets", "values")),
     ("4  PIN{n} load keeps the corner", check_pin_load, ("nets", "values")),
     ("5  shielded pairs, one end [practice]", check_triads, ("nets",)),
+    ("   R_IN fixed, equal to R_OUT, unloaded", check_gain_chain,
+     ("nets", "values")),
     ("   open pins are the declared ones", check_open_pins, ("open_pins",)),
     ("   ERC finds only declared residue", check_erc, ("violations",)),
     ("   VREF load inside the MAX6126's range", check_reference_load,

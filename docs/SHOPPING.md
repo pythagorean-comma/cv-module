@@ -39,12 +39,8 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | J9 | CTRL | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
 | J10 | CTRL2 | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
 | J11 | CTRL3 | `61300311121` | 1 | 5 | GBP 0.30–0.70 | band | [search](https://www.mouser.co.uk/c/?q=61300311121) |
-| K101–K602 | NOT CHOSEN | `**not chosen**` | 12 | 13 | GBP 2.50–5.00 | band | — |
 | R101–R802 | 10k 0.1% | `ERA6AEB103V` | 14 | 18 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB103V) |
 | R111–R621 | 12k1 0.1% | `ERA6AEB1212V` | 12 | 16 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB1212V) |
-| R112–R612 | 24k3 0.1% | `ERA6AEB2432V` | 6 | 10 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB2432V) |
-| R113–R613 | 48k7 0.1% | `ERA6AEB4872V` | 6 | 10 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB4872V) |
-| R114–R614 | 97k6 0.1% | `ERA6AEB9762V` | 6 | 10 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB9762V) |
 | R115–R615 | 220R 1% | `RC0805FR-07220RL` | 6 | 10 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-07220RL) |
 | R131–R632 | 1M 1% | `RC0805FR-071ML` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-071ML) |
 | R141–R644 | 22k 1% | `RC0805FR-0722KL` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0722KL) |
@@ -58,7 +54,7 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 
 ## Totals, per currency, fitted quantities
 
-- **GBP 47.42 – 95.85**
+- **GBP 15.62 – 30.45**
 - **USD 27.96 – 49.80**
 
 Kept per currency rather than converted: two lines were priced in dollars because that is the currency the figures were found in, and folding them into a sterling total at a rate nobody looked up would turn two honest figures into one invented one.
@@ -101,17 +97,9 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **J11** — Wurth WR-PHD 1x03 vertical, gold-plated: the mixer's own CONN_MPN[3], so the same part is at both ends of the loom. Gold because these are signal contacts in a box that will be opened.
 
-**K101–K602** — e.g. Panasonic TQ2-L2-5V class: 2-pole changeover, dual coil, 14 x 9 mm. **Not a choice.** Twelve of them is the largest single cost on the board and 49 % of its area -- see floorplan.py.
-
 **R101–R802** — Panasonic ERA-6A thin film, 0.1 %, 25 ppm. Thin film is the specification and not the tolerance -- see FRONT_R.
 
 **R111–R621** — ERA-6A thin film
-
-**R112–R612** — ERA-6A thin film
-
-**R113–R613** — ERA-6A thin film
-
-**R114–R614** — ERA-6A thin film
 
 **R115–R615** — 0805 thick film
 
@@ -141,5 +129,4 @@ The deferred blocks, each with its reason. None of them is costed here, so the t
 - **controller** — RP2040 and its QSPI flash, crystal, USB and MIDI: shared block, and the scope statement puts shared blocks after one channel is complete.
 - **envelope ADC** — ADS131M08 or MCP3564, undecided in spec section 4.4.
 - **envelope rectifier** — the smoothing time constant is not derivable -- spec section 4.4 gives a sampling rate and no attack/release target. The tap net BUF{n} exists and is driven; the rectifier hangs off it.
-- **relay drive** — 2 x TPIC6B595 plus the 74LVC1G123 one-shot, section 4.5.
 - **supply** — isolated DC-DC at >=300 kHz per section 1.1; the topology is decided and the part is not.

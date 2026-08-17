@@ -8,10 +8,11 @@ The discipline is the mixer's. Its `Assumption` class says it plainly: **the ran
 
 ## The short version
 
-Both of these would change the board; the rest would change a number:
+**One entry would change the board; the rest would change a number:**
 
 1. **`MEASURED['noise_floor']`** — the mixer's own unmeasured figure, which decides whether this module costs 0.11 dB or 0.85 dB with everything open, and 0.56 dB or 3.17 dB while the lead feature is running.
-2. **The pad relay** — not chosen, 49 % of the board area and about a third of its cost.
+
+**The pad relay was the second and it is not an assumption any more.** It was the largest unchosen part in the design — 52 % of the placed courtyard, about two thirds of the BOM — and rather than being chosen it has been deleted, along with the pad it switched. `design.pad_benefit()` prices the pad against the control port that replaces it and the answer is 0.000 dB of system noise at every noise floor in the declared range. Nothing here is waiting on a relay.
 
 **Two entries that *were* on this list are settled rather than open.** Constraint 2's "six separate returns" has been struck, with the arithmetic, in [Readings of the spec](#readings-of-the-spec). And the 20.1 µF that used to sit on VREF — twice the MAX6126's capacitive-load stability ceiling, because two 10 µF reservoirs were fitted — is resolved by deleting C804: its justification was shielding the reference's loop from an 8 kHz load step, and at 8 kHz a 10 µF could only supply 1.4 % of that step. VREF now carries 10.1 µF, which is the datasheet's own recommended 10 µF ∥ 0.1 µF, and `verify.check_reference_load()` holds the range against KiCad's netlist. See `design.reference_load()`.
 
@@ -59,15 +60,15 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **When wrong:** See servo_residual(). What the constraint actually protects is DC *current* through the mixer's master wiper, and C703 turns 3 mV at SUM_OUT into 3 nA there -- the same order as the 0.2-1.0 nA the mixer already accepts from its own op-amp. Even the top of this range is comfortable. If it were not, the answer is a zero-drift part in the servo and not a series capacitor: a capacitor would put a second high-pass within a decade of the mixer's own 15.9 Hz, which is what its DC_BLOCK_VALUE comment warns against.
 
-### `vca_rin` = 12100.0 ohm R_IN/R_OUT at the 0 dB pad step
+### `vca_rin` = 12100.0 ohm, R_IN = R_OUT, one fixed pair per channel
 
 **Range:** 7500.0 .. 20000.0
 
-**Question:** How low can R_IN go before distortion costs more than the noise it buys? The datasheet gives a range and a direction -- 7.5k to 100k, 'lower values will produce the best noise performance at some cost in distortion' -- and no number.
+**Question:** How low can R_IN go before distortion costs more than the noise it buys? The datasheet gives a range and a direction -- 7.5k to 100k, 'lower values will produce the best noise performance at some cost in distortion' -- and no number. The one figure it does give is the level dependence: 0.05 % at 0.775 V rms and 0.025 % 17 dB below that.
 
 **Sets:** the VCA's output noise, and with it whether this module is audible against the six Nu capsules at all
 
-**When wrong:** Nothing structural: four resistors per channel and R_OUT. How much it matters is decided entirely by the mixer's own noise_floor assumption -- at the predicted 144 uV the whole choice is worth 0.3 dB, and at the optimistic end of its declared range it is worth 0.8 dB. Measure that first; this is downstream of it.
+**When wrong:** Nothing structural: two resistors per channel, and the coarse pad's deletion means the top of the range is no longer bounded by anything but the part. How much it matters is decided entirely by the mixer's own noise_floor assumption -- at the predicted 144 uV the whole choice is worth 0.3 dB, and at the optimistic end of its declared range it is worth 0.8 dB. Measure that first; this is downstream of it.
 
 ## Inherited from the mixer
 
@@ -84,7 +85,7 @@ Facts this repo takes from `../summing-mixer` at `4bc7ddb`. Their truth is upstr
 
 ## Parts not chosen
 
-- **None** — dual-coil latching DPDT: not named in the spec (section 4.5 names the driver and the one-shot only), and section 6 says not to invent one. Its *pins* are now known -- see RELAY_PINS -- because IEC 60947 contact numbering is a standard and not a part. What the schematic commits to is that whatever relay is fitted follows it.
+None. The one entry was the pad relay — a part the spec asks for by function, does not name, and §6 forbids inventing — and it was resolved by deleting the pad rather than by choosing the relay. See `design.pad_benefit()`. `design.check_orderable()` and `check_pin_numbers()` are unchanged and still refuse a BOM line with no part number and a pin written as a role; the deferred DC-DC, ADC and bypass relay will refill this list when they are drawn.
 
 ## Blocks deferred
 
@@ -94,14 +95,13 @@ Not assumptions so much as absences, listed because a section 5 check against a 
 - **controller** — RP2040 and its QSPI flash, crystal, USB and MIDI: shared block, and the scope statement puts shared blocks after one channel is complete.
 - **envelope ADC** — ADS131M08 or MCP3564, undecided in spec section 4.4.
 - **envelope rectifier** — the smoothing time constant is not derivable -- spec section 4.4 gives a sampling rate and no attack/release target. The tap net BUF{n} exists and is driven; the rectifier hangs off it.
-- **relay drive** — 2 x TPIC6B595 plus the 74LVC1G123 one-shot, section 4.5.
 - **supply** — isolated DC-DC at >=300 kHz per section 1.1; the topology is decided and the part is not.
 
 ### Pins waiting on a deferred block
 
-- **relay drive** — 48 pins, `K101.A1` … `K602.B2`. They carry a no-connect flag on the schematic because KiCad has no other way to write "connected by a block that is not drawn yet", and `verify.check_open_pins()` is what stops the flag from being read as final. **The board must not be fabricated while this list is non-empty.**
+None. All 48 were the twelve pad relays' coils, and they went with the pad — see `design.pad_benefit()`. `verify.check_open_pins()` still holds the declaration in both directions, so a pin left open on the sheet and declared nowhere still fails; there is simply nothing declared as waiting.
 
-The relay coils are also a **spec correction**, recorded and not acted on. Section 4.5 says "12 coils (six 2-bit pads)" driven by "2 × TPIC6B595" — 16 outputs. Twelve coils is twelve *single*-coil relays, and a single-coil latching relay latches by reversing its coil polarity, which needs a bridge; the TPIC6B595 is an open-drain sink and cannot reverse anything. With the dual-coil latching part section 4.1 asks for, six 2-bit pads are 12 relays and **24 coils, which is 3 × TPIC6B595 exactly**. Not acted on because the relay is in `design.UNSPECIFIED`, the coil supply voltage is a property of the relay, and section 6 says not to invent one. See `design.DEFERRED_PINS`.
+**Section 4.5's coil arithmetic is resolved by subtraction, and it is worth keeping what it said.** It asked for "12 coils (six 2-bit pads)" driven by "2 × TPIC6B595" — 16 outputs. Twelve coils is twelve *single*-coil relays, and a single-coil latching relay latches by reversing its coil polarity, which needs a bridge; the TPIC6B595 is an open-drain sink and cannot reverse anything. With the dual-coil latching part section 4.1 asks for, six 2-bit pads are 12 relays and **24 coils, which is 3 × TPIC6B595 exactly**. The contradiction was real and it is now moot: there are no coils, no drivers, no one-shot and no coil supply rail. It is recorded because a spec that does not close arithmetically is worth knowing about even when the block it describes has been deleted.
 
 ## Readings not taken
 
@@ -147,15 +147,15 @@ The relay coils are also a **spec correction**, recorded and not acted on. Secti
 
 **To settle:** A spectrum analyser on one channel at Phase 1. This is worth adding to the phase-1 bench list, which currently only has feedthrough, noise and law drift on it.
 
-### The datasheet's noise figures apply at pad steps other than 0 dB.
+### How much of the SSI2164 cell's noise sits ahead of its gain core.
 
-**Basis:** The table's stated condition is R_IN = R_OUT, which is true only at the 0 dB step. The other three raise R_IN and leave R_OUT alone, and vca_noise() is called with the base value throughout.
+**Basis:** vca_cell_fit() splits the datasheet's four points into a current at the cell's output and a fixed voltage there, but not into input-referred and output-referred parts -- nothing in the datasheet distinguishes them, and it publishes no noise-against-gain figure at all. design.cell_noise() takes it as a parameter with no default.
 
-**Affects:** The noise figures at -6, -12 and -18 dB, which are not computed anywhere.
+**Affects:** How much quieter a shut channel is than an open one, which is most of the gating penalty in delta.system_delta(): at the pessimistic end the cell's noise does not attenuate at all, and the penalty at the optimistic noise floor is 2.9 dB against 1.8 dB at the other end.
 
-**If wrong:** The pad steps are noisier than modelled -- but they are used when the source is hot, so the signal is larger by the same amount. This is what any pad costs and it is not specific to this arrangement.
+**If wrong:** Nothing about the board. Both ends were computed before the coarse pad was struck, precisely so the decision would not depend on this -- and it does not, because the pad loses at both.
 
-**To settle:** Measure, or accept. It does not change a component value.
+**To settle:** A noise measurement at two gain settings on one channel, at Phase 1. It belongs on the same bench visit as the feedthrough test.
 
 ### The SSI2164 noise table already includes an I-V amplifier.
 
@@ -179,13 +179,13 @@ The relay coils are also a **spec correction**, recorded and not acted on. Secti
 
 ### Courtyard areas and a packing factor of 2.5.
 
-**Basis:** The areas are from the footprint names; the relay is a 14 x 9 mm envelope for a part that is not chosen; the packing factor is a judgement.
+**Basis:** The areas are from the footprint names; the packing factor is a judgement. The 14 x 9 mm relay envelope that used to be the largest term is now only in floorplan.pad_area(), which prices what was deleted rather than what is fitted.
 
-**Affects:** floorplan.area(), and the finding that the module is 1466 mm2 larger than the mixer's whole outline.
+**Affects:** floorplan.area(), and with the pad gone the finding has reversed: 3310 mm2 against the mixer's own 6189 mm2 outline, where it was 7225 and 1036 mm2 short.
 
-**If wrong:** The area conclusion survives a wide error, because the shortfall is 24 %. It stops being interesting now the enclosure is bespoke.
+**If wrong:** The reversal survives a wide error -- it is a factor of 1.9, not a few per cent -- but the deferred blocks are not in it, so 'fits' means 'has stopped being obviously too big'.
 
-**To settle:** Nothing to settle. Superseded by the enclosure decision.
+**To settle:** Place the deferred blocks. The packing factor is only worth arguing with once there is an outline to argue about.
 
 ## Firmware assumptions
 
@@ -208,16 +208,6 @@ The relay coils are also a **spec correction**, recorded and not acted on. Secti
 **If wrong:** Little. The arithmetic in REFERENCE_PLACEMENT shows the transient is 19 uA against the MAX6126's 10 mA, so the stagger is a free improvement rather than a requirement.
 
 **To settle:** Check the RP2040 datasheet when the controller block is drawn.
-
-### A 3-10 ms coil pulse is what the latching relays need.
-
-**Basis:** From spec section 4.5, which states it without a part. Used in floorplan.py's current argument and nowhere else.
-
-**Affects:** The one-shot's RC, which is not designed yet.
-
-**If wrong:** Nothing here. It is the relay's specification and arrives with the relay.
-
-**To settle:** Choose the relay.
 
 ## Readings of the spec
 
@@ -295,7 +285,7 @@ The relay coils are also a **spec correction**, recorded and not acted on. Secti
 
 ## Prices
 
-Of 34 BOM lines, **1 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 31 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
+Of 30 BOM lines, **1 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 27 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
 
 The totals in `docs/SHOPPING.md` are therefore a range, and the range is honest rather than decorative. They are also a floor: none of the deferred blocks is costed.
 

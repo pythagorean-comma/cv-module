@@ -27,7 +27,8 @@ one place is the rule the rest of the repo runs on.
 | §5.4 | *"or the 31.8 Hz corner moves"* — corrected. 31.8 Hz is the corner at 5 kΩ, one end of the window the sentence quotes | `CLAUDE.md` constraint 3 |
 | §5.5 | *"individually-shielded twisted triads"* — demoted from load-bearing to good practice on 59 dB of margin, and a triad here is a pair inside a shield | `CLAUDE.md` constraint 5 |
 | §4.2 | *"MAX6126A25 … (35 nV/√Hz)"* — 35 nV/√Hz is the **2.048 V** part. The 2.5 V part is 45 | `design.VREF`, read first-hand |
-| §4.5 | *"12 coils (six 2-bit pads)"* driven by *"2× TPIC6B595"* — does not close. Dual-coil latching, as §4.1 asks, is 24 coils and 3× registers | [`ASSUMPTIONS.md`](ASSUMPTIONS.md), `design.DEFERRED_PINS` |
+| §4.1, §4.5 | *"Coarse pad … Keeps the VCA near unity where its noise costs least"* — **struck, and it is the largest deletion in the repo.** The SSI2164's noise rise belongs to R_OUT, which a pad does not move; against the control port, which reaches the same level for no parts, the pad is 0.03–3.9 dB *worse* at the cell and 0.000 dB at the system. 36 parts, 52 % of the courtyard, two thirds of the BOM | `design.pad_benefit()`, `delta.pad_system_delta()` |
+| §4.5 | *"12 coils (six 2-bit pads)"* driven by *"2× TPIC6B595"* — does not close. Dual-coil latching, as §4.1 asks, is 24 coils and 3× registers. **Moot with the pad struck**, and recorded because a spec that does not close arithmetically is worth knowing about | [`ASSUMPTIONS.md`](ASSUMPTIONS.md) |
 | §7 | asks `verify.py` to check "six separate returns", which is §5.2 and struck | `verify.check_shield_returns()` holds the half that has a mechanism |
 
 **§6 has not moved and is still binding.** Nothing in the list above was invented

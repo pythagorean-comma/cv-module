@@ -95,17 +95,43 @@ MODELS = (
         "to the phase-1 bench list, which currently only has feedthrough, "
         "noise and law drift on it."),
 
+    # **This entry was the pad's whole cost analysis and every clause of it was
+    # wrong.** It read: "The datasheet's noise figures apply at pad steps other
+    # than 0 dB ... the pad steps are noisier than modelled -- but they are
+    # used when the source is hot, so the signal is larger by the same amount.
+    # This is what any pad costs and it is not specific to this arrangement ...
+    # Measure, or accept. It does not change a component value."
+    #
+    # The steps are not noisier (the datasheet's rise belongs to R_OUT, which
+    # the pad does not move); the source is not hotter (this module's input is
+    # whatever arrives at PIN{n}, and the pad is cut-only, so nothing about it
+    # makes a signal larger); and it changed thirty-six parts.
+    #
+    # It is replaced by nothing rather than by a corrected version, because
+    # design.pad_benefit() computes the answer and the pad is gone. What is
+    # kept is the shape of the mistake, and it is worth as much as any of the
+    # struck constraints in CLAUDE.md: **an assumption whose "if it is wrong"
+    # clause cancels its own consequence is one nobody will ever compute.**
+    # Every other Guess in this file names something that would change if the
+    # guess were wrong. This one said, in effect, that the answer did not
+    # matter either way -- and no check in a repository full of checks looks at
+    # the *reasoning* inside a declaration.
     Guess(
-        "The datasheet's noise figures apply at pad steps other than 0 dB.",
-        "The table's stated condition is R_IN = R_OUT, which is true only at "
-        "the 0 dB step. The other three raise R_IN and leave R_OUT alone, and "
-        "vca_noise() is called with the base value throughout.",
-        "The noise figures at -6, -12 and -18 dB, which are not computed "
-        "anywhere.",
-        "The pad steps are noisier than modelled -- but they are used when "
-        "the source is hot, so the signal is larger by the same amount. This "
-        "is what any pad costs and it is not specific to this arrangement.",
-        "Measure, or accept. It does not change a component value."),
+        "How much of the SSI2164 cell's noise sits ahead of its gain core.",
+        "vca_cell_fit() splits the datasheet's four points into a current at "
+        "the cell's output and a fixed voltage there, but not into "
+        "input-referred and output-referred parts -- nothing in the datasheet "
+        "distinguishes them, and it publishes no noise-against-gain figure at "
+        "all. design.cell_noise() takes it as a parameter with no default.",
+        "How much quieter a shut channel is than an open one, which is most of "
+        "the gating penalty in delta.system_delta(): at the pessimistic end "
+        "the cell's noise does not attenuate at all, and the penalty at the "
+        "optimistic noise floor is 2.9 dB against 1.8 dB at the other end.",
+        "Nothing about the board. Both ends were computed before the coarse "
+        "pad was struck, precisely so the decision would not depend on this -- "
+        "and it does not, because the pad loses at both.",
+        "A noise measurement at two gain settings on one channel, at Phase 1. "
+        "It belongs on the same bench visit as the feedthrough test."),
 
     Guess(
         "The SSI2164 noise table already includes an I-V amplifier.",
@@ -135,14 +161,18 @@ MODELS = (
 
     Guess(
         "Courtyard areas and a packing factor of 2.5.",
-        "The areas are from the footprint names; the relay is a 14 x 9 mm "
-        "envelope for a part that is not chosen; the packing factor is a "
-        "judgement.",
-        "floorplan.area(), and the finding that the module is 1466 mm2 larger "
-        "than the mixer's whole outline.",
-        "The area conclusion survives a wide error, because the shortfall is "
-        "24 %. It stops being interesting now the enclosure is bespoke.",
-        "Nothing to settle. Superseded by the enclosure decision."),
+        "The areas are from the footprint names; the packing factor is a "
+        "judgement. The 14 x 9 mm relay envelope that used to be the largest "
+        "term is now only in floorplan.pad_area(), which prices what was "
+        "deleted rather than what is fitted.",
+        "floorplan.area(), and with the pad gone the finding has reversed: "
+        "3310 mm2 against the mixer's own 6189 mm2 outline, where it was "
+        "7225 and 1036 mm2 short.",
+        "The reversal survives a wide error -- it is a factor of 1.9, not a "
+        "few per cent -- but the deferred blocks are not in it, so 'fits' "
+        "means 'has stopped being obviously too big'.",
+        "Place the deferred blocks. The packing factor is only worth arguing "
+        "with once there is an outline to argue about."),
 )
 
 FIRMWARE = (
@@ -168,14 +198,6 @@ FIRMWARE = (
         "improvement rather than a requirement.",
         "Check the RP2040 datasheet when the controller block is drawn."),
 
-    Guess(
-        "A 3-10 ms coil pulse is what the latching relays need.",
-        "From spec section 4.5, which states it without a part. Used in "
-        "floorplan.py's current argument and nowhere else.",
-        "The one-shot's RC, which is not designed yet.",
-        "Nothing here. It is the relay's specification and arrives with the "
-        "relay.",
-        "Choose the relay."),
 )
 
 READINGS_OF_THE_SPEC = (
@@ -314,15 +336,21 @@ def _report():
 
     out("## The short version")
     out()
-    out("Both of these would change the board; the rest would change a "
-        "number:")
+    out("**One entry would change the board; the rest would change a "
+        "number:**")
     out()
     out("1. **`MEASURED['noise_floor']`** — the mixer's own unmeasured "
         "figure, which decides whether this module costs 0.11 dB or 0.85 dB "
         "with everything open, and 0.56 dB or 3.17 dB while the lead feature "
         "is running.")
-    out("2. **The pad relay** — not chosen, 49 % of the board area and about "
-        "a third of its cost.")
+    out()
+    out("**The pad relay was the second and it is not an assumption any "
+        "more.** It was the largest unchosen part in the design — 52 % of the "
+        "placed courtyard, about two thirds of the BOM — and rather than being "
+        "chosen it has been deleted, along with the pad it switched. "
+        "`design.pad_benefit()` prices the pad against the control port that "
+        "replaces it and the answer is 0.000 dB of system noise at every noise "
+        "floor in the declared range. Nothing here is waiting on a relay.")
     out()
     load = design.reference_load()
     out("**Two entries that *were* on this list are settled rather than "
@@ -383,6 +411,15 @@ def _report():
     for value, reason in sorted(design.UNSPECIFIED.items(),
                                 key=lambda kv: str(kv[0])):
         out(f"- **{value}** — {reason}")
+    if not design.UNSPECIFIED:
+        out("None. The one entry was the pad relay — a part the spec asks for "
+            "by function, does not name, and §6 forbids inventing — and it was "
+            "resolved by deleting the pad rather than by choosing the relay. "
+            "See `design.pad_benefit()`. `design.check_orderable()` and "
+            "`check_pin_numbers()` are unchanged and still refuse a BOM line "
+            "with no part number and a pin written as a role; the deferred "
+            "DC-DC, ADC and bypass relay will refill this list when they are "
+            "drawn.")
     out()
 
     out("## Blocks deferred")
@@ -407,18 +444,26 @@ def _report():
             f"`verify.check_open_pins()` is what stops the flag from being read "
             f"as final. **The board must not be fabricated while this list is "
             f"non-empty.**")
-    out()
-    out("The relay coils are also a **spec correction**, recorded and not "
-        "acted on. Section 4.5 says \"12 coils (six 2-bit pads)\" driven by "
-        "\"2 × TPIC6B595\" — 16 outputs. Twelve coils is twelve *single*-coil "
-        "relays, and a single-coil latching relay latches by reversing its coil "
-        "polarity, which needs a bridge; the TPIC6B595 is an open-drain sink "
-        "and cannot reverse anything. With the dual-coil latching part section "
-        "4.1 asks for, six 2-bit pads are 12 relays and **24 coils, which is "
-        "3 × TPIC6B595 exactly**. Not acted on because the relay is in "
-        "`design.UNSPECIFIED`, the coil supply voltage is a property of the "
-        "relay, and section 6 says not to invent one. See "
-        "`design.DEFERRED_PINS`.")
+    if not waiting:
+        out("None. All 48 were the twelve pad relays' coils, and they went "
+            "with the pad — see `design.pad_benefit()`. `verify."
+            "check_open_pins()` still holds the declaration in both "
+            "directions, so a pin left open on the sheet and declared nowhere "
+            "still fails; there is simply nothing declared as waiting.")
+        out()
+        out("**Section 4.5's coil arithmetic is resolved by subtraction, and "
+            "it is worth keeping what it said.** It asked for \"12 coils (six "
+            "2-bit pads)\" driven by \"2 × TPIC6B595\" — 16 outputs. Twelve "
+            "coils is twelve *single*-coil relays, and a single-coil latching "
+            "relay latches by reversing its coil polarity, which needs a "
+            "bridge; the TPIC6B595 is an open-drain sink and cannot reverse "
+            "anything. With the dual-coil latching part section 4.1 asks for, "
+            "six 2-bit pads are 12 relays and **24 coils, which is 3 × "
+            "TPIC6B595 exactly**. The contradiction was real and it is now "
+            "moot: there are no coils, no drivers, no one-shot and no coil "
+            "supply rail. It is recorded because a spec that does not close "
+            "arithmetically is worth knowing about even when the block it "
+            "describes has been deleted.")
     out()
 
     for title, guesses in (("Readings not taken", READINGS),

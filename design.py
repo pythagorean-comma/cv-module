@@ -8,13 +8,11 @@ finished.
     from the mixer's RV{n}01 socket
       PIN{n} --[ 10k ]--+-- inverting unity front end --+-- envelope tap
        (pin 1)          |          (Rf 10k)             |
-                     virtual                            +--[ 10u ]--[ pad ]--,
-                      earth                                                  |
-                                                          +-------------------+
-                                                          |
-                                                    R_IN 12k1..97k6
-                                                          |
-      SIN{n} <-- I-V + DC servo <-- SSI2164 <-------------+
+                     virtual                            +--[ 10u ]--,
+                      earth                                         |
+                                                             R_IN 12k1
+                                                                    |
+      SIN{n} <-- I-V + DC servo <-- SSI2164 <----------------------+
        (pin 2)      (R_OUT 12k1)      ^  Vc
                                       |
                             2-pole MFB, 255 Hz, x0.809
@@ -35,11 +33,15 @@ the RMC piezo system. An inverting unity stage costs nothing, restores polarity,
 and presents `PIN{n}` an exact 10k into a virtual earth rather than a shunt
 resistor in parallel with a follower's input. See front_end().
 
-**The coarse pad is R_IN, not a pad.** The SSI2164 is current-in, so gain is
-R_OUT/R_IN and attenuation is a larger R_IN. Switching R_IN puts the relay
-contacts in series with 12k1-97k6 carrying microamps, where 100 mohm of contact
-resistance is a 1e-5 error -- against a passive divider, where the same contact
-sits in the shunt leg and its resistance is the pad ratio. See pad_states().
+**There is no coarse pad.** Spec section 4.1 asks for 0/-6/-12/-18 dB on
+latching relays to "keep the VCA near unity where its noise costs least", and
+the SSI2164's noise does not work that way: its table sweeps R_IN and R_OUT
+together, and vca_cell_fit() shows the rise belongs to R_OUT, which a pad does
+not move. Against the control port -- which reaches the same level for no parts
+-- the pad is 0.03 to 3.9 dB *worse* on noise and no better on distortion.
+Thirty-six parts, 52 % of the placed courtyard, two thirds of the BOM and a
+coil supply rail RAILS never had, struck. See pad_benefit(), and VCA_RIN for
+what is left.
 
 **The CV chain is the datasheet's Figure 10, complemented.** Which makes the
 whole CV path fail-silent by construction rather than by firmware, and makes
@@ -82,15 +84,19 @@ MEASURED = {
     "noise_floor": socket.NOISE_FLOOR,
 
     "vca_rin": Assumption(
-        value=12_100.0, units=" ohm R_IN/R_OUT at the 0 dB pad step",
+        value=12_100.0, units=" ohm, R_IN = R_OUT, one fixed pair per channel",
         low=7_500.0, high=20_000.0,
         question="How low can R_IN go before distortion costs more than the "
                  "noise it buys? The datasheet gives a range and a direction "
                  "-- 7.5k to 100k, 'lower values will produce the best noise "
-                 "performance at some cost in distortion' -- and no number.",
+                 "performance at some cost in distortion' -- and no number. "
+                 "The one figure it does give is the level dependence: "
+                 "0.05 % at 0.775 V rms and 0.025 % 17 dB below that.",
         sets="the VCA's output noise, and with it whether this module is "
              "audible against the six Nu capsules at all",
-        when_wrong="Nothing structural: four resistors per channel and R_OUT. "
+        when_wrong="Nothing structural: two resistors per channel, and the "
+                   "coarse pad's deletion means the top of the range is no "
+                   "longer bounded by anything but the part. "
                    "How much it matters is decided entirely by the mixer's "
                    "own noise_floor assumption -- at the predicted 144 uV the "
                    "whole choice is worth 0.3 dB, and at the optimistic end "
@@ -183,9 +189,57 @@ CONTROL_FEEDTHROUGH_DB = -60.0      # typ, 0 dB -> -40 dB
 # Page 4: "A 20kohm value for R_IN is recommended for most applications, but
 # can range from 7.5kohm to 100kohm -- lower values will produce the best
 # noise performance at some cost in distortion."
+#
+# **The conditions line above the whole specification table was read this
+# session and it is the half that decides the coarse pad.** Verbatim, page 2:
+# "V_S = +/-15V, V_IN = 0.775V_RMS, f = 1kHz, A_V = 0dB, Class AB, T_A = 25C;
+# using Figure 1 circuit without diode". Three things follow:
+#
+#   * the parameter is **R_IN/OUT** -- both resistors, moved together. The
+#     table is neither an R_IN sweep nor an R_OUT sweep, so on its own it
+#     cannot say which of the two the rise belongs to. That question is the
+#     whole of the pad's case and nothing in this repo had asked it; see
+#     vca_cell_fit() and cell_noise();
+#   * **A_V = 0 dB**, so every row is at unity and the table says nothing
+#     about noise against control voltage either;
+#   * **"Figure 1 circuit"** is the cell plus a 1/2 TL072 and both resistors,
+#     so these figures already contain an I-V amplifier -- which is what
+#     vca_cell_fit() finds sitting underneath them as a fixed term.
 VCA_NOISE_DBU = {30_000.0: -93.0, 20_000.0: -96.0,
                  15_000.0: -98.0, 7_500.0: -101.0}
+VCA_NOISE_CONDITION = "R_IN/OUT together, A_V = 0 dB, Figure 1 without diode"
 VCA_RIN_RANGE = (7_500.0, 100_000.0)
+
+# The amplifier inside that condition. Page 3, Figure 1: the I_OUT pin is held
+# at virtual earth by "1/2 TL072", whose datasheet noise is 18 nV/rtHz at
+# 1 kHz. Declared because vca_cell_fit() has to say what the fixed term it
+# finds is the same size as: 34.7 nV against 2 x 18 = 36.
+VCA_MEASURE_AMP_EN = 18e-9
+
+# Page 2, the THD rows, under the same conditions line -- so V_IN is 0.775 V
+# rms throughout and the only thing that changes down the column is A_V. Class
+# AB, 80 kHz measurement bandwidth. Read first-hand this session:
+#
+#     A_V = 0 dB                    0.05  %
+#     A_V = 0 dB, V_IN = -17 dBu    0.025 %
+#     A_V = +20 dB                  0.20  %
+#     A_V = -20 dB                  0.045 %
+#
+# **The -20 dB row is the one the pad existed to avoid needing, and it is
+# better than the unity row.** It is measured with the full 0.775 V still
+# arriving at R_IN and the cell attenuating by 20 dB in the control port --
+# exactly the case the pad was there to keep the design out of. The part is not
+# worse there. See pad_benefit(), which is where this table is spent.
+#
+# The second row is the level dependence, and it is the one real effect: a
+# 17 dB smaller input halves the distortion. It belongs to the signal level and
+# not to the gain setting, which is why a pad -- attenuating before the cell --
+# can move it and a control voltage cannot.
+# Keyed (A_V in dB, V_IN in volts rms) and valued as a *fraction*, not as the
+# percent the datasheet prints -- STYLE.md rule 9, the unit belongs in the
+# identifier and not in a comment.
+VCA_THD_FRACTION = {(0.0, 0.775): 5.0e-4, (0.0, 0.1095): 2.5e-4,
+                    (20.0, 0.775): 2.0e-3, (-20.0, 0.775): 4.5e-4}
 
 # Page 4. Input current handling is ~1 mA peak; the datasheet advises designing
 # for 900 uA where R_IN is 10k or below on supplies of +/-12 V or more.
@@ -325,38 +379,181 @@ def tempco_span(nominal_db=-40.0):
     }
 
 
-def vca_noise(rin):
+def vca_noise(rin_out):
     """Output noise density of one VCA channel at unity, V/rtHz.
 
     Interpolated log-log through VCA_NOISE_DBU, which is four measured points
-    rather than a model, so this is a reading of the datasheet's graph and not
-    a derivation. Two things it does not say, both recorded rather than
-    smoothed over:
+    rather than a model, so this is a reading of the datasheet's table and not
+    a derivation.
 
-    The table's condition is R_IN = R_OUT. That holds only at the 0 dB pad
-    step; the other three raise R_IN and leave R_OUT alone, so their noise is
-    not on this curve and this function is called with the base value.
+    **The argument is R_IN/OUT and not R_IN, and that is a correction.** The
+    parameter was called `rin` and the docstring said the table's condition
+    "holds only at the 0 dB pad step" -- which was true, and was then used as
+    though the curve were an R_IN dependence with R_OUT along for the ride. It
+    is not: cell_noise() splits the same four points into a current at the
+    cell's output and a fixed voltage there, and the rise belongs to **R_OUT**.
+    Calling this with a padded R_IN answered a question the table cannot be
+    asked. Nothing did -- the pad's four steps were never costed at all, which
+    is how the error survived; see pad_benefit().
 
-    And it is a total, not a density -- dBu over 20 Hz to 20 kHz unweighted --
-    so the conversion below assumes it is flat. The datasheet publishes no
+    With the pad gone, R_IN = R_OUT by construction on every channel, so this
+    function is now called at the datasheet's own stated condition rather than
+    extrapolated away from it.
+
+    It is a total, not a density -- dBu over 20 Hz to 20 kHz unweighted -- so
+    the conversion below assumes it is flat. The datasheet publishes no
     spectrum.
     """
     points = sorted(VCA_NOISE_DBU)
-    if rin <= points[0]:
+    if rin_out <= points[0]:
         dbu = VCA_NOISE_DBU[points[0]]
-    elif rin >= points[-1]:
+    elif rin_out >= points[-1]:
         dbu = VCA_NOISE_DBU[points[-1]]
     else:
-        lower = max(p for p in points if p <= rin)
-        upper = min(p for p in points if p >= rin)
+        lower = max(p for p in points if p <= rin_out)
+        upper = min(p for p in points if p >= rin_out)
         if lower == upper:
             dbu = VCA_NOISE_DBU[lower]
         else:
-            fraction = math.log(rin / lower) / math.log(upper / lower)
+            fraction = math.log(rin_out / lower) / math.log(upper / lower)
             dbu = (VCA_NOISE_DBU[lower]
                    + fraction * (VCA_NOISE_DBU[upper] - VCA_NOISE_DBU[lower]))
     rms = 0.7746 * 10 ** (dbu / 20)
     return {"dbu": dbu, "rms": rms, "density": rms / math.sqrt(BANDWIDTH)}
+
+
+def vca_cell_fit():
+    """Split the datasheet's four noise points into a current and a voltage.
+
+    The table sweeps R_IN and R_OUT together, so it cannot say on its own
+    which resistor the rise belongs to -- and that is the question the coarse
+    pad's whole case rests on, because the pad raises R_IN and leaves R_OUT
+    alone. This is the arithmetic that separates them.
+
+    Two of the four terms are computed rather than fitted, from the mixer's own
+    thermal(), because they are known:
+
+        R_IN's Johnson current through the cell at unity, into R_OUT
+                        sqrt(4kT/R_IN) x R_OUT
+        R_OUT's own Johnson voltage
+                        sqrt(4kT x R_OUT)
+
+    and at the table's condition R_IN = R_OUT = R those are equal, so together
+    they are 2.4kT.R of noise power. What is left is two unknowns, and the
+    model is linear in R^2:
+
+        e^2 - 2.4kT.R  =  i_cell^2 . R^2  +  e_fixed^2
+
+    so an ordinary least squares in x = R^2 gives both with no search, no
+    iteration and no third-party package.
+
+    **The distinction is the whole decision.** `i_cell` is a *current* at the
+    cell's output, so it is multiplied by R_OUT and the pad cannot touch it.
+    `e_fixed` is a *voltage* there and depends on neither resistor. Nothing in
+    the model rises with R_IN at all; the only R_IN term, its Johnson current,
+    *falls* as R_IN grows.
+
+    Two corroborations, neither of them proof:
+
+    **e_fixed comes out at 34.7 nV/rtHz, and the measuring amplifier is a
+    TL072 at 18.** VCA_MEASURE_AMP_EN, at a noise gain of 2, is 36 -- so the
+    fixed term is the size of the op-amp the datasheet measured through, which
+    is a thing the conditions line says is in there. It is not proof that it is
+    *only* that: an output-stage voltage noise inside the cell would sit in the
+    same place and four points cannot separate them. Everything downstream
+    therefore keeps the pessimistic reading and leaves the term in.
+
+    **i_cell comes out at 3.8 pA/rtHz, which is full shot noise on 44 uA.**
+    Page 6 describes Class AB as class A at low signal levels and Figure 5 puts
+    the class A/B transition current at about 10 uA at the smallest mode
+    current it plots, with MODE open below that. So the fit implies a core
+    idling at a few times its own transition current, which is the right order
+    of magnitude and is all a plausibility check can say.
+
+    One thing the datasheet contradicts itself about, recorded rather than
+    reconciled. Page 8's ULTRA-LOW NOISE VCA paragraph says paralleling four
+    channels with R_IN/OUT divided by four improves output noise by exactly
+    6 dB, "-97dBu for a single channel to -103dBu". Every term in the model
+    above scales by 6 dB under that transformation *except* e_fixed, which is
+    the op-amp and does not move -- so a full 6 dB requires the fixed term to
+    be negligible, and the table's own curvature requires it to be 34.7 nV.
+    They cannot both be exact. The table is a specification and the paragraph
+    is prose with round numbers, so the table wins here; it is worth knowing
+    that the part's own document disagrees by two or three decibels about this.
+    """
+    fourkt = 4 * BOLTZMANN * TEMPERATURE
+    rows = []
+    for r, dbu in sorted(VCA_NOISE_DBU.items()):
+        measured = vca_noise(r)["density"]
+        rows.append((r, measured, measured ** 2 - 2 * fourkt * r))
+
+    # Least squares of y = a.x + b with x = R^2, y = the residual power above.
+    n = len(rows)
+    xs = [r ** 2 for r, _, _ in rows]
+    ys = [y for _, _, y in rows]
+    mean_x, mean_y = sum(xs) / n, sum(ys) / n
+    covariance = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    variance = sum((x - mean_x) ** 2 for x in xs)
+    slope = covariance / variance
+    intercept = mean_y - slope * mean_x
+    assert slope > 0 and intercept > 0, (
+        f"the two-term model does not fit: i_cell^2 = {slope:g}, "
+        f"e_fixed^2 = {intercept:g} -- a negative term means the split is "
+        f"wrong, not that the numbers are")
+
+    i_cell, e_fixed = math.sqrt(slope), math.sqrt(intercept)
+    residuals = [(r, 20 * math.log10(
+        math.sqrt(slope * r ** 2 + intercept + 2 * fourkt * r) / measured))
+        for r, measured, _ in rows]
+    return {
+        "i_cell": i_cell,
+        "e_fixed": e_fixed,
+        "amp_at_noise_gain_2": 2 * VCA_MEASURE_AMP_EN,
+        "shot_equivalent_amps": i_cell ** 2 / (2 * ELECTRON_CHARGE),
+        "residuals_db": residuals,
+        "rms_db": math.sqrt(sum(d ** 2 for _, d in residuals) / n),
+    }
+
+
+def cell_noise(rin, rout, gain_db=0.0, input_referred=0.0, e_fixed=None):
+    """One cell's output noise density at any R_IN, R_OUT and gain, V/rtHz.
+
+    The model vca_cell_fit() establishes, evaluated away from the condition it
+    was fitted at. At rin == rout and gain_db == 0 it reproduces the
+    datasheet's own four points to better than 0.2 dB, which is the only claim
+    it can make on its own authority.
+
+        e_out^2 = R_OUT^2 [ g^2 (i_in^2 + 4kT/R_IN) + i_out^2 ]
+                  + 4kT R_OUT + e_fixed^2
+
+    `input_referred` is the fraction of i_cell's *power* that sits ahead of the
+    gain core and is therefore attenuated with the signal by g. **It is not
+    known and cannot be got from the datasheet**, so it is a parameter with no
+    default worth defending: 0.0 puts all of the cell's noise at the output,
+    where the control voltage cannot reduce it, and 1.0 puts all of it at the
+    input. Both ends are computed wherever the answer might depend on it, and
+    the pad's case is dead at both -- which is why the split never had to be
+    resolved. Page 6's account of the core favours somewhere in between: V_C
+    "steers the signal current from one side of each differential pair to the
+    other", and what is steered away from I_OUT is signal and noise alike.
+
+    `e_fixed` defaults to the fit, which attributes the whole R-independent
+    term to the cell and is the pessimistic reading. The design's own I-V
+    amplifier is an OPA1644 at 3.3 nV/rtHz rather than the TL072 the table was
+    measured through; if the term really is the amplifier, one channel is about
+    2 dB quieter than every figure this repo quotes. Not claimed, because four
+    points cannot tell an op-amp from an output stage.
+    """
+    fit = vca_cell_fit()
+    if e_fixed is None:
+        e_fixed = fit["e_fixed"]
+    g = 10 ** (gain_db / 20)
+    i_in_squared = fit["i_cell"] ** 2 * input_referred
+    i_out_squared = fit["i_cell"] ** 2 * (1 - input_referred)
+    fourkt = 4 * BOLTZMANN * TEMPERATURE
+    return math.sqrt(
+        rout ** 2 * (g ** 2 * (i_in_squared + fourkt / rin) + i_out_squared)
+        + fourkt * rout + e_fixed ** 2)
 
 
 # ---------------------------------------------------------------------------
@@ -513,37 +710,88 @@ def dc_block_delta():
 
 
 # ---------------------------------------------------------------------------
-# The coarse pad, which is R_IN
+# R_IN and R_OUT -- and the 2-bit coarse pad, which has been struck
 # ---------------------------------------------------------------------------
 
-# 0 / -6 / -12 / -18 dB in two bits, per spec section 4.1, and section 4.5's
-# "12 coils (six 2-bit pads)" fixes the count at two dual-coil latching relays
-# per channel.
-PAD_STEPS_DB = (0.0, -6.0, -12.0, -18.0)
-
-# The four R_IN values, E96, and the base is MEASURED["vca_rin"].
+# **The coarse pad is gone. Thirty-six parts, 52 % of the placed courtyard, two
+# thirds of the BOM, twenty-four coil drives and a coil supply rail RAILS never
+# had -- deleted, because what it buys is between nothing and less than
+# nothing.** pad_benefit() is the arithmetic and it is short; this is why it was
+# never run.
 #
-# Why the pad is R_IN and not a pad. The SSI2164 is a current-in device, so
-# channel gain is R_OUT/R_IN and 6 dB of attenuation is twice the input
-# resistor. That puts the relay contacts in series with 12k1 to 97k6 carrying
-# at most 100 uA, where a contact's 100 mohm is a 1e-5 error and its
-# degradation over a decade is still nothing. A passive divider ahead of a
-# fixed R_IN puts the same contact in the shunt leg, where its resistance *is*
-# the pad ratio and its drift is a level shift -- on a switch that operates
-# every time the player changes a preset.
+# The brief that asked the question called it 40 parts. It is 36 -- twelve
+# relays and twenty-four resistors -- of which six resistors come back as the
+# fixed R_IN, so the netlist goes from 188 parts and 138 nets to 158 and 102.
 #
-# 12k1 rather than the datasheet's recommended 20k because the top step has to
-# stay inside the part. 20k doubles three times to 160k, and page 4's range
-# stops at 100k; 12k1 doubles to 96k8 and clears it. It is also the quieter end
-# of the recommendation, and the direction the datasheet gives is that lower is
-# quieter at some cost in distortion.
-VCA_RIN_STEPS = (12_100.0, 24_300.0, 48_700.0, 97_600.0)
+# What was here: 0 / -6 / -12 / -18 dB in two bits, four E96 input resistors
+# per channel selected by two dual-coil latching relays, from spec section 4.1
+# ("Coarse pad ... Latching relays. Keeps the VCA near unity where its noise
+# costs least") and section 4.5's "12 coils (six 2-bit pads)".
+#
+# **The claim it rests on is that a VCA is noisier away from unity, and the
+# SSI2164 is not.** Its noise table sweeps *R_IN/OUT* -- both resistors
+# together -- and vca_cell_fit() splits those four points into a current at
+# the cell's output and a fixed voltage there. A current is multiplied by
+# R_OUT. The pad raises R_IN and leaves R_OUT alone, so it moves the cell's
+# noise by 0.2 dB, in the direction of *less*, and only because R_IN's own
+# Johnson current falls. The rise from 62 to 123 nV/rtHz that the pad was
+# implicitly costed against belongs to R_OUT and the pad never touches it.
+#
+# The datasheet says the same thing about distortion, which is the other reading
+# of "where its noise costs least": VCA_THD_FRACTION's A_V = -20 dB row is
+# measured at full input and is *lower* than the unity row.
+#
+# The comparison that decides it is not "the pad against nothing" -- the module
+# has to reach the same output level either way -- it is **the pad against the
+# control port**, which can attenuate the same 18 dB with no parts at all. At
+# the cell that comparison is between -0.03 and -3.9 dB: the pad is never
+# quieter, and against the datasheet's own THD rows it is not less distorted
+# either, because A_V = -20 dB measures *better* than A_V = 0 dB at full input.
+#
+# **How it survived is the usual shape and the instrument is new.** It was not
+# an unchecked constraint this time -- it was an `Assumption` whose "if it is
+# wrong" clause cancelled its own consequence. ASSUMPTIONS.md carried "the
+# datasheet's noise figures apply at pad steps other than 0 dB", answered with
+# "the pad steps are noisier than modelled -- but they are used when the source
+# is hot, so the signal is larger by the same amount", and closed with "it does
+# not change a component value". Every clause of that is wrong: the steps are
+# not noisier, the source is not hotter (the module's input is whatever arrives
+# at PIN{n}, and the pad is cut-only), and it changes forty. An assumption
+# whose consequence is written as self-cancelling is an assumption nobody will
+# ever compute, which is the same failure as a check that covers less than its
+# name -- one level further out, where nothing is instrumented at all.
+#
+# Kept from it, because they are true and were the good part of the reasoning:
+# a pad on this part belongs at R_IN rather than in a divider (the SSI2164 is
+# current-in, so contacts in series with 12k1 carry ~100 uA and 100 mohm of
+# contact resistance is a 1e-5 error, where the same contact in a divider's
+# shunt leg *is* the pad ratio); and if a coarse range switch is ever wanted
+# for a reason that is not noise, that is where it goes.
+#
+# R_IN, and the argument for it has changed even though the number has not.
+#
+# 12k1 was forced: the top pad step had to stay inside the part, 20k doubles
+# three times to 160k and page 4's range stops at 100k, 12k1 doubles to 96k8
+# and clears it. **That constraint is gone with the pad**, so R_IN is now free
+# across the datasheet's whole 7.5k-100k and the choice is the one page 4
+# actually describes -- "lower values will produce the best noise performance
+# at some cost in distortion" -- with no number attached to either side.
+#
+# It stays at 12k1 on this argument: at the mixer's own clipping_peak() the
+# input current is 102 uA against the 900 uA page 4 advises designing to, so
+# nothing at this end of the range is near a limit, and 12k1 is 2.9 dB quieter
+# than the recommended 20k. 7.5k would be 2.1 dB quieter again and is the one
+# place the distortion cost might bite, which is exactly what
+# MEASURED["vca_rin"] is an Assumption about. The value here is that
+# assumption's, not a second copy of it.
+VCA_RIN = "12k1 0.1%"
+VCA_RIN_OHMS = MEASURED["vca_rin"].value
 
-# R_OUT is fixed and equals the base R_IN, so the 0 dB step is exactly unity
-# and every other step is attenuation. Unity is where spec section 4.1 wants
-# the cell -- "keeps the VCA near unity where its noise costs least".
-VCA_ROUT = "12k1 0.1%"
-VCA_ROUT_OHMS = 12_100.0
+# R_OUT equals R_IN. That is the unity condition rather than a chosen value --
+# the SSI2164 is current-in/current-out, so channel gain is R_OUT/R_IN -- and
+# it is written as the equality so the two cannot drift apart.
+VCA_ROUT = VCA_RIN
+VCA_ROUT_OHMS = VCA_RIN_OHMS
 
 # Across R_OUT at the I-V converter. Page 4: "Many op-amps require a feedback
 # capacitor to preserve phase margin. A value of 100pF will suffice in most
@@ -552,37 +800,126 @@ VCA_ROUT_OHMS = 12_100.0
 IV_CF = "100p/50V C0G"
 IV_CF_FARADS = 100e-12
 
-# Dual-coil latching, two changeover poles, dry signal-level contacts, and a
-# 3-10 ms coil pulse per spec section 4.5. **The part is not chosen here**: the
-# spec names the drive (TPIC6B595) and the one-shot (74LVC1G123) and does not
-# name the relay, and section 6 says not to invent one. See ASSUMPTIONS.md.
-PAD_RELAYS_PER_CHANNEL = 2
-PAD_RELAY = None
+# The pad steps that were here, kept as data because pad_benefit() has to be
+# able to price the thing that was deleted. Not fitted anywhere: no netlist, no
+# footprint, no BOM line. Exact ratios rather than the E96 values that were
+# actually drawn (24k3, 48k7, 97k6), because there are no parts to name any
+# more and the difference is under 1.5 %.
+PAD_STEPS_DB = (0.0, -6.0, -12.0, -18.0)
+PAD_STEPS_RIN = tuple(VCA_RIN_OHMS * 10 ** (-db / 20) for db in PAD_STEPS_DB)
 
 
-def pad_states():
-    """The four pad steps, as they actually come out of E96 resistors.
+def vca_input():
+    """What the cell's input sees, with one fixed R_IN and nothing switching.
 
-    Accuracy is irrelevant here and the arithmetic is reported anyway, because
-    "coarse" is a claim about what the step is for and not permission to skip
-    checking it. What does matter is the two right-hand columns: the input
-    current the VCA sees at the mixer's own clipping_peak(), against the 900 uA
-    page 4 advises designing to, and whether each step stays inside the
-    7.5k-100k the part is specified over.
+    Three things, and the middle one is the reason the pad was never needed for
+    headroom either: the input current at the mixer's own clipping_peak()
+    against the 900 uA page 4 advises designing to, whether R_IN sits inside
+    the 7.5k-100k the part is specified over, and the corner the 10 uF control-
+    feedthrough capacitor makes with it.
+
+    The corner used to move with the pad step -- 1.32 Hz at 12k1 down to
+    0.16 Hz at 97k6 -- and is now one number.
     """
-    base = VCA_RIN_STEPS[0]
     peak = socket.clipping_peak()
+    return {
+        "rin": VCA_RIN_OHMS,
+        "rout": VCA_ROUT_OHMS,
+        "gain_db": 20 * math.log10(VCA_ROUT_OHMS / VCA_RIN_OHMS),
+        "peak": peak,
+        "current": peak / VCA_RIN_OHMS,
+        "in_range": VCA_RIN_RANGE[0] <= VCA_RIN_OHMS <= VCA_RIN_RANGE[1],
+        "block_corner": 1.0 / (2 * math.pi * VCA_INPUT_BLOCK_FARADS
+                               * VCA_RIN_OHMS),
+        "headroom_ratio": VCA_INPUT_CURRENT_MAX / (peak / VCA_RIN_OHMS),
+        # Both stated as "quieter by", positive, against the datasheet's own
+        # recommendation and against the quiet end of its range.
+        "quieter_than_recommended_db": 20 * math.log10(
+            vca_noise(20_000.0)["density"] / vca_noise(VCA_RIN_OHMS)["density"]),
+        "quietest_would_gain_db": 20 * math.log10(
+            vca_noise(VCA_RIN_OHMS)["density"]
+            / vca_noise(VCA_RIN_RANGE[0])["density"]),
+    }
+
+
+def pad_benefit():
+    """What the 2-bit coarse pad buys. The answer is nothing, and here is why.
+
+    Spec section 4.1 gives the pad one job -- "Keeps the VCA near unity where
+    its noise costs least" -- and 00-current-state.md carries it through five
+    documents as "Coarse switched passive pad (latching relays) + VCA near
+    unity. Unchanged". Neither computes it, and the cost is forty parts.
+
+    **The comparison has to be against the control port, not against nothing.**
+    The module must reach the same output level either way, so the alternative
+    to 18 dB of pad is 18 dB more attenuation in V_C -- which is free, already
+    drawn, and has 61.3 dB of span against a 47 dB requirement. Everything
+    except the cell is identical between the two routes, and that is worth
+    stating because it is what lets the whole question be settled at the cell:
+
+      * the front end is upstream of R_IN, so its noise is divided by the pad
+        ratio in the pad route and by the gain in the control route -- the same
+        number both times;
+      * the servo injects at the I-V summing node, downstream of both;
+      * the input current the cell handles differs, and that is the one real
+        asymmetry. It is priced below, from the datasheet's own THD rows.
+
+    So what is left is the cell, and the cell is cell_noise(). The pad holds
+    R_OUT and raises R_IN; the control port holds both and lowers g. Two rows
+    per step because `input_referred` is unknown -- at 0.0 the cell's noise is
+    all at its output and the control port cannot reduce it, at 1.0 it is all
+    at the input and attenuates fully. **The pad loses at both ends**, by 0.03
+    to 3.9 dB at the -18 dB step, so the split never has to be resolved.
+
+    Distortion, which is the other thing "near unity" might have meant, from
+    VCA_THD_FRACTION. A_V = -20 dB at full input is 0.045 % against unity's 0.050 %:
+    the control port is *not* the distorting way to attenuate. What does move
+    distortion is input level -- 0.025 % at -17 dBu -- and that is the one
+    thing the pad genuinely does, since it divides the current the cell
+    handles. It is worth about half the THD of a channel that is 18 dB down in
+    the mix, which is -66 dBc becoming -70 dBc on a signal already 18 dB below
+    the rest. Not forty parts.
+
+    Two smaller things the pad would have bought, priced so they are not
+    rediscovered as arguments:
+
+    **Tempco.** The -3300 ppm/degC gain constant makes drift proportional to
+    the dB taken in V_C, so 18 dB of pad removes 18 dB of it -- 2.9 dB of
+    wander over the 0-50 C ambient. tempco_span() already declines to
+    compensate a larger figure than that on the ground that it is common-mode
+    across one die, and the lead feature is differential in a way that a
+    per-channel *static* offset is not.
+
+    **Control feedthrough**, which is -60 dB for a 0 to -40 dB change and is
+    the binding constraint on the gating feature. It is a property of the
+    *change* in V_C, and the pad cannot help with it: relays cannot switch per
+    step of an 8-per-second pattern, so every dB of gating is in V_C whether or
+    not a pad sets the static level.
+    """
     rows = []
-    for rin in VCA_RIN_STEPS:
+    for db, rin in zip(PAD_STEPS_DB, PAD_STEPS_RIN):
+        pad = cell_noise(rin, VCA_ROUT_OHMS)
+        control = {f: cell_noise(VCA_RIN_OHMS, VCA_ROUT_OHMS, gain_db=db,
+                                 input_referred=f) for f in (0.0, 1.0)}
         rows.append({
-            "rin": rin,
-            "db": 20 * math.log10(VCA_ROUT_OHMS / rin),
-            "current": peak / rin,
-            "in_range": VCA_RIN_RANGE[0] <= rin <= VCA_RIN_RANGE[1],
-            "block_corner": 1.0 / (2 * math.pi * VCA_INPUT_BLOCK_FARADS * rin),
+            "db": db, "rin": rin,
+            "pad_cell": pad,
+            "control_cell": control,
+            # Positive would mean the pad is quieter. Neither end is.
+            "benefit_db": {f: 20 * math.log10(control[f] / pad)
+                           for f in control},
+            "pad_current": socket.clipping_peak() / rin,
+            "control_current": socket.clipping_peak() / VCA_RIN_OHMS,
         })
-    return {"base": base, "peak": peak, "steps": rows,
-            "headroom_ratio": VCA_INPUT_CURRENT_MAX / (peak / base)}
+    return {
+        "rows": rows,
+        "thd_unity": VCA_THD_FRACTION[(0.0, 0.775)],
+        "thd_attenuated": VCA_THD_FRACTION[(-20.0, 0.775)],
+        "thd_low_level": VCA_THD_FRACTION[(0.0, 0.1095)],
+        "cv_span_db": cv_filter()["depth_db"],
+        "deepest_step_db": min(PAD_STEPS_DB),
+        "tempco_saved_db": abs(tempco_span(min(PAD_STEPS_DB))["span"]),
+    }
 
 
 def allocation():
@@ -1112,25 +1449,23 @@ LOGIC_A = {n: n + 1 for n in range(1, 9)}
 LOGIC_Y = {n: 19 - n for n in range(1, 9)}
 LOGIC_REF = "U11"
 
-# The pad relay. **The part is still not chosen and the pins now are**, and the
-# distinction is the whole of this comment.
+# **RELAY_PINS was here and is deleted with the pad it belonged to.** It held
+# the IEC 60947 contact numbers -- 11/12/14 for pole 1 as common /
+# normally-closed / normally-open, 21/22/24 for pole 2, A1-A2 and B1-B2 for the
+# set and reset coils of a dual-coil latching part -- and what it committed the
+# design to was not a relay but a *constraint on which relay could be fitted*,
+# since plenty of signal relays follow that numbering and plenty do not
+# (Panasonic's TQ2 numbers sequentially round the package).
 #
-# These are IEC 60947 contact numbers, which is a standard rather than a part:
-# tens are the pole and units are the function, so 11/12/14 is pole 1 as
-# common / normally-closed / normally-open, 21/22/24 is pole 2, and A1-A2 and
-# B1-B2 are the set and reset coils of a two-coil latching relay. KiCad's
-# generic Relay_DPDT_Latching_2coil carries exactly this and nothing
-# part-specific, which is what makes it safe to draw with.
+# It was good work on a part that should not be on this board, and the note
+# survives it for one reason: **the deferred bypass relay will face the same
+# question**, and it is worth knowing that a pin map can be pinned before a
+# part is chosen, by naming the standard rather than the manufacturer. The
+# numbers themselves are not carried forward, because the bypass relay is a
+# different animal -- one pole, held de-energised at power-up per section 4.5 --
+# and a pin map copied from a dual-coil latching DPDT would be a reading that
+# nobody read.
 #
-# So what is committed to here is not a relay but a *constraint on which relay
-# may be fitted*: it has to follow IEC contact numbering. Plenty of signal
-# relays do and plenty do not -- Panasonic's TQ2 numbers its pins sequentially
-# round the package -- so this is a real filter on that BOM line rather than
-# paperwork, and ASSUMPTIONS.md records it as one.
-RELAY_PINS = {"SET+": "A1", "SET-": "A2", "RESET+": "B1", "RESET-": "B2",
-              "COM_A": "11", "NC_A": "12", "NO_A": "14",
-              "COM_B": "21", "NC_B": "22", "NO_B": "24"}
-
 # MAX6126, 8-pin SO/uMAX. **Read first-hand from Maxim's own PDF** -- document
 # 19-2647, Rev 8, 6/16 -- page 1's Pin Configuration and page 16's Pin
 # Description table. Analog Devices' own URL still times out; the copy that
@@ -1213,7 +1548,6 @@ LIBS = {
     "cv:SSI2164": ("cv", "Audio", "SSI2164", None),
     "cv:74AHC541": ("cv", "74xx", "74AHC541", None),
     "cv:MAX6126": ("cv", "Reference_Voltage", "ADR4525", "MAX6126"),
-    "cv:Relay": ("cv", "Relay", "Relay_DPDT_Latching_2coil", "Relay"),
     "power:GNDA": ("power", "power", "GNDA", None),
     "power:GNDD": ("power", "power", "GNDD", None),
     "power:PWR_FLAG": ("power", "power", "PWR_FLAG", None),
@@ -1327,9 +1661,6 @@ PAD_FP = "TestPoint:TestPoint_Pad_D2.0mm"
 ORDER_CODES = {
     "10k 0.1%":       "ERA6AEB103V",
     "12k1 0.1%":      "ERA6AEB1212V",
-    "24k3 0.1%":      "ERA6AEB2432V",
-    "48k7 0.1%":      "ERA6AEB4872V",
-    "97k6 0.1%":      "ERA6AEB9762V",
     "22k 1%":         "RC0805FR-0722KL",
     "17k8 1%":        "RC0805FR-0717K8L",
     "220R 1%":        "RC0805FR-07220RL",
@@ -1355,27 +1686,19 @@ ORDER_CODES = {
 # Parts and blocks this pass does not place, each with the reason. Declared so
 # that "deferred" and "missed" are different states a check can distinguish --
 # the same argument design.NO_CONNECT makes upstream about floating pins.
-UNSPECIFIED = {
-    PAD_RELAY: "dual-coil latching DPDT: not named in the spec (section 4.5 "
-               "names the driver and the one-shot only), and section 6 says "
-               "not to invent one. Its *pins* are now known -- see RELAY_PINS "
-               "-- because IEC 60947 contact numbering is a standard and not "
-               "a part. What the schematic commits to is that whatever relay "
-               "is fitted follows it.",
-}
+# **Empty, and it is the pad's deletion that emptied it.** Its one entry was
+# the dual-coil latching relay: a part the spec asks for by function, does not
+# name, and section 6 forbids inventing. The dict and the two checks that read
+# it stay, because the deferred blocks will refill it -- the DC-DC, the ADC and
+# the bypass relay are all named by function and not by part -- and because an
+# empty declaration is a different statement from a missing one.
+UNSPECIFIED = {}
 
 # Pins deliberately left unconnected, declared beside the circuit rather than
 # buried in the checker -- the mixer's NO_CONNECT, same argument.
 REF_REF = "U12"
 NO_CONNECT = tuple(
     (REF_REF, str(REF_PINS[name])) for name in ("IC1", "IC2")
-) + tuple(
-    # K{n}01 selects a branch and needs one pole; its second is spare. Declared
-    # rather than left floating, the same argument design.NO_CONNECT makes
-    # upstream about the stacking jacks' switch contacts.
-    (f"K{n}01", RELAY_PINS[role])
-    for n in range(1, CHANNELS + 1)
-    for role in ("COM_B", "NC_B", "NO_B")
 ) + tuple(
     # The '541's two unused *outputs*. Its unused inputs are held at MAGND
     # below, per page 4 note 1, and an output cannot be: tying a driven output
@@ -1410,33 +1733,32 @@ NO_CONNECT = tuple(
 # not, and the two are separated here so that a check can count the second and
 # a build can refuse to fabricate while it is non-empty.
 #
-# What was there before was worse than a flag. The schematic wired every coil's
-# SET-/RESET- to MDGND and labelled SET+/RESET+ out to nets that existed nowhere
-# else -- 24 global labels on 24 one-pin nets, which KiCad reported as
-# `isolated_pin_label` and nothing here read. Two things wrong with it:
+# **It is empty now, and what emptied it is the pad going rather than the relay
+# driver landing.** All 48 entries were the twelve relays' 24 coils. The
+# distinction the dict exists to make is unchanged and check_open_pins() still
+# holds it in both directions -- a pin open on the sheet and declared nowhere is
+# a forgotten wire either way.
 #
-#   * it is not design.py's. The coil nets were invented in the drawing, which
-#     is the one direction STYLE.md rule 1 forbids;
-#   * it is electrically backwards. Section 4.5 specifies the TPIC6B595, an
-#     open-drain *sink*. A sink drives the coil's low side, so the low side
-#     belongs to the driver's drain and the high side to a coil supply. Grounded
-#     low sides need a driver that can source, which the specified part cannot.
-#     A relay that never transfers, from a sheet that draws as correct.
+# Two things it recorded are worth keeping, because they are what the pad's
+# removal makes moot and they should not come back with the next relay.
 #
-# And the count does not fit the spec either. Section 4.5 says "12 coils (six
-# 2-bit pads)" and "2 x TPIC6B595" -- 16 outputs. Twelve coils is twelve
-# *single*-coil relays, and a single-coil latching relay latches by reversing
-# the coil polarity, which needs a bridge and not a sink. With the dual-coil
-# latching part section 4.1 asks for, six 2-bit pads are 12 relays and 24 coils,
-# which is 3 x TPIC6B595 exactly. Recorded in ASSUMPTIONS.md rather than acted
-# on: the relay is UNSPECIFIED, the coil supply voltage is a property of the
-# relay, and section 6 says not to invent one.
-DEFERRED_PINS = {
-    (f"K{n}0{index}", RELAY_PINS[role]): "relay drive"
-    for n in range(1, CHANNELS + 1)
-    for index in (1, 2)
-    for role in ("SET+", "SET-", "RESET+", "RESET-")
-}
+# The sheet wired every coil's SET-/RESET- to MDGND and labelled SET+/RESET+ out
+# to nets that existed nowhere else -- 24 global labels on 24 one-pin nets,
+# which KiCad reported as `isolated_pin_label` and nothing here read. It was
+# wrong twice: the coil nets were invented in the *drawing*, which is the one
+# direction STYLE.md rule 1 forbids, and a grounded low side is backwards for
+# the open-drain sink section 4.5 specifies -- a sink drives the coil's low
+# side, so the low side belongs to the driver's drain and the high side to a
+# coil supply. A relay that never transfers, from a sheet that draws as correct.
+#
+# And section 4.5's coil count never closed. "12 coils (six 2-bit pads)" driven
+# by "2 x TPIC6B595" is 16 outputs; twelve coils means twelve *single*-coil
+# latching relays, which latch by reversing coil polarity and need a bridge
+# rather than a sink. With the dual-coil part section 4.1 asks for it is 24
+# coils and 3 x TPIC6B595 exactly. **That contradiction is now resolved by
+# subtraction rather than by choosing a side**, and the coil supply rail that
+# RAILS never had is not needed after all.
+DEFERRED_PINS = {}
 DEFERRED = {
     "envelope rectifier": "the smoothing time constant is not derivable -- "
                           "spec section 4.4 gives a sampling rate and no "
@@ -1446,7 +1768,11 @@ DEFERRED = {
                   "block, and the scope statement puts shared blocks after "
                   "one channel is complete.",
     "envelope ADC": "ADS131M08 or MCP3564, undecided in spec section 4.4.",
-    "relay drive": "2 x TPIC6B595 plus the 74LVC1G123 one-shot, section 4.5.",
+    # "relay drive" was here -- 2 x TPIC6B595 and the 74LVC1G123 one-shot,
+    # section 4.5. It existed only to drive the coarse pad's coils and goes
+    # with it. Section 4.5 calls the one-shot's absence "the
+    # highest-probability field failure in the design", which was true and is
+    # now a failure this board cannot have.
     "bypass relay and fail-safe": "the AC-coupled charge pump, section 4.5.",
     "supply": "isolated DC-DC at >=300 kHz per section 1.1; the topology is "
               "decided and the part is not.",
@@ -1533,12 +1859,17 @@ class Design:
     def check_pin_numbers(self):
         """No part may reach the netlist with an unresolved pin number.
 
-        RELAY_PINS is all None because the relay is not chosen. That is a
-        legitimate state for a design to be in and it is not a legitimate state
-        for a *board* to be in, so the two are separated here rather than
-        conflated: a pin written as a role -- `<COM_A>` -- is allowed only on a
-        part that UNSPECIFIED names and explains, and is an error anywhere
-        else.
+        A part whose pins are still roles rather than numbers is a legitimate
+        state for a *design* to be in and not for a *board*, so the two are
+        separated here rather than conflated: a pin written as a role --
+        `<COM_A>` -- is allowed only on a part that UNSPECIFIED names and
+        explains, and is an error anywhere else.
+
+        **Nothing triggers it at the moment**, because the pad relay was the
+        only unspecified part and it is gone. That is a check with nothing to
+        catch rather than a check that cannot fail: the deferred DC-DC, ADC and
+        bypass relay are all named by function, and the first one drawn brings
+        the state back.
 
         The failure this stops is the one section 6 of the spec is about. A
         plausible pin number on an unchosen relay looks exactly like a read one,
@@ -1640,17 +1971,16 @@ for _n in range(1, CHANNELS + 1):
     NET_DC.update({
         f"PIN{_n}": 0.0, f"SIN{_n}": 0.0,
         f"FEN{_n}": 0.0, f"BUF{_n}": 0.0,
-        f"PADI{_n}": 0.0, f"IIN{_n}": 0.0, f"RCJ{_n}": 0.0,
+        f"CPL{_n}": 0.0, f"IIN{_n}": 0.0, f"RCJ{_n}": 0.0,
         f"IOUT{_n}": 0.0, f"SVN{_n}": 0.0, f"SRV{_n}": (-MODULE_RAIL,
                                                         MODULE_RAIL),
         f"CVX{_n}": (0.0, VREF), f"CVN{_n}": 0.0,
         f"VC{_n}": (0.0, VREF), f"LOGO{_n}": (0.0, VREF),
         f"PWM{_n}": (0.0, 3.3),
     })
-    NET_DC.update({f"PS{_n}{letter}": 0.0 for letter in "ABCD"})
-    # The two selector nodes between the relays. Audio, and DC-free because
-    # C{n}01 is upstream of the whole pad.
-    NET_DC.update({f"PSEL{_n}X": 0.0, f"PSEL{_n}Y": 0.0})
+    # PS{n}A-D and PSEL{n}X/Y were here: the pad's four resistor tails and the
+    # two selector nodes between its relays. Six nets a channel, thirty-six in
+    # all, gone with it.
 
 # The reference inverter's virtual earth, held at MAGND by feedback.
 NET_DC["RINV"] = 0.0
@@ -1716,16 +2046,20 @@ DOMAIN_STAR = "R902"          # MAGND <-> MDGND, inside the module
 def channel(design, n):
     """One channel, end to end. Six of these and the shared blocks are the board.
 
-    The order is the signal: socket, difference amplifier, coupling, pad, VCA,
-    I-V, servo, back to the socket. The CV filter is built alongside because it
+    The order is the signal: socket, front end, coupling, R_IN, VCA, I-V,
+    servo, back to the socket. The CV filter is built alongside because it
     lands on the same VCA cell.
     """
     package, unit = SECTIONS[("front", n)]
     out, inverting, non_inverting = OPAMP_UNITS[unit]
 
-    # The loom connector. Three ways, mirroring the mixer's own RV{n}01 order
-    # so a builder reads the same 1/2/3 at both ends. Pin 3 is RET{n} and not
-    # ground: see FRONT_R.
+    # The loom connector. **Two ways, and it used to say three.** The comment
+    # here read "three ways, mirroring the mixer's own RV{n}01 order so a
+    # builder reads the same 1/2/3 at both ends. Pin 3 is RET{n} and not
+    # ground", which described the difference-amplifier front end that went with
+    # constraint 2's struck second sentence -- see FRONT_R. There is no RET{n}.
+    # The pair is PIN{n} and SIN{n}; the mixer's pin 3 takes the shield, which
+    # lands at that end only and has no pin here.
     design.add(Part(f"J{n}", f"CH{n}", socket.CONN_FP[2], in_bom=True,
                     mpn=socket.CONN_MPN[2],
                     description=(
@@ -1747,36 +2081,18 @@ def channel(design, n):
     design.connect("MAGND", (package, non_inverting))
 
     # Input coupling into the VCA, datasheet page 4, "recommended for improved
-    # control feedthrough". Its corner moves with the pad step -- 1.3 Hz at
-    # 12k1 down to 0.16 Hz at 97k6 -- and both are far below anything audible.
-    _capacitor(design, f"C{n}01", VCA_INPUT_BLOCK, f"BUF{n}", f"PADI{n}",
+    # control feedthrough". Its corner with R_IN is 1.32 Hz and used to move
+    # with the pad step, down to 0.16 Hz at 97k6; it is one number now.
+    _capacitor(design, f"C{n}01", VCA_INPUT_BLOCK, f"BUF{n}", f"CPL{n}",
                footprint=C_FILM_FP,
                description=f"Channel {n} VCA input block -- control feedthrough")
 
-    # The coarse pad: four input resistors and a 2-bit relay selector.
-    for index, (letter, ohms) in enumerate(zip("ABCD", VCA_RIN_STEPS)):
-        value = {12_100.0: "12k1 0.1%", 24_300.0: "24k3 0.1%",
-                 48_700.0: "48k7 0.1%", 97_600.0: "97k6 0.1%"}[ohms]
-        _resistor(design, f"R{n}1{index + 1}", value,
-                  f"PADI{n}", f"PS{n}{letter}",
-                  description=f"Channel {n} R_IN, "
-                              f"{PAD_STEPS_DB[index]:+.0f} dB step")
-
-    # Two dual-coil latching DPDT relays as a binary 4:1 selector. K{n}01
-    # chooses the branch and K{n}02 chooses within it, so two bits address four
-    # resistors and no state can connect two at once.
-    for index in (1, 2):
-        design.add(Part(f"K{n}0{index}", PAD_RELAY, None, units=1,
-                        description=(
-                            f"Channel {n} pad bit {index - 1}, dual-coil "
-                            f"latching DPDT; contacts carry <=102 uA")))
-    design.connect(f"IIN{n}", (f"K{n}01", RELAY_PINS["COM_A"]))
-    design.connect(f"PSEL{n}X", (f"K{n}01", RELAY_PINS["NC_A"]), (f"K{n}02", RELAY_PINS["COM_A"]))
-    design.connect(f"PSEL{n}Y", (f"K{n}01", RELAY_PINS["NO_A"]), (f"K{n}02", RELAY_PINS["COM_B"]))
-    design.connect(f"PS{n}A", (f"K{n}02", RELAY_PINS["NC_A"]))
-    design.connect(f"PS{n}B", (f"K{n}02", RELAY_PINS["NO_A"]))
-    design.connect(f"PS{n}C", (f"K{n}02", RELAY_PINS["NC_B"]))
-    design.connect(f"PS{n}D", (f"K{n}02", RELAY_PINS["NO_B"]))
+    # R_IN. One resistor, and the four-plus-two-relays that were here are in
+    # pad_benefit(). CPL{n} is the coupling node -- it was PADI{n}, the pad's
+    # input, and a net named after a block that no longer exists is a fossil
+    # the next reader has to date.
+    _resistor(design, f"R{n}11", VCA_RIN, f"CPL{n}", f"IIN{n}",
+              description=f"Channel {n} R_IN -- unity with R{n}21")
 
     # The stability network, datasheet page 3 Figure 1. Not optional and not in
     # the spec.
@@ -1842,9 +2158,10 @@ def channel(design, n):
 def shared(design):
     """The reference, the logic buffer, the amplifiers and the two ground stars.
 
-    Everything else -- controller, ADC, relay drive, fail-safe, supply -- is in
-    DEFERRED with a reason. What is here is the minimum the six channels need
-    in order for section 5 to be checkable at all.
+    Everything else -- controller, ADC, envelope rectifier, fail-safe, supply --
+    is in DEFERRED with a reason. What is here is the minimum the six channels
+    need in order for section 5 to be checkable at all. The relay drive was a
+    sixth and is not deferred but deleted, with the pad it drove.
     """
     # Rail decoupling, in its own 700 series with a flat counter.
     #
@@ -2237,32 +2554,64 @@ def _report():
               f"{row['was_loss_db']:>+6.2f}    {row['gain_db']:>+5.2f} dB")
     print()
 
-    print("coarse pad = R_IN, two dual-coil latching relays per channel")
-    p = pad_states()
-    print(f"  step      R_IN     I_IN at {p['peak']:.2f} V pk    in 7k5-100k?"
-          f"   10u corner")
-    for row in p["steps"]:
-        print(f"  {row['db']:+6.2f} dB  {row['rin']:>6.0f}  "
-              f"{row['current'] * 1e6:>8.1f} uA        "
-              f"{'yes' if row['in_range'] else 'NO ':>10}     "
-              f"{row['block_corner']:>6.2f} Hz")
-    print(f"  R_OUT {VCA_ROUT_OHMS:.0f} fixed, so 0 dB is exactly unity")
-    print(f"  input-current headroom {p['headroom_ratio']:.0f}x against the "
-          f"900 uA page 4 advises")
+    print("the VCA input, one fixed R_IN and no pad")
+    p = vca_input()
+    print(f"  R_IN = R_OUT         {p['rin']:>8.0f} ohm  gain "
+          f"{p['gain_db']:+.2f} dB, unity by construction")
+    print(f"  I_IN at {p['peak']:.2f} V pk   {p['current'] * 1e6:>8.1f} uA   "
+          f"{p['headroom_ratio']:.0f}x inside the 900 uA page 4 advises")
+    print(f"  inside 7k5-100k?     {'yes' if p['in_range'] else 'NO':>8}      "
+          f"and no longer bounded by a top pad step")
+    print(f"  10u block corner     {p['block_corner']:>8.2f} Hz")
+    print(f"  quieter than the recommended 20k by "
+          f"{p['quieter_than_recommended_db']:.1f} dB; 7k5 would be "
+          f"{p['quietest_would_gain_db']:.1f} dB quieter again "
+          f"-- MEASURED['vca_rin']")
     a = allocation()
     print(f"  {a['packages']} packages, {a['per_package']} channels each: "
           f"{a['die_mates']} die-mates per string against "
           f"{a['alternative_die_mates']} at 4+2, {a['spare']} spare grounded")
     print()
 
-    print("VCA noise, Class AB, at the 0 dB step")
-    v = vca_noise(VCA_RIN_STEPS[0])
-    print(f"  R_IN/OUT {VCA_RIN_STEPS[0]:.0f}      {v['dbu']:>6.1f} dBu  "
+    print("VCA noise, Class AB, and where the datasheet's rise actually lives")
+    print(f"  conditions           {VCA_NOISE_CONDITION}")
+    v = vca_noise(VCA_RIN_OHMS)
+    print(f"  R_IN/OUT {VCA_RIN_OHMS:.0f}      {v['dbu']:>6.1f} dBu  "
           f"{v['rms'] * 1e6:>6.2f} uV rms  {v['density'] * 1e9:>5.1f} nV/rtHz")
     for rin in sorted(VCA_NOISE_DBU):
         row = vca_noise(rin)
         print(f"    datasheet {rin:>6.0f}  {row['dbu']:>6.1f} dBu"
               f"                  {row['density'] * 1e9:>5.1f}")
+    fit = vca_cell_fit()
+    print(f"  fitted: i_cell {fit['i_cell'] * 1e12:.2f} pA/rtHz at the cell's "
+          f"*output*, x R_OUT")
+    print(f"          e_fixed {fit['e_fixed'] * 1e9:.1f} nV/rtHz, R-independent "
+          f"(the TL072 at NG 2 is "
+          f"{fit['amp_at_noise_gain_2'] * 1e9:.0f})")
+    print(f"          residual {fit['rms_db']:.2f} dB rms over four points read "
+          f"to the nearest dB")
+    print(f"          plausibility: full shot noise on "
+          f"{fit['shot_equivalent_amps'] * 1e6:.0f} uA")
+    print()
+
+    print("the 2-bit coarse pad, priced against the control port that replaces it")
+    b = pad_benefit()
+    print("  step     R_IN     pad cell    Vc cell (out/in-referred)   pad buys")
+    for row in b["rows"]:
+        print(f"  {row['db']:>+5.0f} dB {row['rin']:>7.0f}  "
+              f"{row['pad_cell'] * 1e9:>6.2f} nV   "
+              f"{row['control_cell'][0.0] * 1e9:>6.2f} / "
+              f"{row['control_cell'][1.0] * 1e9:>6.2f} nV      "
+              f"{row['benefit_db'][0.0]:>+5.2f} .. "
+              f"{row['benefit_db'][1.0]:>+5.2f} dB")
+    print(f"  THD says the same: A_V = -20 dB is "
+          f"{b['thd_attenuated'] * 100:.3f} % at full input against "
+          f"{b['thd_unity'] * 100:.3f} % at unity")
+    print(f"  and the control port has {b['cv_span_db']:.1f} dB of span for the "
+          f"{-b['deepest_step_db']:.0f} dB, for no parts")
+    print(f"  the pad would have bought {b['tempco_saved_db']:.1f} dB of tempco "
+          f"wander on the deepest step -- see tempco_span(), which declines to "
+          f"compensate more")
     print()
 
     print("DC servo, and constraint 3")

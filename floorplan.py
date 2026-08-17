@@ -1,12 +1,18 @@
 """The floorplan: zones, the two ground domains, and what crosses between them.
 
 A floorplan for this module is not mostly about where parts fit. It is about
-which of three currents each part's return belongs to, because two of the three
-are twenty times larger than the audio and one of them switches:
+which current each part's return belongs to, because one of them is three times
+the other and it switches:
 
     audio          ~35 uA per channel at the summing node
     CV switching  ~114 uA per channel through the '541 at 30.5 kHz
-    relay coils    ~40 mA per coil for 3-10 ms, twelve of them
+
+**There was a third and it was two orders larger.** Twelve relay coils at
+~40 mA for 3-10 ms, which were the reason this file's largest zone straddled
+the boundary. design.pad_benefit() struck the pad that needed them, and that
+takes 36 parts, 1566 mm2 of courtyard and the only milliamps on the board out
+of the plan at once. What is left is two microamp currents and a boundary with
+nothing inductive across it. pad_area() is where the millimetres are.
 
 So this file is a placement *contract* rather than a drawing: zones, the
 adjacency each one requires and why, the ground star, and an explicit list of
@@ -43,15 +49,24 @@ Three stars, and only the first is a rule this module inherits.
 **R901: MAGND to the mixer's AGND. Exactly one, and it is constraint 2.**
 A dedicated conductor from the module's audio ground to the mixer's own
 designated AGND pad, TP6 -- whose comment upstream calls it "the *only* correct
-one, given the ground rule". The six triad shields land at the same node. No
-other conductor in the loom bonds the two grounds: RET{n} reaches MAGND only
-through R{n}03 + R{n}04, which is 20 kohm and carries nanoamps, and verify.py
-asserts that impedance rather than trusting the net names to differ.
+one, given the ground rule". The six shields land at the same node and at no
+other, which is the whole of what makes the bond count one: a shield is
+terminated at the main-board end and cut back here, so nothing in the loom
+carries a second path between the two grounds.
+
+**Two sentences here were stale and are corrected.** They said "RET{n} reaches
+MAGND only through R{n}03 + R{n}04, which is 20 kohm and carries nanoamps, and
+verify.py asserts that impedance". There is no RET{n} and there are no R{n}03 or
+R{n}04 -- they were the difference amplifier's sense pair, struck with
+constraint 2's second sentence (see design.FRONT_R), and verify.py has never
+asserted an impedance. A description of a topology that no longer exists reads
+exactly like one that does.
 
 **R902: MAGND to MDGND, inside the module.** The module's own analogue/digital
 join, and not a bond to anything of the mixer's. Everything that switches for
-its own reasons -- the controller, the relay drivers, the fail-safe pump, the
-DC-DC's secondary -- returns here and nowhere else.
+its own reasons -- the controller, the fail-safe pump, the DC-DC's secondary --
+returns here and nowhere else. The relay drivers were on that list and are not
+any more.
 
 **The star point of MAGND is the SSI2164 ground pins, and that is derived.**
 This is the part of the strategy that is not obvious and not optional.
@@ -85,7 +100,7 @@ DOMAINS = (
     (r"^J8$", DIGITAL, "supply inlet from the DC-DC secondary"),
     (r"^J9$|^J10$|^J11$", DIGITAL, "PWM and OE from the controller"),
     (r"^R[1-6]0[12]$", ANALOGUE, "front-end inverting stage"),
-    (r"^R[1-6]1[1-5]$", ANALOGUE, "pad resistors and the VCA input RC"),
+    (r"^R[1-6]1[15]$", ANALOGUE, "R_IN and the VCA input RC"),
     (r"^R[1-6]2[12]$", ANALOGUE, "I-V"),
     (r"^R[1-6]3[12]$", ANALOGUE, "DC servo"),
     (r"^R[1-6]4[1-4]$", ANALOGUE, "CV filter -- referenced to the VCA's GND"),
@@ -93,8 +108,6 @@ DOMAINS = (
     (r"^C[1-6]21$", ANALOGUE, "I-V compensation"),
     (r"^C[1-6]31$", ANALOGUE, "servo integrator"),
     (r"^C[1-6]4[12]$", ANALOGUE, "CV filter poles"),
-    (r"^K[1-6]0[12]$", "STRADDLE", "pad relays: contacts analogue, coils "
-                                   "digital"),
     (r"^U[1-8]$", ANALOGUE, "quad op-amps"),
     (r"^U9$|^U10$", ANALOGUE, "the VCAs -- and the MAGND star point is pin 8"),
     (r"^U11$", "STRADDLE", "the '541: Vcc = VREF, GND = MAGND, inputs from "
@@ -151,13 +164,19 @@ What deliberately does not cross:
   * **audio.** Nothing audio-carrying crosses at all. That is what makes the
     boundary a line rather than a suggestion.
 
-The relay coils are the exception that proves the shape. Twelve coils, each
-about 40 mA for 3 to 10 ms, driven from the digital domain into parts whose
-contacts are in the audio path -- so K{n}0x straddles, exactly as the '541
-does, and its coil return is MDGND while its contacts carry audio. The
-one-shot in spec section 4.5 is what bounds the 3-10 ms; without it a shift
-register holds a coil energised until it burns, which is the highest-probability
-field failure in the design.
+**The relay coils were the exception that proved the shape, and they are gone.**
+Twelve coils, each about 40 mA for 3 to 10 ms, driven from the digital domain
+into parts whose contacts sat in the audio path: K{n}0x straddled exactly as
+the '541 does, coil return on MDGND and contacts carrying audio. Spec section
+4.5 calls the failure they bring -- a shift register holding a coil energised
+until it burns -- "the highest-probability field failure in the design", and
+bounds it with a one-shot.
+
+With the pad struck, the only part that straddles is the '541, whose crossing
+is a logic threshold rather than 40 mA of inductive current, and the
+highest-probability field failure in the design is now something else's
+problem. That is the largest single thing pad_benefit() bought and it is not a
+noise figure.
 """
 
 
@@ -183,12 +202,15 @@ ZONES = (
      "Immediately east of A0 -- every millimetre here is on an unshielded "
      "high-impedance node."),
 
-    ("A2", "pad and relays", "STRADDLE",
-     "Twelve latching relays and twenty-four resistors. The largest zone by "
-     "area and the only one with milliamps in it. Contacts carry <=102 uA of "
-     "audio; coils carry 40 mA of MDGND.",
-     "East of A1 and as far from A1 and R as the board allows: coil transients "
-     "are the biggest dV/dt on the board after the DC-DC."),
+    ("A2", "coupling and R_IN", ANALOGUE,
+     "Six 10 uF control-feedthrough blocks, six R_IN and the six stability "
+     "RCs. **This was the pad zone** -- twelve latching relays and twenty-four "
+     "resistors, the largest zone on the board by area and the only one with "
+     "milliamps in it -- and it is now the smallest analogue zone and entirely "
+     "microamps. See design.pad_benefit().",
+     "Between A1 and A3, with C{n}02's return to the A3 star rather than to "
+     "its own local ground: the 220R/1200pF is the cell's stability network "
+     "and its ground is the cell's."),
 
     ("A3", "VCAs", ANALOGUE,
      "U9 and U10, three channels each. **The MAGND star point is pin 8 of "
@@ -346,9 +368,11 @@ def check_crossings():
     was designed not to have.
 
     Straddling parts are excluded from the test rather than assigned a side,
-    because that is what they are -- the '541 and the twelve relays have pins
-    in both domains by design, and pretending otherwise would either flag them
-    forever or hide a real crossing behind them.
+    because that is what they are: the '541 has pins in both domains by design
+    -- inputs from the digital row, outputs and ground on the analogue one --
+    and pretending otherwise would either flag it forever or hide a real
+    crossing behind it. It is the only one left; the twelve relays were the
+    others.
     """
     problems = []
     for name, entries in sorted(design.NETS.items()):
@@ -372,20 +396,53 @@ def check_crossings():
 # ---------------------------------------------------------------------------
 
 # Courtyard area per footprint, mm^2, from the footprint names this design
-# actually uses. The relay is an envelope rather than a part: a signal-level
-# dual-coil latching DPDT is typically 14 x 9 mm, and twelve of them dominate
-# this table, which is the result worth knowing.
+# actually uses.
 COURTYARD = {
     "R_0805": 3.0, "C_0805": 3.0, "C_1210": 10.0,
     "SOIC-14": 58.0, "SOIC-16": 66.0, "SOIC-20W": 145.0,
     "PinHeader_1x03": 21.0, "PinHeader_1x05": 34.0,
     "TestPoint": 6.0,
 }
+
+# **What the pad was, kept as arithmetic because the saving is the result.** A
+# signal-level dual-coil latching DPDT is typically 14 x 9 mm and there were
+# twelve, plus twenty-four 0805 resistors of which six come back as the fixed
+# R_IN. This is not a footprint any part in design.PARTS has any more; it is
+# what pad_area() prices the deletion against.
 RELAY_ENVELOPE = 14.0 * 9.0
+PAD_RELAYS = 12
+PAD_RESISTORS = 24
+PAD_RESISTORS_KEPT = 6
+
 # Routing, keep-out, pours and the zone gaps. 2.5 is ordinary for a four-layer
-# mixed-signal board with two ground domains and a relay field; it is a
-# judgement and it is written down so it can be argued with.
+# mixed-signal board with two ground domains; it was written down while there
+# was also a relay field on it, and it is left alone rather than trimmed
+# towards the answer now that there is not. It is a judgement either way.
 PACKING = 2.5
+
+
+def pad_area():
+    """What the coarse pad occupied, against what the board is without it.
+
+    The area half of design.pad_benefit(). Board area was never the argument
+    for deleting the pad -- the arithmetic at the cell was, and Tim's decision
+    that the enclosure is bespoke had already taken area out of the verdict --
+    but it is the largest single number attached to it, and BLOCKED below has
+    quoted "52 % of the placed courtyard" as an open question for two passes.
+    """
+    relays = RELAY_ENVELOPE * PAD_RELAYS
+    resistors = COURTYARD["R_0805"] * (PAD_RESISTORS - PAD_RESISTORS_KEPT)
+    now = area()["placed"]
+    return {
+        "relays": relays, "resistors": resistors,
+        "removed": relays + resistors,
+        "was": now + relays + resistors,
+        "now": now,
+        "share_of_was": (relays + resistors) / (now + relays + resistors),
+        "relay_share_of_was": relays / (now + relays + resistors),
+        "with_packing_was": (now + relays + resistors) * PACKING,
+        "with_packing_now": now * PACKING,
+    }
 
 
 def area():
@@ -393,10 +450,6 @@ def area():
     total, unknown, envelope, tally = 0.0, [], [], {}
     for ref, part in design.PARTS.items():
         if part.footprint is None:
-            if ref.startswith("K"):
-                total += RELAY_ENVELOPE
-                tally["relay (envelope)"] = tally.get("relay (envelope)", 0) + 1
-                continue
             if part.value in design.UNSPECIFIED:
                 envelope.append(ref)
                 continue
@@ -411,8 +464,7 @@ def area():
             unknown.append(ref)
     return {"placed": total, "tally": tally, "unknown": sorted(unknown),
             "envelope_unknown": sorted(envelope),
-            "with_packing": total * PACKING,
-            "relay_share": RELAY_ENVELOPE * 12 / total if total else 0.0}
+            "with_packing": total * PACKING}
 
 
 def enclosure_check():
@@ -432,57 +484,47 @@ def enclosure_check():
         "mixer_outline": (board["width"], board["height"]),
         "mixer_area": mixer_area,
         "mezzanine_short": needed - mixer_area,
+        "mezzanine_slack": mixer_area - needed,
         "beside_area": beside,
         "beside_short": needed - beside,
+        "beside_slack": beside - needed,
         "fits_mezzanine": needed <= mixer_area,
         "fits_beside": needed <= beside,
     }
 
 
 BLOCKED = """
-**The outline is blocked, and the area arithmetic makes it worse than expected.**
-
-Neither placement near the mixer works, and this is now a number rather than an
-impression:
+**Not blocked, and the arithmetic has now moved twice in opposite directions.**
 
 | | available | needed | verdict |
 |---|---|---|---|
-| beside the mixer in its 1590J | {beside_area:.0f} mm² | {needed:.0f} mm² | **{beside_short:.0f} mm² short** |
-| as a mezzanine on the mixer's own outline | {mixer_area:.0f} mm² | {needed:.0f} mm² | **{mezzanine_short:.0f} mm² short** |
+| beside the mixer in its 1590J | {beside_area:.0f} mm² | {needed:.0f} mm² | **{beside_slack:.0f} mm² spare** |
+| as a mezzanine on the mixer's own outline | {mixer_area:.0f} mm² | {needed:.0f} mm² | **{mezzanine_slack:.0f} mm² spare** |
 
-The mezzanine row is the one that hurts. It was the attractive option — directly
-over the `RV{n}01` column, six near-zero-length triads, a trivial bond to TP6 —
-and the module needs about a quarter more area than the mixer's whole 122.8 ×
-50.4 outline before any of the deferred blocks are placed. A mezzanine is
-therefore not merely a height question any more, and the height question (which
-needs `comma-enclosure`, absent from this session) no longer decides it.
+Both rows read the other way one pass ago — 7225 mm² needed against 6189 for the
+mixer's whole 122.8 × 50.4 outline, so the module was about a quarter *larger*
+than the board it hangs off, and the mezzanine placement was recorded here as
+arithmetically dead rather than merely a height question.
 
-**And half the shortfall is the coarse pad.** Twelve latching relays are 49 % of
-the placed courtyard. If the enclosure is fixed and area is binding, the pad is
-the first thing to reconsider and the only thing worth reconsidering — dropping
-to a 1-bit pad, or to a fixed R_IN with the range taken in the VCA instead, is
-about 750 mm². That is a real trade against gain staging and it is the user's,
-not mine: `pad_states()` is where the alternative would be argued.
+**Striking the coarse pad is what turned it round**, and it was not the reason
+for striking it: `design.pad_benefit()` argues from the cell's noise, and Tim's
+decision that the enclosure is bespoke had already taken area out of the verdict
+before that. The area is a consequence, and it is a large one — the pad was
+about 55 % of the placed courtyard.
 
-Two things already known and recorded in FINDINGS.md still apply: the mixer's
-published `stack.above` is 13.00 mm, and its mechanical contract has no field
-for what plugs into a connector — so a vertical header with a crimp housing
-would exceed the envelope the enclosure was designed to whatever else happens.
-The loom is soldered directly into the six hole trios, or right-angle.
+So the mezzanine is back on the table on area alone: directly over the `RV{n}01`
+column, six near-zero-length pairs, a trivial bond to TP6. It has never been the
+easy option for another reason, and that reason is unchanged and mechanical.
+Recorded in FINDINGS.md: the mixer's published `stack.above` is 13.00 mm and its
+mechanical contract has no field for what plugs into a connector, so a vertical
+header with a crimp housing exceeds the envelope the mixer's own enclosure was
+designed to. Solder the loom directly into the six `RV{n}01` hole trios, or use
+right-angle. See FINDINGS.md F3.
 
-**Not blocked any more, and the reason changes what this section is for.** Tim's
-decision: the enclosure is bespoke and gets made *after* the board is optimised,
-so area does not constrain the outline and `comma-enclosure` is not needed to
-settle it. The arithmetic above stops being a verdict and becomes a cost
-argument — the pad is still 52 % of the placed courtyard, which is worth
-reconsidering on price and part count rather than on whether it fits.
-
-What survives as a real constraint is the loom, and it is mechanical rather than
-area: the mixer's published `stack.above` is 13.00 mm and its contract has no
-field for what plugs into a connector, so a vertical header with a crimp housing
-exceeds the envelope the mixer's own enclosure was designed to. Solder the loom
-directly into the six `RV{n}01` hole trios, or use right-angle. See FINDINGS.md
-F3.
+**And the deferred blocks are not in this number.** The controller, the ADC, the
+fail-safe and the DC-DC are all still to place, so the honest reading of the two
+rows above is that the module has stopped being obviously too big rather than
+that it has been shown to fit.
 """
 
 
@@ -537,19 +579,22 @@ def _report():
     out("| footprint | count | mm² each |")
     out("|---|---|---|")
     for token, count in sorted(a["tally"].items(), key=lambda kv: -kv[1]):
-        each = RELAY_ENVELOPE if "relay" in token else COURTYARD[token]
-        out(f"| {token} | {count} | {each:.0f} |")
+        out(f"| {token} | {count} | {COURTYARD[token]:.0f} |")
     out()
-    out(f"Placed courtyard area **{a['placed']:.0f} mm²**, of which the twelve "
-        f"relays are **{a['relay_share'] * 100:.0f}%**. At a packing factor of "
-        f"{PACKING} that is a minimum of **{a['with_packing']:.0f} mm²** — "
+    pad = pad_area()
+    out(f"Placed courtyard area **{a['placed']:.0f} mm²**. At a packing factor "
+        f"of {PACKING} that is a minimum of **{a['with_packing']:.0f} mm²** — "
         f"about {math.sqrt(a['with_packing']):.0f} mm square — before any of "
         f"the deferred blocks.")
     out()
-    out(f"The relays dominating this table is the result worth having: the pad "
-        f"is a third of the board. If area becomes the binding constraint, the "
-        f"pad is where to look before anything else, and `pad_states()` is "
-        f"where the alternative would be argued.")
+    out(f"**It was {pad['with_packing_was']:.0f} mm² one pass ago.** The coarse "
+        f"pad occupied {pad['removed']:.0f} mm² of placed courtyard — "
+        f"{pad['relays']:.0f} of relay envelope and {pad['resistors']:.0f} of "
+        f"resistors that are not coming back — which was "
+        f"**{pad['share_of_was'] * 100:.0f}%** of the board, the relays alone "
+        f"being {pad['relay_share_of_was'] * 100:.0f}%. `design.pad_benefit()` "
+        f"is why it went, and the argument there is noise rather than area; "
+        f"this is what the noise argument was worth in millimetres.")
     out()
 
     out("## Blocked")
@@ -580,9 +625,14 @@ def main():
         counts[domain_of(ref)] = counts.get(domain_of(ref), 0) + 1
     print(f"  parts by domain: " + ", ".join(
         f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: str(kv[0]))))
+    pad = pad_area()
     print(f"  minimum area {a['with_packing']:.0f} mm2 "
-          f"({math.sqrt(a['with_packing']):.0f} mm square), relays are "
-          f"{a['relay_share'] * 100:.0f}% of the placed courtyard")
+          f"({math.sqrt(a['with_packing']):.0f} mm square), was "
+          f"{pad['with_packing_was']:.0f} with the pad")
+    e = enclosure_check()
+    print(f"  fits on the mixer's own outline: "
+          f"{'yes' if e['fits_mezzanine'] else 'no'}, beside it in the 1590J: "
+          f"{'yes' if e['fits_beside'] else 'no'}")
     print()
 
     DOCS.mkdir(exist_ok=True)

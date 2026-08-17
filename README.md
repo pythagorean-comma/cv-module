@@ -23,18 +23,19 @@ guessed is in [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
 | | |
 |---|---|
 | one channel derived | ✅ every value, arithmetic inline |
-| netlist | ✅ 188 parts, 138 nets, all pins resolved |
+| the coarse pad | ✅ **struck** — 0.000 dB of system noise for 36 parts |
+| netlist | ✅ 158 parts, 102 nets, all pins resolved |
 | schematic | ✅ **0 merges, 0 breaks, 0 stranded pins** |
 | the verification loop | ✅ `verify.py` reads **KiCad's** netlist, compared by name |
 | ERC | ✅ 0 errors; 6 declared warnings, held to their exact count |
-| section 5 constraints | ✅ checked mechanically, 31 planted faults caught |
-| deltas against the mixer's own model | ✅ three results contradict `00-current-state.md` |
+| section 5 constraints | ✅ checked mechanically, 34 planted faults caught |
+| deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
 | board | ❌ not started |
 
-Six shared blocks are deferred with reasons in `design.DEFERRED`: controller,
-envelope ADC, envelope rectifier, relay drive, fail-safe and supply. The scope
-statement put shared blocks after one channel was complete. It is.
+Five shared blocks are deferred with reasons in `design.DEFERRED`: controller,
+envelope ADC, envelope rectifier, fail-safe and supply. There were six; the
+relay drive is not deferred, it is deleted, along with the pad it drove.
 
 ## Run it
 
@@ -114,6 +115,35 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 
 ## The results worth knowing
 
+**The 2-bit coarse pad is gone, and it is the largest thing this repo has
+deleted.** 36 parts, 52 % of the placed courtyard, about two thirds of the BOM,
+24 coil drives and a coil supply rail `design.RAILS` never had — for a benefit
+nobody had ever computed. Spec §4.1 gives it one job, *"keeps the VCA near unity
+where its noise costs least"*, and the SSI2164's noise does not work that way:
+its table sweeps **R_IN and R_OUT together** at A_V = 0 dB, and
+`design.vca_cell_fit()` splits those four points into a current at the cell's
+output (3.8 pA/√Hz, multiplied by R_OUT) and a fixed voltage there (34.7 nV/√Hz,
+the size of the ½ TL072 the measurement circuit contains). **A pad raises R_IN
+and leaves R_OUT alone**, so it moves the cell by 0.2 dB, downwards.
+
+The comparison that decides it is the pad against the *control port*, which
+reaches the same output level for no parts and has 61.3 dB of span against a
+47 dB requirement. At the cell the pad is 0.03–3.9 dB worse; at the system, via
+`delta.pad_system_delta()`, it is worth **0.000 dB at every noise floor in the
+declared 50–400 µV range** and at both ends of the one thing the datasheet does
+not say about the cell. The datasheet's own THD rows agree: A_V = −20 dB at full
+input is 0.045 % against unity's 0.050 %, so attenuating in the control port is
+not the distorting way either.
+
+**How it survived is worth as much as the result.** It was not an unchecked
+constraint this time — it was an `Assumption` in `ASSUMPTIONS.md` whose "if it is
+wrong" clause cancelled its own consequence: *"the pad steps are noisier than
+modelled — but they are used when the source is hot, so the signal is larger by
+the same amount … it does not change a component value."* Every clause of that
+is false, and an assumption written that way is one nobody will ever compute.
+This repository instruments checks, netlists and drawings; nothing looks at the
+reasoning inside a declaration.
+
 **The dominant noise mechanism is additive, not multiplicative.**
 `00-current-state.md` records overturning this. Referred to one string: the VCA
 cells sit 84.3 dB down and the CV chain's AM sits 91.7 dB down. The original
@@ -144,7 +174,7 @@ Struck, with the arithmetic, at `design.FRONT_R`. `constraints.py`.
 
 ## The verification loop, and why it is the point
 
-`gen_sch.py` draws all 188 parts. Its own checker builds nets from the geometry
+`gen_sch.py` draws all 158 parts. Its own checker builds nets from the geometry
 the way eeschema does and compares them to `design.py`; then `verify.py` throws
 that away and asks **KiCad** the same question, over
 `kicad-cli sch export netlist`. Both agree, net by net and pin by pin.
@@ -161,7 +191,7 @@ because that is what catches a *polarised* part backwards — the fault the mixe
 records twice, at `DIODE_PINS` and `CAP_PINS`, and could not catch.
 
 **The 45 breaks were four causes, and 18 of the 45 were not geometry at all.**
-Accounted for exactly:
+Accounted for exactly — a previous pass, on a sheet that still had the pad on it:
 
 | | |
 |---|---|
@@ -197,14 +227,18 @@ Three more things the pass turned up, each recorded where it happened:
 - **The relay coils were invented in the drawing.** 24 global labels on 24
   one-pin nets, and every coil return wired to MDGND — which is backwards for
   the open-drain sink spec §4.5 specifies, since a sink drives the *low* side.
-  `design.DEFERRED_PINS` now declares those 48 pins and `check_open_pins()`
-  refuses to let a no-connect flag be read as final. `check_pins_accounted()` in
+  `design.DEFERRED_PINS` declared those 48 pins and `check_open_pins()` refuses
+  to let a no-connect flag be read as final. `check_pins_accounted()` in
   `gen_sch.py` is the check that was missing: nothing walked from the pins that
   exist to what became of them, only from `design.NETS` outwards.
+  **`DEFERRED_PINS` is empty now** — all 48 were those coils — and the check is
+  unchanged and still holds its declaration in both directions.
 - **§4.5's coil arithmetic does not work.** "12 coils … 2 × TPIC6B595" needs
   single-coil relays, which latch by polarity reversal, which a sink cannot do.
-  Dual-coil, as §4.1 asks, is 24 coils and 3 × TPIC6B595 exactly. In
-  `ASSUMPTIONS.md`, not acted on — §6.
+  Dual-coil, as §4.1 asks, is 24 coils and 3 × TPIC6B595 exactly. **Moot with
+  the pad struck**, and kept in `ASSUMPTIONS.md` because a spec that does not
+  close arithmetically is worth knowing about — it was one of two constraints
+  recorded against a part that turned out not to belong on the board.
 - **ERC ran at 583 violations and could not be read.** 539 were one per symbol
   saying the library configuration was missing; `gen_project.py` writes the
   project and they go. Underneath were 12 real errors: two power flags on nets
@@ -215,21 +249,34 @@ Three more things the pass turned up, each recorded where it happened:
 
 ## Open, in the order worth taking
 
-1. **The pad relay.** Not chosen; 52 % of the board area and about a third of
-   its cost. Its *pins* are pinned to IEC 60947 contact numbering, which is a
-   constraint on which relay may be fitted — and the coil arithmetic above is a
-   second one. Worth asking whether a 2-bit pad is worth half the board before
-   pricing candidates against either.
-2. **`MEASURED["noise_floor"]`** — the mixer's own unmeasured figure, and this
+~~**The pad relay.** Not chosen; 52 % of the board area and about a third of its
+cost.~~ **Closed, by deleting the pad rather than by choosing a relay.** It was
+item 1 for two passes, and both of the constraints recorded against it — IEC
+60947 contact numbering, and §4.5's coil arithmetic that does not close — turned
+out to be constraints on a part that should not be fitted. See the pad result
+above.
+
+1. **`MEASURED["noise_floor"]`** — the mixer's own unmeasured figure, and this
    module's most load-bearing unknown. It decides whether the module costs
    0.11 dB or 0.85 dB quiescent, and 0.56 dB or 3.17 dB while the lead feature
    is running. `DESIGN.md` upstream calls it "the measurement worth taking".
-3. **The envelope rectifier time constant** — not derivable from the spec, and
+2. **The envelope rectifier time constant** — not derivable from the spec, and
    the six op-amp sections reserved for it are the 6 declared ERC warnings.
-4. **The shared blocks**, all six.
-5. **The fail-safe's power-up sequence now has a number to wait for.** The NR
+   Needs an attack/release target, or a decision to set it by ear.
+3. **The fail-safe's power-up sequence now has a number to wait for.** The NR
    capacitor costs 20 ms of reference turn-on, and the '541's Vcc *is* VREF, so
    for 20 ms every channel's full scale is ramping from zero — and zero CV is
    unity gain. §4.5's named fail-loud hazard, arriving by the reference. 20 ms is
    4× the ~5 ms a relay needs, so it is a sequencing requirement rather than a
    hazard. `design.VREF_TURN_ON_S`, waiting for the deferred fail-safe.
+4. **The shared blocks**, all five.
+5. **R_IN is a free choice again, and it was not.** 12k1 was forced by the pad's
+   top step having to stay inside the part's 100 kΩ; without it the datasheet's
+   whole 7.5–100 kΩ is available and the trade is the one page 4 describes —
+   *"lower values will produce the best noise performance at some cost in
+   distortion"* — with a number on neither side. 7.5 kΩ is 2.1 dB quieter than
+   what is fitted. `MEASURED["vca_rin"]`.
+6. **The board.** `gen_pcb.py` through the deprecated `pcbnew` bindings, as the
+   mixer does — and it starts from a floorplan that has just halved:
+   3310 mm² against 7225, which puts the mezzanine placement back on the table
+   for the first time. `floorplan.BLOCKED`.

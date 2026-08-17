@@ -48,8 +48,11 @@ def grid(value):
 VERT, HORIZ = 0, 90
 
 
-# Row geometry. The audio rows are on a 38.1 mm pitch because a relay symbol is
-# tall; the CV rows are tighter because an MFB stage is not.
+# Row geometry. The audio rows are on a 38.1 mm pitch, which was set by the
+# height of a relay symbol and is kept now that the relays are gone: the pitch
+# has to clear _feedback()'s stepped rails and the +IN drops either side of an
+# amplifier, and shrinking it is a geometry change to check rather than a
+# tidy-up to make. The CV rows are tighter because an MFB stage is not tall.
 #
 # **A row pitch must not equal any part offset used inside the row.** CV_PITCH was
 # 25.4 while C{n}42 sits at y - 25.4, which put every channel's C{n}42 exactly on
@@ -66,7 +69,7 @@ SHARED_Y = 450 * G
 # pin a tenth of a millimetre off the grid does not connect and the drawing
 # does not say so.
 X_LOOM, X_FRONT, X_BLOCK = 20 * G, 44 * G, 88 * G
-X_PAD, X_RELAY, X_RC = 108 * G, 150 * G, 205 * G
+X_RIN, X_RC = 108 * G, 205 * G
 X_VCA, X_IV, X_SERVO = 234 * G, 276 * G, 330 * G
 
 # Columns along a CV row.
@@ -201,13 +204,14 @@ def _leave_down(sch, part, pin, dy, dx):
 
 
 def audio_row(sch, n, y):
-    """One channel's audio path: loom, front end, coupling, pad, VCA, I-V, servo.
+    """One channel's audio path: loom, front end, coupling, R_IN, VCA, I-V, servo.
 
     The order along the row is the order in the module docstring of design.py,
-    and the two places it does not simply run left to right are both worth a
-    glance: the pad's four resistors stack vertically because a 2-bit selector
-    is a column, and SIN{n} returns to the loom by label rather than by a wire
-    back across the whole row.
+    and it runs left to right with one exception: SIN{n} returns to the loom by
+    label rather than by a wire back across the whole row. There used to be a
+    second, the pad's four resistors stacked vertically because a 2-bit selector
+    is a column, and the two relay symbols beside them are why the row pitch is
+    what it is. See design.pad_benefit().
     """
     # -- loom ------------------------------------------------------------
     j = sch.place(f"J{n}", "Connector_Generic:Conn_01x02",
@@ -248,45 +252,18 @@ def audio_row(sch, n, y):
     sch.label(f"BUF{n}", cx, cy - 7.62)
     dx, dy = c01.pin("2")
     sch.wire((dx, dy), (dx, dy + 5.08))
-    sch.label(f"PADI{n}", dx, dy + 5.08)
+    sch.label(f"CPL{n}", dx, dy + 5.08)
 
-    # -- the pad: four input resistors, stacked --------------------------
-    for index, letter in enumerate("ABCD"):
-        rr = _r(sch, f"R{n}1{index + 1}", X_PAD, y - 7.62 + index * 5.08,
-                 angle=HORIZ)
-        px, py = rr.pin("1")
-        sch.wire((px - 5.08, py), (px, py))
-        sch.label(f"PADI{n}", px - 5.08, py)
-        qx, qy = rr.pin("2")
-        sch.wire((qx, qy), (qx + 5.08, qy))
-        sch.label(f"PS{n}{letter}", qx + 5.08, qy)
-
-    # -- the two relays --------------------------------------------------
-    for index, (com, a, b) in enumerate(
-            ((f"IIN{n}", f"PSEL{n}X", f"PSEL{n}Y"),
-             (None, None, None))):
-        ref = f"K{n}0{index + 1}"
-        k = sch.place(ref, "cv:Relay", "DPDT latch", X_RELAY + index * 30.48,
-                      y, footprint="")
-        pins = circuit.RELAY_PINS
-        if index == 0:
-            wiring = ((pins["COM_A"], f"IIN{n}"), (pins["NC_A"], f"PSEL{n}X"),
-                      (pins["NO_A"], f"PSEL{n}Y"))
-        else:
-            wiring = ((pins["COM_A"], f"PSEL{n}X"), (pins["NC_A"], f"PS{n}A"),
-                      (pins["NO_A"], f"PS{n}B"), (pins["COM_B"], f"PSEL{n}Y"),
-                      (pins["NC_B"], f"PS{n}C"), (pins["NO_B"], f"PS{n}D"))
-        for pin, net in wiring:
-            px, py = k.pin(pin)
-            sch.wire((px, py), (px + 3.81, py))
-            sch.label(net, px + 3.81, py)
-        # The coils belong to the deferred relay driver and this sheet does not
-        # guess at them. It used to: SET-/RESET- went to MDGND and SET+/RESET+
-        # to a label that appeared nowhere else, which is a net invented in the
-        # drawing and a coil return that the specified sink driver cannot use.
-        # design.DEFERRED_PINS carries the whole argument, and no_connects()
-        # emits the flags from it -- so the sheet cannot say more, or less, than
-        # design.py does about which pins are open.
+    # -- R_IN -------------------------------------------------------------
+    # Four stacked resistors and two relay symbols were here, which is what
+    # made the audio rows 38.1 mm apart. See design.pad_benefit().
+    r11 = _r(sch, f"R{n}11", X_RIN, y, angle=HORIZ)
+    px, py = r11.pin("1")
+    sch.wire((px - 5.08, py), (px, py))
+    sch.label(f"CPL{n}", px - 5.08, py)
+    qx, qy = r11.pin("2")
+    sch.wire((qx, qy), (qx + 5.08, qy))
+    sch.label(f"IIN{n}", qx + 5.08, qy)
 
     # -- the stability RC ------------------------------------------------
     r15 = _r(sch, f"R{n}15", X_RC, y, angle=90)

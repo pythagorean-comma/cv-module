@@ -186,12 +186,18 @@ def headroom_delta():
 # 5. The whole chain, before and after
 # ---------------------------------------------------------------------------
 
-def channel_noise(rin=None, gate_db=0.0):
+def channel_noise(rin=None, gate_db=0.0, cell=None):
     """This module's own additive noise at SIN{n}, V/rtHz.
 
     `gate_db` is how far that channel is attenuated, and it matters because the
     two terms behave differently: everything upstream of the gain cell is
     attenuated with the signal, and the cell's own output noise is not.
+
+    `cell` overrides the cell's own density, and exists for pad_system_delta():
+    the pad question is a comparison between two evaluations of
+    design.cell_noise(), where that model's own 0.14 dB residual cancels,
+    while the figure below is the datasheet's table read at its own stated
+    condition. Two different jobs, so the default stays the reading.
 
     The VCA figure is the datasheet's, and it already includes an I-V amplifier
     and R_OUT -- the specification's conditions are "using Figure 1 circuit
@@ -204,13 +210,14 @@ def channel_noise(rin=None, gate_db=0.0):
     """
     rin = rin or design.MEASURED["vca_rin"].value
     upstream = design.front_end()["total"] * 10 ** (-gate_db / 20)
-    cell = design.vca_noise(rin)["density"]
+    if cell is None:
+        cell = design.vca_noise(rin)["density"]
     servo = socket.thermal(design.SERVO_RINJ_OHMS) * (
         design.VCA_ROUT_OHMS / design.SERVO_RINJ_OHMS)
     return math.sqrt(upstream ** 2 + cell ** 2 + servo ** 2)
 
 
-def system_delta(floor=None, rin=None, gating=False):
+def system_delta(floor=None, rin=None, gating=False, cell=None):
     """The mixer's noise, before and after this module, referred to SUM_OUT.
 
     `floor` is the mixer's own MEASURED["noise_floor"] -- an assumption with a
@@ -222,6 +229,11 @@ def system_delta(floor=None, rin=None, gating=False):
     open and five attenuated by GATE_DEPTH_DB. It is included because it turns
     out to be the case where this module costs the most, and no previous
     document in the project computes it.
+
+    `cell` is a callable of the channel's own attenuation in dB, returning that
+    cell's output noise density. It is how pad_system_delta() asks the same
+    question of two different gain structures; None keeps the datasheet reading
+    at every depth, which is what every other caller wants.
     """
     floor = floor or socket.NOISE_FLOOR.value
     rin = rin or design.MEASURED["vca_rin"].value
@@ -229,18 +241,20 @@ def system_delta(floor=None, rin=None, gating=False):
     one = six / math.sqrt(design.CHANNELS)
     mixer = socket.summing_stage_noise(wiper=0.0)["total"]
     stage2 = socket.MIXER_DESIGN.inverter_noise()
+    at = (lambda gate_db: None) if cell is None else cell
 
     if gating:
         # One channel passes; five are shut. Their capsule noise is attenuated
         # with their signal, and their VCA cells' output noise is not.
         shut = 10 ** (-GATE_DEPTH_DB / 20)
         capsules = one * math.sqrt(1 + (design.CHANNELS - 1) * shut ** 2)
-        module = math.sqrt(channel_noise(rin) ** 2
+        module = math.sqrt(channel_noise(rin, cell=at(0.0)) ** 2
                            + (design.CHANNELS - 1)
-                           * channel_noise(rin, GATE_DEPTH_DB) ** 2)
+                           * channel_noise(rin, GATE_DEPTH_DB,
+                                           cell=at(GATE_DEPTH_DB)) ** 2)
     else:
         capsules = six
-        module = channel_noise(rin) * math.sqrt(design.CHANNELS)
+        module = channel_noise(rin, cell=at(0.0)) * math.sqrt(design.CHANNELS)
 
     before = math.sqrt(capsules ** 2 + mixer ** 2 + stage2 ** 2)
     after = math.sqrt(before ** 2 + module ** 2)
@@ -251,6 +265,74 @@ def system_delta(floor=None, rin=None, gating=False):
         "before_rms": before * ROOT_BW, "after_rms": after * ROOT_BW,
         "penalty": 20 * math.log10(after / before),
     }
+
+
+def pad_system_delta(floor=None, input_referred=(0.0, 1.0)):
+    """What the 2-bit coarse pad would have bought, referred to one string.
+
+    design.pad_benefit() answers the question at the cell, which is where the
+    mechanism is. This is the same answer stated the way every other result in
+    this repo is stated -- as a penalty against the mixer's own noise budget,
+    at the mixer's own assumed channel peak -- because a cell figure is not
+    something anybody can hear and a system penalty is.
+
+    Two gain structures reaching the same output level:
+
+        as built   all of the channel's attenuation in V_C
+        with pad   the deepest pad step in R_IN, the remainder in V_C
+
+    and two readings of the cell, because how much of its noise sits ahead of
+    the gain core is not on the datasheet: `input_referred` 0.0 puts all of it
+    at the output, where V_C cannot reduce it and the two structures are nearly
+    identical, and 1.0 puts all of it at the input, where V_C attenuates it and
+    the pad does not. **The pad does not win at either end**, so the unknown
+    never has to be resolved -- which is worth more than resolving it would be.
+
+    Run across noise_floor's whole declared range, 50 to 400 uV, because that
+    is this module's most load-bearing unknown and the honest form of an answer
+    that depends on it is a range rather than a number. It barely moves the
+    result here: the difference being reported is between two module noise
+    figures that differ by hundredths of a decibel, so it is small against
+    every floor in the range and smallest against the loudest.
+    """
+    pad_db = abs(min(design.PAD_STEPS_DB))
+    rin = design.VCA_RIN_OHMS
+    rout = design.VCA_ROUT_OHMS
+
+    def as_built(fraction):
+        return lambda gate_db: design.cell_noise(
+            rin, rout, gain_db=-gate_db, input_referred=fraction)
+
+    def with_pad(fraction):
+        # The pad takes as much of the depth as its deepest step allows and
+        # V_C takes the rest, which is the arrangement spec section 4.1 asks
+        # for: coarse in relays, fine in the control port.
+        def cell(gate_db):
+            taken = min(gate_db, pad_db)
+            return design.cell_noise(rin * 10 ** (taken / 20), rout,
+                                     gain_db=-(gate_db - taken),
+                                     input_referred=fraction)
+        return cell
+
+    rows = []
+    floors = ((floor,) if floor else
+              (socket.NOISE_FLOOR.low, socket.NOISE_FLOOR.value,
+               socket.NOISE_FLOOR.high))
+    for value in floors:
+        row = {"floor": value, "cases": {}}
+        for gating in (False, True):
+            for fraction in input_referred:
+                built = system_delta(value, gating=gating,
+                                     cell=as_built(fraction))["penalty"]
+                padded = system_delta(value, gating=gating,
+                                      cell=with_pad(fraction))["penalty"]
+                row["cases"][(gating, fraction)] = {
+                    "as_built": built, "with_pad": padded,
+                    # Positive would mean the pad lowers the system penalty.
+                    "buys_db": built - padded,
+                }
+        rows.append(row)
+    return {"pad_db": pad_db, "gate_db": GATE_DEPTH_DB, "rows": rows}
 
 
 def rin_sensitivity(floor=None):
@@ -326,6 +408,19 @@ DISAGREEMENTS = (
      "Replacing the pot with a buffer makes the mixer's summing stage very "
      "slightly worse. The mixer's own docstring predicted this and no document "
      "in this project had read it."),
+
+    ("hardware-spec-v0.md section 4.1, and 00-current-state.md's Hardware "
+     "table",
+     "Coarse pad, 0/-6/-12/-18 dB on latching relays: 'keeps the VCA near "
+     "unity where its noise costs least'",
+     "It keeps nothing. The SSI2164's noise table sweeps R_IN and R_OUT "
+     "together and the rise belongs to R_OUT, which a pad does not move; the "
+     "control port reaches the same level for no parts and is quieter by "
+     "0.03 to 3.9 dB at the cell. At the system level the pad is worth "
+     "{pad_best_db:+.3f} dB at every noise floor in the declared range and at "
+     "both readings of what the datasheet does not say. It cost 40 parts, "
+     "52% of the placed courtyard, 24 coil drives and a coil supply rail. "
+     "Struck -- see design.pad_benefit()."),
 
     ("00-current-state.md, three things that most affect the sound, item 2",
      "Summing-resistor scaling -- free 8 dB for one resistor value",
@@ -427,8 +522,26 @@ def _report():
               f"{row['open']:>+6.2f} dB   {row['gating']:>+6.2f} dB")
     print()
 
+    p = pad_system_delta()
+    print(f"7. the {p['pad_db']:.0f} dB coarse pad, against taking the same "
+          f"depth in V_C")
+    print(f"   the gating case puts {p['gate_db']:.0f} dB on five channels, so "
+          f"the pad takes {p['pad_db']:.0f} of it and V_C takes the rest")
+    print("   floor      case      cell noise all at   penalty as built   "
+          "with pad    pad buys")
+    for row in p["rows"]:
+        for (gating, fraction), case in sorted(row["cases"].items()):
+            where = "the output" if fraction == 0.0 else "the input "
+            print(f"   {row['floor'] * 1e6:>4.0f} uV   "
+                  f"{'gating' if gating else 'open':<8}  {where}          "
+                  f"{case['as_built']:>+6.2f} dB        "
+                  f"{case['with_pad']:>+6.2f} dB   {case['buys_db']:>+6.3f} dB")
+    print("   -> 0.000 dB at every floor in the declared range and at both ends")
+    print("      of the one thing about the cell the datasheet does not say")
+    print()
+
     m = mechanism_delta()
-    print("7. additive against multiplicative, referred to one string")
+    print("8. additive against multiplicative, referred to one string")
     print(f"   the six capsules          {m['source_below']:>6.1f} dB down")
     print(f"   this module, additive     {m['module_below']:>6.1f} dB down")
     print(f"   the VCA cells alone       {m['cell_below']:>6.1f} dB down")
@@ -438,8 +551,11 @@ def _report():
     print()
 
     d = summing_node_delta()
+    pad = pad_system_delta()
     values = {**mechanism_delta(), "vs_half": d["vs_half"],
-              "scaling_delta": -0.5}
+              "scaling_delta": -0.5,
+              "pad_best_db": max(case["buys_db"] for row in pad["rows"]
+                                 for case in row["cases"].values())}
     print("=" * 72)
     print("WHERE THE NUMBERS DISAGREE WITH THE DOCUMENTS")
     print("=" * 72)

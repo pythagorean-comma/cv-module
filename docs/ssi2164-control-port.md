@@ -379,6 +379,66 @@ what bounds the choice either: page 4 puts maximum input current handling at
 7.5–20 kΩ, and it becomes an `Assumption` in `design.py` rather than a number,
 because how much it matters depends entirely on `MEASURED["noise_floor"]`.**
 
+### The conditions line above that table, read later and worth 36 parts
+
+The read above took the four rows and stopped. The line above the whole
+specification table is the one that decides the coarse pad, and it was quoted
+in this document only as far as "R_IN/OUT". Verbatim, page 2:
+
+> V_S = ±15V, V_IN = 0.775V_RMS, f = 1kHz, **A_V = 0dB**, Class AB, T_A = 25°C;
+> **using Figure 1 circuit without diode**
+
+Three things follow, and the second is the one the pad rested on:
+
+- the parameter is **R_IN/OUT**, both resistors moved together, so the table is
+  neither an R_IN sweep nor an R_OUT sweep and cannot say on its own which of
+  the two the rise belongs to;
+- **A_V = 0 dB** — every row is at unity, so it says nothing about noise
+  against control voltage either;
+- **Figure 1** is the cell plus a ½ TL072 and both resistors, so these figures
+  already contain an I-V amplifier at 18 nV/√Hz.
+
+`design.vca_cell_fit()` separates the four points into a current at the cell's
+output (3.8 pA/√Hz) and a fixed voltage there (34.7 nV/√Hz), fitting all four
+to 0.14 dB rms with the two Johnson terms computed rather than fitted. **The
+rise belongs to R_OUT**, and the fixed term is the size of the TL072 at a noise
+gain of 2 — which is a corroboration and not a proof, since an output-stage
+noise inside the cell would sit in the same place and four points cannot
+separate them.
+
+That is what struck the coarse pad. A pad raises R_IN and leaves R_OUT alone,
+so it moves the cell's noise by 0.2 dB in the direction of *less*; the 62 →
+123 nV/√Hz it was implicitly costed against is R_OUT's and the pad never
+touches it. See `design.pad_benefit()`.
+
+**One inconsistency inside the datasheet, recorded rather than reconciled.**
+Page 8's ULTRA-LOW NOISE VCA paragraph claims paralleling four channels with
+R_IN/OUT divided by four improves output noise by exactly 6 dB, "−97dBu for a
+single channel to −103dBu". Every term in the fit scales by 6 dB under that
+transformation except the fixed one, which is the op-amp and does not move — so
+a full 6 dB needs the fixed term to be negligible and the table's own curvature
+needs it to be 34.7 nV/√Hz. They cannot both be exact, by about 2–3 dB. The
+table is a specification and the paragraph is prose with round numbers.
+
+### THD is specified against A_V, and it does not punish attenuation
+
+Same conditions line, so V_IN is 0.775 V rms throughout and only A_V changes.
+Class AB, 80 kHz bandwidth:
+
+| condition | THD |
+|---|---|
+| A_V = 0 dB | 0.05 % |
+| A_V = 0 dB, V_IN = −17 dBu | 0.025 % |
+| A_V = +20 dB | 0.20 % |
+| **A_V = −20 dB** | **0.045 %** |
+
+The −20 dB row is measured with the full input still arriving at R_IN and the
+cell attenuating in the control port — exactly the case a pad exists to avoid —
+and it is *better* than unity. What moves distortion is **input level**, not
+gain setting, which is why the second row is half the first. A pad does move
+that, and it is worth 0.05 % becoming ~0.03 % on a channel that is 18 dB down
+in the mix.
+
 ### MODE — the spec never mentions it, and it decides 12 dB
 
 Page 3: *"Leave open for Class AB operation."* Page 5: *"Class AB will yield the
@@ -467,6 +527,7 @@ whether a spare channel is wanted for feature 12's compressor sidechain.
 | §2 | +3300 ppm/°C tempco resistor practice | **Right as practice**, named on page 10; declined here on the arithmetic in §4 | six parts saved |
 | §2 | (sign) | table gives **−3300 ppm/°C**; consistent, magnitude rises with T | — |
 | §4.1 | R_IN 30 kΩ, "datasheet noise condition" | **Wrong.** Worst of four; 20 kΩ recommended, 7.5–100 kΩ range | R_IN, R_OUT |
+| §4.1, §4.5 | coarse pad, 0/−6/−12/−18 dB on latching relays, "keeps the VCA near unity where its noise costs least" | **Wrong, and it is the largest thing in this table.** The noise rise belongs to R_OUT, which a pad does not move, and THD at A_V = −20 dB is *lower* than at unity. The control port reaches the same level for no parts | 36 parts, 52 % of the courtyard, two thirds of the BOM, 24 coil drives and a coil supply rail |
 | §4.1 | MODE pin | **Absent.** Class AB, pin 1 open, worth 12 dB and better feedthrough | one part not fitted |
 | §4.1 | input RC | **Absent.** 220 Ω + 1200 pF is required for stability | 2 parts/channel |
 | §4.1 | series 10 µF at the VCA input | **Absent.** Recommended for control feedthrough — the lead feature's own failure mode | 1 part/channel |
@@ -477,9 +538,9 @@ whether a spare channel is wanted for feature 12's compressor sidechain.
 | §1.1 | module needs 60–80 mA | **Over by ~5×** for the VCAs: ±6 mA typ per package | supply sizing |
 | §1.4 | THAT4301 needs ±7 V, "check rails first" | **Clears.** ±4 to ±18 V on the 2164; rails are not the gate | bench-off unblocked |
 
-Six of these move a component value or a part count. Two of them —
-the fail-silent inversion and the missing 10 µF — bear directly on the lead
-feature rather than on the noise budget.
+Seven of these move a component value or a part count, and the seventh moves 36
+of them. Two — the fail-silent inversion and the missing 10 µF — bear directly
+on the lead feature rather than on the noise budget.
 
 ---
 
@@ -494,7 +555,14 @@ two:
 2. **Control-port voltage-noise density.** Unspecified. Every AM figure in this
    project assumes the external source dominates, and nothing in Rev 3.4 says
    whether it does.
-3. **Gain accuracy at deep attenuation.** The table stops at −40 dB for
+3. **How much of the cell's noise sits ahead of the gain core.** Nothing in
+   Rev 3.4 distinguishes input-referred from output-referred, and there is no
+   noise-against-gain figure anywhere in it. It decides how much quieter a shut
+   channel is than an open one, which is most of the gating penalty in
+   `delta.system_delta()`. `design.cell_noise()` takes it as a parameter and
+   both ends are computed; the pad decision was deliberately made to survive
+   either. In `ASSUMPTIONS.md`.
+4. **Gain accuracy at deep attenuation.** The table stops at −40 dB for
    feedthrough and matching, and the feature wants ≥47 dB of usable depth per
    channel. −100 dB is specified as a maximum, not characterised on the way
    down.

@@ -201,6 +201,32 @@ records a **source cited and never read** (`PUMP_RULES`). This was a **constrain
 cited and never derived**. From the inside, a well-checked wrong constraint and a
 well-checked right one look identical.
 
+### Also struck, and for the same kind of reason — the 2-bit coarse pad
+
+**Spec §4.1 asks for 0/−6/−12/−18 dB on latching relays. Do not draw it.**
+`design.pad_benefit()` prices it and `delta.pad_system_delta()` states the answer
+as a system penalty: **0.000 dB, at every noise floor in the declared range.**
+
+The mechanism, because it is the part that must survive compaction: the
+SSI2164's noise table sweeps **R_IN and R_OUT together** at A_V = 0 dB, and the
+rise across it belongs to **R_OUT**. A pad raises R_IN. The alternative is not
+"no attenuation" — it is the control port, which reaches the same level for no
+parts, and against which the pad is 0.03–3.9 dB *worse* at the cell. The
+datasheet's own THD at A_V = −20 dB is lower than at unity, so there is no
+distortion argument either. It cost 36 parts, 52 % of the placed courtyard, two
+thirds of the BOM, 24 coil drives and a coil supply rail.
+
+**The instrument that failed here is one level further out than the last one.**
+Constraint 2 was a claim in a list headed *check these mechanically*. This was an
+`Assumption` in `ASSUMPTIONS.md` — the repo's own mechanism for recording what it
+does not know — whose *"if it is wrong"* clause cancelled its own consequence:
+"the pad steps are noisier than modelled, but they are used when the source is
+hot, so the signal is larger by the same amount … it does not change a component
+value." Every clause false, and the effect was that nobody computed it for five
+documents. **An assumption whose consequence is written as self-cancelling is an
+assumption nobody will ever compute.** Nothing in this repo instruments the
+reasoning inside a declaration, and nothing can.
+
 ---
 
 ## Toolchain

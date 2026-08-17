@@ -3,23 +3,30 @@
 > ## ⚠ Two corrections to this page's own standing
 >
 > **1. "Where a document contradicts this page, this page wins" no longer holds.**
+> Three of the arithmetic's disagreements are with this page now, not two.
 > It was true when written, and this page kept its own promise honestly — it is
 > the document that established the habit of recording what each correction
 > overturned. But `hardware-spec-v0.md` is the authoritative spec for this repo,
 > and where either conflicts with a *computed* result, **the arithmetic wins.**
 > `delta.py` prints its disagreements last and loudly for exactly this reason.
 >
-> **2. Two of the three results `delta.py` disagrees with are on this page**, and
-> one of them is not a detail:
+> **2. Three of the four results `delta.py` disagrees with are on this page**,
+> and two of them are not details:
 >
 > | this page says | the arithmetic says |
 > |---|---|
 > | Hardware table: dominant noise mechanism is **multiplicative**, corrected from additive | **Additive wins, and the correction should be reverted.** The VCA cells sit 84.3 dB under one string; the CV chain's AM sits 91.7 dB under the same signal. The original claim was right and was overturned for a mechanism 8 dB quieter |
 > | Three things that most affect the sound, item 2: summing-resistor scaling is a **free 8 dB** | A wash. It assumed source noise independent of the source's full-scale voltage; the MAX6126's noise rises with its output — 45 nV/√Hz at 2.5 V against 95 at 5 V, both read first-hand — so scaling up and dividing back down cancels |
+> | Hardware table: gain staging is a **coarse switched passive pad (latching relays) + VCA near unity**, marked *Unchanged* | **Struck.** The SSI2164's noise table sweeps R_IN and R_OUT together and the rise belongs to R_OUT, which a pad does not move; the datasheet's own THD is *lower* at A_V = −20 dB than at unity. Against the control port the pad buys 0.000 dB of system noise at every floor in `noise_floor`'s range, and it cost 36 parts, 52 % of the courtyard and two thirds of the BOM. `design.pad_benefit()` |
 >
-> `delta.DISAGREEMENTS` is the authority for both, with the numbers recomputed on
-> every run rather than quoted here. The third disagreement is against `CLAUDE.md`,
-> not this page.
+> **The third one is the reason "Unchanged" is a status worth distrusting.** It
+> is the only row in the Hardware table that carried that word through five
+> documents, and it meant nobody had revisited it — not that anybody had checked
+> it. Every other row on this page won an argument; that one never had one.
+>
+> `delta.DISAGREEMENTS` is the authority for all three, with the numbers
+> recomputed on every run rather than quoted here. The remaining disagreement is
+> against `CLAUDE.md`, not this page.
 >
 > **The reading order below is history.** Documents 0–4 belong to the parent
 > project and are not in this repo; nothing here depends on them. What survives
@@ -29,7 +36,7 @@
 
 **Read this for context, not for current truth.** Five documents accumulated, each
 correcting the last, so several confident-sounding passages in the earlier files
-are wrong — and, as above, two on this page are too. The value of this page is
+are wrong — and, as above, three on this page are too. The value of this page is
 that it says *why* the choices are what they are.
 
 Last revised: after the DAC8568 SYNC correction.
@@ -91,7 +98,7 @@ For 40 dB of musical gate depth: per-channel depth **≥47 dB**, per-pair isolat
 | **Reference** | 35–41 nV/√Hz (MAX6126 + NR cap, or ADR4525C/D), shared by DAC and ADC. Reference noise is **correlated across strings**, so it is the most perceptible kind | Not considered |
 | **Feature 12, compression** | **Analogue sidechain.** dB-out RMS detector (6.1 mV/dB) into the dB-in port ⇒ ratio is one resistor ratio | Software, in the sensing layer |
 | **Fail-safe** | **AC-coupled charge pump** driving the bypass relay (any stuck state drops it) + DAC CLR-to-full-scale = hardware mute in ~1 µs | Watchdog + latching relay |
-| **Gain staging** | Coarse switched passive pad (latching relays) + VCA near unity. Unchanged | — |
+| **Gain staging** | ~~Coarse switched passive pad (latching relays) + VCA near unity~~ **Struck** — one fixed R_IN = R_OUT, all attenuation in V_C. See the correction block at the top | Was: *Unchanged* through five documents |
 | **Buy vs build** | **Build bespoke.** Nothing off-the-shelf survives the no-switcher rule | Not examined |
 
 ### The three things that most affect how it sounds
@@ -152,7 +159,14 @@ Every claim overturned so far, so the pattern is visible.
 | 10 | The MCU is the load-bearing choice | The DAC is; and then neither, really | deep dive |
 | 11 | DAC8568 can stream frames under one SYNC | It cannot — `t4` min SYNC HIGH = 80 ns | **user reading the datasheet** |
 | 12 | PWM loses on cost and accuracy | Leading option once the CV filter is mandatory anyway | consequence of 11 |
+| 13 | A coarse relay pad keeps the VCA near unity "where its noise costs least" | **No mechanism.** The 2164's noise rise is R_OUT's; a pad moves R_IN. 0.000 dB of system noise for 36 parts | reading the datasheet's conditions line |
 
-Three of the twelve came from Tim rather than from me, and two of those three
+Three of the thirteen came from Tim rather than from me, and two of those three
 (7, 8) came from listening rather than from analysis. Worth noting as a working
 pattern: **the renders are the most reliable error detector in this project.**
+
+Number 13 is the second of its kind — after `CLAUDE.md`'s struck constraint 2 —
+and the two together are the pattern worth naming: **the claims that survive
+longest are the ones nobody ever argued about.** Both were carried forward as
+settled through every document in the project, and both fell to twenty lines of
+arithmetic the first time anybody wrote them down.

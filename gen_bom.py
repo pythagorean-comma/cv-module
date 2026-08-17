@@ -111,9 +111,6 @@ PRICES = {
                      "Panasonic ERA-6A thin film, 0.1 %, 25 ppm. Thin film is "
                      "the specification and not the tolerance -- see FRONT_R."),
     "12k1 0.1%": band(0.10, 0.30, "GBP", 25, "ERA-6A thin film"),
-    "24k3 0.1%": band(0.10, 0.30, "GBP", 25, "ERA-6A thin film"),
-    "48k7 0.1%": band(0.10, 0.30, "GBP", 25, "ERA-6A thin film"),
-    "97k6 0.1%": band(0.10, 0.30, "GBP", 25, "ERA-6A thin film"),
 
     "22k 1%": band(0.01, 0.03, "GBP", 100, "0805 thick film"),
     "17k8 1%": band(0.01, 0.03, "GBP", 100, "0805 thick film, E96"),
@@ -164,16 +161,18 @@ def price_for(value, mpn):
         return PRICES[value]
     return PRICES_BY_MPN.get(mpn)
 
-# A named representative for the one line that cannot be priced, so the board
-# can be budgeted without the part being chosen. This is an envelope, not a
-# selection: design.PAD_RELAY is still None and design.UNSPECIFIED still says
-# why.
-RELAY_ENVELOPE = Price(
-    2.50, 5.00, "GBP", 12, "band",
-    "envelope from a representative signal DPDT latching relay",
-    "e.g. Panasonic TQ2-L2-5V class: 2-pole changeover, dual coil, 14 x 9 mm. "
-    "**Not a choice.** Twelve of them is the largest single cost on the board "
-    "and 49 % of its area -- see floorplan.py.")
+# **RELAY_ENVELOPE was here and there is no unpriced line left.** It was a
+# representative signal DPDT latching relay at GBP 2.50-5.00 -- an envelope so
+# the board could be budgeted while the part stayed unchosen -- and twelve of
+# them were the largest single cost on the board. Deleting the coarse pad takes
+# the BOM from GBP 47-96 to GBP 16-30, which is two thirds of it, and takes the
+# only line that had a price without a part number with it.
+#
+# The mechanism stays: `lines()` still prices a value of None through
+# `price_for()`, which returns None, and `check()` still refuses a line that has
+# neither a part number nor a declaration in design.UNSPECIFIED. The next
+# unchosen part -- the DC-DC, the ADC, the bypass relay -- lands on the same
+# path.
 
 # USD to GBP, for the total only, and stated rather than folded in silently.
 # Two lines are quoted in dollars because that is the currency the figures were
@@ -198,7 +197,7 @@ def lines():
     for (value, footprint, mpn), refs in groups.items():
         refs.sort(key=sort_key)
         active = footprint is None or "SO" in (footprint or "")
-        price = RELAY_ENVELOPE if value is None else price_for(value, mpn)
+        price = price_for(value, mpn)
         out.append({
             "refs": refs,
             "value": value,

@@ -22,8 +22,11 @@ Every mutation below is a real fault rather than a synthetic one:
     unconnected-looking sense resistors;
   * a shield bonded at both ends is what happens when a loom is made by
     somebody who was not told;
-  * and a second MAGND/AGND bridge is the mixer's own named failure mode,
-    transplanted.
+  * a second MAGND/AGND bridge is the mixer's own named failure mode,
+    transplanted;
+  * and a second resistor on the coupling node is the coarse pad coming back,
+    which is the one change that would quietly invalidate design.pad_benefit()
+    without invalidating anything a wire can see.
 """
 
 import contextlib
@@ -50,10 +53,16 @@ def _design_restored():
 
     A test harness whose fixtures leak is the same failure this file exists to
     catch, one level up: it passes, and it stops meaning what its name says.
+
+    **VCA_ROUT_OHMS joined the list with check_gain_chain()**, and it is the
+    first scalar here rather than a container. The case that needs it asks what
+    happens when design.py itself drifts off the unity condition, which cannot
+    be expressed in a netlist at all -- and left unrestored it would make every
+    later case run against a design that is not the design.
     """
     saved = {name: copy.deepcopy(getattr(design, name))
              for name in ("NETS", "LOOM", "DEFERRED_PINS", "DEFERRED",
-                          "NO_CONNECT")}
+                          "NO_CONNECT", "VCA_ROUT_OHMS")}
     try:
         yield
     finally:
@@ -143,28 +152,54 @@ def _(nets, values, open_pins, violations):
     nets["STRAY"] = {("J3", "4"), ("R301", "1")}
 
 
-# The three faults check_open_pins() exists for, and the first is not synthetic:
-# it is what this sheet did for its whole life. Every relay coil's return was
-# wired to MDGND and its drive labelled out to a net that existed nowhere else,
-# which no check here looked at, and which is backwards for the open-drain sink
-# section 4.5 specifies. See design.DEFERRED_PINS.
-@case("a deferred coil return is quietly wired to MDGND",
-      verify.check_open_pins)
+# The four faults check_gain_chain() exists for, and the first two are the pad
+# coming back -- which is the specific way this board could stop being the board
+# design.pad_benefit() argues about. A switched R_IN is four resistors on the
+# coupling node and a contact in series with the cell's input, and both of those
+# are visible here and nowhere else in the netlist.
+@case("a second R_IN branch appears on CPL3, which is a pad returning",
+      verify.check_gain_chain)
 def _(nets, values, open_pins, violations):
-    open_pins.discard(("K101", "A2"))
-    nets["MDGND"].add(("K101", "A2"))
+    nets["CPL3"].add(("R312", "1"))
 
 
+@case("R411 fitted at a pad step's value, so the channel is not unity",
+      verify.check_gain_chain)
+def _(nets, values, open_pins, violations):
+    values["R411"] = "24k3 0.1%"
+
+
+@case("a contact lands between R_IN and the cell's input", verify.check_gain_chain)
+def _(nets, values, open_pins, violations):
+    nets["IIN2"].add(("K201", "11"))
+
+
+@case("design.py itself drifts off unity: R_OUT no longer equals R_IN",
+      verify.check_gain_chain)
+def _(nets, values, open_pins, violations):
+    design.VCA_ROUT_OHMS = 24_300.0
+
+
+# The two faults check_open_pins() exists for. There used to be three, and the
+# first was not synthetic: every relay coil's return was wired to MDGND and its
+# drive labelled out to a net that existed nowhere else, backwards for the
+# open-drain sink section 4.5 specifies. Both it and the "deferred pin waits on
+# a block that has landed" case named coil pins, and design.DEFERRED_PINS is
+# empty now that the pad is struck -- so they are gone rather than rewritten
+# around a pin that does not exist. **The check is unchanged and still holds
+# both directions**; what is missing is a fault to plant in it, which is a
+# thing to notice rather than to paper over with a synthetic one. The next
+# deferred block that lands brings the cases back with it.
 @case("a pin is left open on the sheet and declared nowhere",
       verify.check_open_pins)
 def _(nets, values, open_pins, violations):
     open_pins.add(("U9", "2"))
 
 
-@case("a deferred pin waits on a block that has landed",
-      verify.check_open_pins)
+@case("a permanent no-connect is quietly wired up", verify.check_open_pins)
 def _(nets, values, open_pins, violations):
-    design.DEFERRED_PINS[("K101", "A1")] = "relay drive (landed)"
+    open_pins.discard((design.REF_REF, str(design.REF_PINS["IC1"])))
+    nets["MAGND"].add((design.REF_REF, str(design.REF_PINS["IC1"])))
 
 
 # check_erc() is an allow-list, which is the one shape of check that can quietly
