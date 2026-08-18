@@ -188,4 +188,4 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 The deferred blocks, each with its reason. None of them is costed here, so the totals above are a floor for the module and not its price.
 
-- **controller** — RP2040, and the part is settled -- controller_fit() is the derived case for it. What is not settled is two computed gates: controller_package() says a 0.40 mm QFN-56 is unreachable at this fabrication class, and controller_supply() says the linear V3V3 chain cannot carry it out of 35.4 mA of +Vout. Both are decisions above the drawing.
+- **controller** — RP2040, and the part is settled -- controller_fit() is the derived case for it. One of the two gates is closed: controller_package() reports the 0.40 mm QFN-56 reachable now, with no fan-out escape needed, because the fabrication class moved to 0.09/0.09 on 1 oz -- see docs/fabrication-class.md. What is left is controller_supply(): the linear V3V3 chain cannot carry it out of 35.4 mA of +Vout, and the switcher that can is a part nobody has chosen.

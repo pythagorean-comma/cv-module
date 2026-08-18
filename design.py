@@ -4621,14 +4621,14 @@ DEFERRED = {
     # of. Deriving what the block asks for turned it into two computed gates,
     # and both are decisions above a drawing:
     #
-    #   * **the package.** controller_package(): RP2040 ships only in a 7x7
-    #     QFN-56 at 0.40 mm pitch, and rules.fan_out_class() puts that off the
-    #     bottom of the ladder on two independent counts. The widest escape
-    #     that clears the next pin is 0.20 mm against this board's 0.25, and
-    #     0.40 mm of pitch on a 0.50 mm grid gives fourteen pins a side eleven
-    #     grid lines to land on. It clears at the 2 oz *minimum* class,
-    #     0.15/0.15, which costs nothing at the fabricator and re-routes all
-    #     164 nets on a grid with four times the cells;
+    #   * **the package -- CLOSED, and by a fabrication decision rather than a
+    #     drawing one.** controller_package(): RP2040 ships only in a 7x7
+    #     QFN-56 at 0.40 mm pitch, and rules.fan_out_class() put that off the
+    #     bottom of its ladder on all three counts at the class that was then
+    #     fitted. rules.coarsest_class_for() solved for what would clear it --
+    #     0.12/0.12 mm or finer, which is below the 2 oz floor -- and the
+    #     board is at 0.09/0.09 on 1 oz now. The package is reachable with no
+    #     escape needed at all. See docs/fabrication-class.md;
     #   * **the supply.** controller_supply(): supply_fit() leaves 35.4 mA of
     #     +Vout, V3V3 is two linear rails below it, and a milliamp of 3.3 V is
     #     a milliamp of twelve at the converter's pin. The part's own measured
@@ -4636,17 +4636,19 @@ DEFERRED = {
     #     and the MIDI. A switcher from VA+ clears it at any efficiency above
     #     40 %, and is a new aggressor supply_beat() has to price.
     #
-    # What is *not* open any more is the part or the case for it:
+    # What is *not* open is the part, the case for it, or the package:
     # controller_fit() is the derived table, every row read off the RP2040's
     # own datasheet, and 00-current-state.md's entry 9 is marked as not relied
     # upon. See CONTROLLER.
     "controller": "RP2040, and the part is settled -- controller_fit() is the "
-                  "derived case for it. What is not settled is two computed "
-                  "gates: controller_package() says a 0.40 mm QFN-56 is "
-                  "unreachable at this fabrication class, and "
-                  "controller_supply() says the linear V3V3 chain cannot "
-                  "carry it out of 35.4 mA of +Vout. Both are decisions "
-                  "above the drawing.",
+                  "derived case for it. One of the two gates is closed: "
+                  "controller_package() reports the 0.40 mm QFN-56 reachable "
+                  "now, with no fan-out escape needed, because the "
+                  "fabrication class moved to 0.09/0.09 on 1 oz -- see "
+                  "docs/fabrication-class.md. What is left is "
+                  "controller_supply(): the linear V3V3 chain cannot carry it "
+                  "out of 35.4 mA of +Vout, and the switcher that can is a "
+                  "part nobody has chosen.",
     # **"envelope ADC" was here and it is drawn.** Its reason read
     # "ADS131M08 or MCP3564, undecided in spec section 4.4", and what settled
     # it was neither channel count nor price: the ADS131M08's external
@@ -6257,8 +6259,8 @@ def _report():
           f"{sup['switcher_floor_ma'][1]:.1f} mA, so it clears at any "
           f"efficiency over {sup['switcher_min_efficiency'] * 100:.0f} % -- "
           f"no efficiency figure needed, and none invented")
-    print(f"  -> both gates are decisions above a drawing, so the block stays "
-          f"in DEFERRED with them written down")
+    print(f"  -> the package gate is closed by the fabrication class; what "
+          f"keeps this block in DEFERRED is the supply, and it wants a part")
     print()
 
     print(f"the envelope ADC -- {ENV_ADC}, and the full scale chose it")

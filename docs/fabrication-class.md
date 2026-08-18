@@ -100,6 +100,37 @@ that fail, probe, rip up and retry — and a finer grid has far less of it.
 * **The 5 V rail closes**, which the coarse class could not do once the via rules
   were right.
 
+## What reversing it would cost, and it is not the part
+
+Worth stating exactly, because it is easy to overstate. At any coarser class the
+RP2040's QFN-56 is unreachable **by this router** — and that qualifier carries the
+whole meaning. `rules.route_pitch()` ties the routing grid to the fabrication
+class, `grid = track + clearance + margin`, and its derivation holds only because
+`route.py` permits tracks on adjacent cells:
+
+> two tracks on adjacent cells are `pitch − track` apart, and that has to clear
+> `clearance`
+
+That is a property of this router, not of copper. A router with a grid finer than
+`track + clearance`, enforcing spacing as a rule rather than through the pitch,
+decouples the two — which is how commercial routers do it, and why 0.40 mm QFNs
+go onto 2 oz boards routinely.
+
+So reversing this decision costs router work in one of three forms, and the part
+is the price only if all three are refused:
+
+| | |
+|---|---|
+| **decouple the grid from the class** in `route_pitch()` | the general fix; it would retire the fan-out question at every class |
+| **build the spreading fan** | at 0.15/0.15 only *one* of `fan_out_class()`'s three conditions fails — the jog, by 0.075 mm — and this is exactly its mechanism. At 0.25/0.20 all three fail and it is a bigger job |
+| **hand-route the escape region** | against this repo's generate-don't-draw principle, and legitimate |
+
+Nothing about the board as it stands is contingent on this: it is complete, clean
+and routing in 89 s at the class that is fitted. This section exists because the
+first prose written about the decision said reversing it "costs the RP2040",
+which reads "this router cannot" as "cannot be done" — the same substitution the
+four overturned predictions above were made of.
+
 ## What is not decided here
 
 **What DRC enforces for hole clearance is deliberately unchanged.** JLCPCB
