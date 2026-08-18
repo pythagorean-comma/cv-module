@@ -113,8 +113,25 @@ class Grid:
     other, which is what lets a net's own copper be a routing target.
     """
 
-    def __init__(self, rect, pitch, track, clearance, via_diameter):
+    def __init__(self, rect, pitch, track, clearance, via_diameter,
+                 via_reach=None):
         self.left, self.top, self.right, self.bottom = rect
+        # rules.via_exclusion()'s three distances. Defaulted from the copper
+        # rules alone so a caller that does not pass them is no worse off than
+        # the hard-coded ring this replaced.
+        self.via_reach = via_reach or {
+            "to_track_mm": via_diameter / 2 + track / 2 + clearance,
+            "to_via_mm": via_diameter + clearance,
+            "to_pad_mm": via_diameter / 2 + clearance,
+        }
+        self._via_ring = None
+        self._via_pair = None
+        # Where a via may not be placed, by cell, with the nets responsible.
+        self.no_via = {}
+        # Where the vias actually are, so via-to-via can be asked. Kept beside
+        # `owner` because a cell holding a via and a cell holding a track are
+        # the same to `owner` and are not the same to this rule.
+        self.placed_vias = {}
         self.pitch = pitch
         self.track = track
         self.clearance = clearance
@@ -513,10 +530,18 @@ class Grid:
         self.base = [list(plane) for plane in self.owner]
 
     def release(self, cells):
-        """Un-route these cells: back to what blocking left, not to empty."""
+        """Un-route these cells: back to what blocking left, not to empty.
+
+        **And any via that stood on one goes too.** placed_vias is beside
+        `owner` rather than in it, so restoring `owner` does not clear it -- and a
+        via left in that dict after its net is ripped up is a phantom that
+        forbids the next via for ever. It is the one piece of state here that
+        rip-up has to be told about twice.
+        """
         for layer, column, row in cells:
             index = self.index(column, row)
             self.owner[layer][index] = self.base[layer][index]
+            self.placed_vias.pop((column, row), None)
 
     def block_edge(self, edge_clearance):
         """The board outline, on both layers."""
@@ -530,22 +555,78 @@ class Grid:
                         self.take(layer, column, row, "blocked")
 
     # -- routing ----------------------------------------------------------
-    # A via needs its four orthogonal neighbours, and **not its diagonal
-    # ones**, which is arithmetic rather than taste. A via is 0.6 mm across and
-    # a track is 0.25: at one pitch their copper is 0.5 - 0.3 - 0.125 = 0.075
-    # apart, which is a third of the clearance and was 500 violations on the
-    # first routed board. At a diagonal the centres are 0.707 apart and the
-    # copper is 0.28, which clears 0.2 with room.
+    # **A via is near three kinds of thing and this used to be one ring of four
+    # cells.** The old constant blocked the four orthogonal neighbours and not
+    # the diagonals, with a comment deriving it: a via is 0.6 mm across and a
+    # track 0.25, so at one 0.5 mm pitch their copper is 0.075 mm apart -- a
+    # third of the clearance, and 500 violations on the first routed board --
+    # while at a diagonal it is 0.28 mm and clears. Requiring all eight was the
+    # cautious version and cost 27 nets, because a SOIC pin's diagonals are
+    # always somebody's clearance ring.
     #
-    # Requiring all eight was the safe version of this and it cost 27 nets: a
-    # SOIC pin has a neighbour 1.27 mm away on each side, so its diagonals are
-    # always somebody's clearance ring, and no via could ever be placed at a
-    # package pin. Every route had to escape on the front layer through the
-    # same corridor, and the ones that arrived last found it full.
-    VIA_NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1), (0, 0))
+    # All of that is true, and all of it is true **at a 0.5 mm grid on 0.25/0.20
+    # copper**, stated as though it were a fact about the geometry. Routing this
+    # board at 0.09/0.09 produced 56 DRC violations that the grid's own
+    # bookkeeping thought were fine, in exactly the two places this ring does not
+    # look: 49 between a via's hole and copper it is not connected to, and 7
+    # between a via's copper and a pad's, because block_pad_ring() sizes a pad's
+    # halo for the *track* that might be laid there and a via's copper reaches
+    # 0.3 mm from its centre rather than 0.125.
+    #
+    # rules.via_exclusion() computes all three distances, each as the stricter of
+    # a copper rule that shrinks with the class and a **hole** rule that does
+    # not -- and the crossover is real: copper binds at the fitted class by
+    # 0.10 mm and the hole rule binds at 0.09/0.09 by 0.01. They arrive through
+    # the rules dict, because _one_pass() already has a parameter called `rules`.
+    def _offsets(self, reach):
+        """Cell offsets whose centres lie within `reach` of a cell centre."""
+        span = int(math.floor(reach / self.pitch))
+        found = []
+        for dc in range(-span, span + 1):
+            for dr in range(-span, span + 1):
+                if math.hypot(dc, dr) * self.pitch <= reach + 1e-9:
+                    found.append((dc, dr))
+        return tuple(found)
+
+    def via_ring(self):
+        """Cells whose track copper would be inside a via's clearance."""
+        if self._via_ring is None:
+            self._via_ring = self._offsets(self.via_reach["to_track_mm"])
+        return self._via_ring
+
+    def via_pair(self):
+        """Cells where another via would be too close, copper or hole."""
+        if self._via_pair is None:
+            self._via_pair = self._offsets(self.via_reach["to_via_mm"])
+        return self._via_pair
+
+    def block_pad_for_vias(self, x0, y0, x1, y1, net):
+        """Cells where a *via* may not be placed because this pad is there.
+
+        Separate from block_pad_ring() because it is a different distance about a
+        different object: that halo is `clearance + track/2` and stops a track,
+        and a via's copper stands 0.3 mm off its centre rather than 0.125. It is
+        also not layer-specific -- a via is through-plated, so a cell that is
+        illegal for it on one layer is illegal for it everywhere.
+
+        Recorded per net rather than as a flat keep-out: a via on the same net as
+        the pad may sit inside its halo, which is what a fan-out via at a pad
+        does. So each cell carries the nets whose copper is near it, and a via is
+        allowed only where every one of them is its own.
+        """
+        reach = self.via_reach["to_pad_mm"]
+        for column, row in self._cells_within(x0, y0, x1, y1, reach):
+            self.no_via.setdefault(self.index(column, row), set()).add(net)
 
     def via_fits(self, column, row, net, crossable=()):
-        for dc, dr in self.VIA_NEIGHBOURS:
+        held = self.no_via.get(self.index(column, row))
+        if held and held - {net}:
+            return False
+        for dc, dr in self.via_pair():
+            other = self.placed_vias.get((column + dc, row + dr))
+            if other is not None and other != net:
+                return False
+        for dc, dr in self.via_ring():
             for layer in LAYERS:
                 if (not self.free(layer, column + dc, row + dr, net)
                         and (layer, column + dc, row + dr) not in crossable):
@@ -769,7 +850,9 @@ def _connect(grid, net, entries, access, crossable=None, claim=True):
         # legally placed. This is the rule the grid cannot express.
         for point in path_vias:
             column, row = grid.cell_of(*point)
-            for dc, dr in Grid.VIA_NEIGHBOURS:
+            if claim:
+                grid.placed_vias[(column, row)] = net
+            for dc, dr in grid.via_ring():
                 for layer in LAYERS:
                     spot = (layer, column + dc, row + dr)
                     if spot in crossable:
@@ -790,7 +873,7 @@ def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None,
     """
     escapes = escapes or {}
     grid = Grid(rect, rules["pitch"], rules["track"], rules["clearance"],
-                rules["via"])
+                rules["via"], rules.get("via_reach"))
     grid.block_edge(rules["edge"])
     if reserve:
         grid.reserve(*reserve[0], reserve[1])
@@ -817,6 +900,12 @@ def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None,
                 for layer in layers:
                     stage(grid, layer, x - half_w, y - half_h, x + half_w,
                           y + half_h, owner)
+    # And the via keep-out, which is not per layer -- see block_pad_for_vias().
+    for net, entries in pads.items():
+        owner = net if net else "blocked"
+        for x, y, half_w, half_h, _ in entries:
+            grid.block_pad_for_vias(x - half_w, y - half_h, x + half_w,
+                                    y + half_h, owner)
     for layers, x, y, half_w, half_h in obstacles:
         for layer in layers:
             grid.block_box(layer, x - half_w, y - half_h, x + half_w,

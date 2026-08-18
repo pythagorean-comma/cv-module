@@ -38,6 +38,7 @@ import tempfile
 import types
 
 import design
+import rules
 import verify
 import contract.socket as socket
 
@@ -579,12 +580,16 @@ def _(nets, values, open_pins, violations, drc, board):
 # **This case changed direction when the board finished routing**, and the way
 # it changed is the point. It used to delete four of the sixty-seven unconnected
 # items, modelling "somebody routed four nets and left the declaration at 67".
-# At UNROUTED_ITEMS = 0 that mutation removes four items from an empty list and
+# At UNROUTED_ITEMS = 0 that mutation removed four items from an empty list and
 # plants nothing at all -- it stopped being a fault without stopping being a
 # case, and test_verify.py reported it MISSED on the first run after the board
 # closed, which is the file doing its job.
 #
-# There is only one direction left from zero, and it is the one that matters:
+# **UNROUTED_ITEMS is 10 again now** -- see the note there, and note that this
+# case survives the change for the reason the old one did not: appending an item
+# fails the comparison at any declared value, where deleting four only planted a
+# fault while there were at least four to delete. The direction that matters is
+# still this one:
 # a connection that was made is no longer made. That is what a part moving, a
 # net appearing, or a router regression all look like from DRC's side.
 @case("a routed connection is lost and the count stays at zero",
@@ -743,13 +748,34 @@ def main():
                  {**json.loads(text),
                   "board": {"design_settings": {"drc_exclusions": [],
                                                 "rules": {}}}})),
+            # **These two carried the fitted class as literals and both went
+            # dead the moment it changed.** They read `'"clearance": 0.2'` and
+            # `'(width 0.25)'`, which matched nothing once rules.py moved to
+            # 0.09/0.09: str.replace() found no target, wrote the file back
+            # unchanged, check_rules() correctly reported no problem, and this
+            # file reported MISSED on both. That is the IEC relay pins again --
+            # a mutation whose target is a value some other file owns -- and the
+            # fix is the same shape twice: read the value from where it lives,
+            # and make the harness refuse a mutation that changes nothing.
             ("a net class clearance drifts off rules.py", verify.PROJECT,
-             lambda text: text.replace('"clearance": 0.2', '"clearance": 0.15')),
+             lambda text: text.replace(f'"clearance": {rules.CLEARANCE_MM}',
+                                       f'"clearance": {rules.CLEARANCE_MM / 2}')),
             ("the board carries a track of an undeclared width", verify.PCB,
-             lambda text: text.replace('(width 0.25)', '(width 0.2)', 1))):
+             lambda text: text.replace(f'(width {rules.TRACK_MM})',
+                                       f'(width {rules.TRACK_MM / 2})', 1))):
+        # **A text mutation that changes nothing is a mutation with no target**,
+        # which is dead_mutations()' discriminator one object along: you cannot
+        # remove what is not there, and you cannot replace what does not match.
+        # Checked here rather than there because these three rewrite files on
+        # disk instead of the netlist, so dead_mutations() never sees them.
+        original = path.read_text()
+        planted = mutate(original)
+        if planted == original:
+            report(f"{label} [DEAD: the mutation matched nothing]", [])
+            continue
         with tempfile.NamedTemporaryFile("w", suffix=path.suffix,
                                          delete=False) as handle:
-            handle.write(mutate(path.read_text()))
+            handle.write(planted)
             copy_path = pathlib.Path(handle.name)
         if path == verify.PROJECT:
             found = verify.check_rules(copy_path, verify.PCB)

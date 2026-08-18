@@ -40,6 +40,7 @@ ADC and the supply entirely.
 import pathlib
 import re
 import subprocess
+import sys
 
 import design
 from toolchain import kicad
@@ -144,12 +145,13 @@ def copper_layers(board=BOARD):
     return ",".join(["F.Cu", *inner, "B.Cu"])
 
 
-def plot_schematic(destination):
+def plot_schematic(destination, source=None):
     """The sheet as a PDF. The one document that needs no argument at all."""
-    _run("sch", "export", "pdf", "-o", str(destination), str(SHEET))
+    _run("sch", "export", "pdf", "-o", str(destination),
+         str(SHEET if source is None else source))
 
 
-def plot_layout(destination):
+def plot_layout(destination, source=None):
     """One page per copper layer, each readable on its own.
 
     **Three of these settings look cosmetic and are load-bearing**, and all
@@ -172,14 +174,15 @@ def plot_layout(destination):
     plot that omits them shows three empty rectangles of board with no
     indication that anything is meant to be there.
     """
+    source = BOARD if source is None else source
     _run("pcb", "export", "pdf", "--mode-multipage",
          "--theme", "KiCad Classic", "--bg-color", "#FFFFFF",
-         "--layers", copper_layers(),
+         "--layers", copper_layers(source),
          "--common-layers", "Edge.Cuts,F.SilkS,User.Drawings",
-         "--scale", "0", "-o", str(destination), str(BOARD))
+         "--scale", "0", "-o", str(destination), str(source))
 
 
-def render_top(destination):
+def render_top(destination, source=None):
     """The one artefact that reads at a glance to somebody who has not opened a CAD tool.
 
     Deliberately `--quality basic`: the raytracer samples stochastically, so a
@@ -189,7 +192,60 @@ def render_top(destination):
     """
     _run("pcb", "render", "--side", "top", "--quality", "basic",
          "--background", "opaque", "--width", "2400", "--height", "2400",
-         "-o", str(destination), str(BOARD))
+         "-o", str(destination), str(BOARD if source is None else source))
+
+
+PLOTS = ((f"{PROJECT}-schematic.pdf", plot_schematic, "sheet"),
+         (f"{PROJECT}-layout.pdf", plot_layout, "board"),
+         (f"{PROJECT}-top.png", render_top, "board"))
+
+
+def check_plots(sheet=SHEET, board=BOARD, docs=DOCS):
+    """Do the tracked plots correspond to the tracked board? A real check.
+
+    **The hazard is committing part-way through a build, and nothing here could
+    see it.** These three files are tracked binaries, and PDF_EPOCH exists so
+    that each is a *function of the board* -- which it is: two plots of one board
+    are byte-identical, measured. What no instrument covered is the other half of
+    that property: whether the plots on disk are a function of **this** board.
+    They are not, if a commit is taken after gen_pcb.py has written the board and
+    before gen_plots.py has replotted it. Commit 789c4ba is exactly that, by
+    534 bytes, and its layout PDF was plotted from the previous board.
+
+    **This check cannot be a step in the build and be worth anything**, which is
+    the awkward part and is stated rather than worked around. Run after
+    gen_plots.py it compares files that were just written against themselves and
+    passes for free -- a check that passes trivially where it runs is this repo's
+    own named failure mode. Run *before* it, on a board that has legitimately
+    changed, it fails for the expected reason and would be switched off inside a
+    week.
+
+    So it is a mode rather than a stage: `python3 gen_plots.py --verify`, whose
+    place is a clean checkout, before a commit, or in CI. It plots the tracked
+    board into a temporary directory and compares bytes. It was validated the way
+    test_verify.py validates its own cases -- by running it against 789c4ba,
+    where it fails on cv-module-layout.pdf and passes on the other two.
+    """
+    import tempfile
+    problems = []
+    with tempfile.TemporaryDirectory() as scratch:
+        scratch = pathlib.Path(scratch)
+        for name, plot, wants in PLOTS:
+            tracked = docs / name
+            if not tracked.exists():
+                problems.append(f"{name} is not in {docs.name}/ at all")
+                continue
+            fresh = scratch / name
+            plot(fresh, sheet if wants == "sheet" else board)
+            if fresh.suffix == ".pdf":
+                _normalise_pdf(fresh)
+            if tracked.read_bytes() != fresh.read_bytes():
+                problems.append(
+                    f"{name} is {tracked.stat().st_size} bytes and replotting "
+                    f"{(sheet if wants == 'sheet' else board).name} gives "
+                    f"{fresh.stat().st_size} -- the tracked plot is not a plot "
+                    f"of the tracked {wants}")
+    return problems
 
 
 def main():
@@ -199,9 +255,7 @@ def main():
     DOCS.mkdir(exist_ok=True)
 
     written = []
-    for name, plot in ((f"{PROJECT}-schematic.pdf", plot_schematic),
-                       (f"{PROJECT}-layout.pdf", plot_layout),
-                       (f"{PROJECT}-top.png", render_top)):
+    for name, plot, _ in PLOTS:
         destination = DOCS / name
         plot(destination)
         if destination.suffix == ".pdf":
@@ -225,4 +279,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--verify" in sys.argv[1:]:
+        stale = check_plots()
+        for problem in stale:
+            print(f"stale: {problem}")
+        if stale:
+            raise SystemExit(
+                f"{len(stale)} tracked plot(s) do not correspond to the "
+                f"tracked board -- run python3 gen_plots.py")
+        print(f"all {len(PLOTS)} tracked plots are plots of the tracked board")
+    else:
+        main()

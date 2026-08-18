@@ -58,21 +58,48 @@ import math
 # The rules as fitted
 # ---------------------------------------------------------------------------
 
-# Outer copper weight. **The rules below are chosen to be legal at either
-# weight**, which is why this is a declaration and not yet a decision: nothing
-# on this board needs 2 oz -- design.coil_budget()'s 75-120 mA of relay coil is
-# the largest current anywhere on it and 0.25 mm of 1 oz carries that with a
-# rise of a few degrees -- but keeping the option costs nothing while the
-# fitted class is three times the 2 oz minimum. It stops costing nothing the
-# moment anything asks for 0.09 mm; see escape_corridor().
-COPPER_OZ = 2
+# Outer copper weight. **Decided, and it is 1 oz.** This was a declaration
+# rather than a decision for five passes -- "the rules below are chosen to be
+# legal at either weight ... keeping the option costs nothing", which was true
+# and ended the moment something asked for 0.09 mm. The controller asked.
+#
+# **The decision was taken on a measurement rather than an argument**, and the
+# argument it overturned was this file's own. gen_pcb.py end to end, all four
+# combinations of class and via rule:
+#
+#     class          via rules      time     unrouted   DRC violations
+#     0.25/0.20 2oz  ring of four    89 s        0            0
+#     0.09/0.09 1oz  ring of four    69 s        0           56
+#     0.25/0.20 2oz  corrected      454 s       10 (V5)       0
+#     0.09/0.09 1oz  corrected       89 s        0            0
+#
+# Only the last row is a complete, DRC-clean board. The coarse class cannot
+# close the 5 V rail once via_exclusion() is modelled properly and takes five
+# times as long to fail; the fine one closes everything, needs no fan-out escape
+# anywhere, and runs in the same 89 seconds the coarse class used to.
+#
+# **What 1 oz costs is current capacity and the answer is 0.33 degrees.**
+# track_current(): design.coil_budget()'s 92.7 mA on 0.09 mm of 1 oz is 0.33 C
+# of rise, and 4.0 C even if the borrowed IPC-2221 constant is three times out.
+# Nothing else on this board is more than microamps. The figure that made this
+# look like a trade was 29 A/mm2, and current density omits the surface area
+# that does the cooling -- see track_current() for why that is the wrong
+# instrument.
+#
+# **And it makes the RP2040 routable**, which is what asked the question:
+# fan_out_class() puts a 0.40 mm QFN-56 off the bottom of its ladder at
+# 0.25/0.20 and clears it here, with no escape needed at all. See
+# design.controller_package() and docs/fabrication-class.md.
+COPPER_OZ = 1
 
-# 0.25 mm against JLCPCB's 0.15 mm minimum at 2 oz: 1.7x the published floor.
-# This board's constraint is area and part count, not track width, and a track
-# three thou wider than it needs to be is free everywhere except between two
-# pins of a SOIC -- which is the one place it turned out to matter, and the
-# place escape_corridor() shows it does not matter enough to move.
-TRACK_MM = 0.25
+# 0.09 mm, which is JLCPCB's published minimum at 1 oz and the whole reason the
+# copper weight moved -- see COPPER_OZ. It was 0.25 mm, with a comment arguing
+# that "a track three thou wider than it needs to be is free everywhere except
+# between two pins of a SOIC". That was right about the SOIC and wrong about
+# what the width is for: the track sets route_pitch(), the pitch sets which pin
+# pitches the router can reach at all, and 0.25 mm put a 0.40 mm QFN-56 out of
+# reach entirely.
+TRACK_MM = 0.09
 
 # The rails and both grounds, per the Power net class. Not used by the router,
 # which draws every signal at TRACK_MM; this is what a rail is widened to when
@@ -80,10 +107,13 @@ TRACK_MM = 0.25
 # cannot disagree about it.
 POWER_TRACK_MM = 0.5
 
-# 0.2 mm against 0.15 mm published at 2 oz. The margin is deliberate and it is
-# the same argument as the track: 0.05 mm is 33 % of the fabricator's floor and
-# it is free.
-CLEARANCE_MM = 0.2
+# 0.09 mm, with the track, for the same reason. **The margin that used to be
+# here is gone and that is the honest cost of the decision**: 0.2 against a
+# 0.15 mm floor was 33 % of margin held for nothing, and 0.09 is the floor
+# itself. What protects the board now is that PITCH_MARGIN_MM is still carried
+# on top of the pitch, and that DRC runs against these numbers on every build --
+# verify.check_rules() is what holds all three files to them.
+CLEARANCE_MM = 0.09
 
 # 0.6 mm diameter on a 0.3 mm hole. **Chosen to sit outside every surcharge the
 # capabilities page names**, which is the one place that page gives a price:
@@ -311,6 +341,73 @@ def pad_reach(pin_pitch=TSSOP_PIN_PITCH_MM, pad_width=TSSOP_PAD_WIDTH_MM,
 
 
 # ---------------------------------------------------------------------------
+# Holes, which are a different rule from copper and do not scale with the class
+# ---------------------------------------------------------------------------
+#
+# **These are the fabricator's own figures and they were not in this file at
+# all.** gen_pcb.rules() sets the minimum track, via, copper clearance and edge
+# clearance, and verify.check_rules() holds all four; nothing said anything about
+# a drill, so KiCad's own default -- 0.25 mm, quoted by the DRC report as "board
+# setup constraints hole clearance 0.2500 mm" -- has been enforcing it unowned.
+# Read first-hand from the same JLCPCB capabilities page as the class above:
+#
+#     "Via Hole-to-Hole Spacing: 0.2mm"
+#     "Pad Hole-to-Hole Spacing: 0.45mm"
+#     "Via hole to Track: 0.2mm"
+#     "PTH to Track: 0.28mm" (0.35 mm recommended)
+#
+# **The point that matters is that none of these is a function of the copper
+# class.** A hole clearance is drill positioning, not etching, so taking the
+# track and clearance from 0.25/0.20 down to 0.09/0.09 buys nothing here -- and
+# at some point on the way down the hole rule *overtakes* the copper rule and
+# becomes the binding one. via_exclusion() is where that crossover is computed
+# rather than discovered: at the fitted class the copper rule wins by 0.10 mm,
+# and at 0.09/0.09 the hole rule wins by 0.01.
+#
+# **What is enforced is deliberately not changed here.** KiCad's 0.25 mm default
+# is stricter than the 0.20 mm this fabricator publishes, and routing at
+# 0.09/0.09 produced 49 violations against it. Declaring 0.20 would make those
+# 49 disappear with no copper moving, which is indistinguishable from relaxing a
+# check to make it pass -- so the figures are recorded, the router is held to the
+# **stricter** of the two, and what DRC enforces is left alone. Choosing to
+# design to the fabricator's real limit is a decision, and it belongs to whoever
+# takes the class decision.
+VIA_HOLE_TO_HOLE_MM = 0.20
+PAD_HOLE_TO_HOLE_MM = 0.45
+VIA_HOLE_TO_TRACK_MM = 0.20
+# KiCad's own default, named as such because it is what has been in force.
+KICAD_HOLE_CLEARANCE_MM = 0.25
+
+
+def via_exclusion(track=TRACK_MM, clearance=CLEARANCE_MM,
+                  via=VIA_DIAMETER_MM, drill=VIA_DRILL_MM):
+    """The three distances a via needs, each the stricter of copper and hole.
+
+    route.py had one of these as a hard-coded ring of four neighbours, correct
+    at a 0.5 mm grid and stated as though it were a fact about the geometry.
+    These are the same question asked properly, and they are three questions
+    rather than one because a via is near three kinds of thing:
+
+        to a track's centre   via/2 + track/2 + clearance   |  drill/2 + hole
+        to another via        via + clearance               |  drill + hole
+        to a pad's copper     via/2 + clearance             |  drill/2 + hole
+
+    The left column is copper and shrinks with the class; the right is drill and
+    does not. `hole` is the stricter of this fabricator's published figure and
+    KiCad's default, for the reason in the comment above.
+    """
+    hole = max(VIA_HOLE_TO_TRACK_MM, KICAD_HOLE_CLEARANCE_MM)
+    hole_pair = max(VIA_HOLE_TO_HOLE_MM, KICAD_HOLE_CLEARANCE_MM)
+    return {
+        "to_track_mm": max(via / 2 + track / 2 + clearance, drill / 2 + hole),
+        "to_via_mm": max(via + clearance, drill + hole_pair),
+        "to_pad_mm": max(via / 2 + clearance, drill / 2 + hole),
+        "hole_mm": hole,
+        "copper_binds": via / 2 + clearance >= drill / 2 + hole,
+    }
+
+
+# ---------------------------------------------------------------------------
 # The fan-out: what a track may do inside a pad it cannot land in the middle of
 # ---------------------------------------------------------------------------
 
@@ -458,6 +555,41 @@ def fan_out_class(pin_pitch, pad_width, grid=None, track=TRACK_MM,
     }
 
 
+# **Hole-to-hole clearance is a rule this file does not own, and that is a gap
+# rather than a decision.** gen_pcb.rules() sets the minimum track, via, copper
+# clearance and edge clearance through pcbnew, and verify.check_rules() holds all
+# four against this module. It sets nothing for holes, so KiCad's own default --
+# 0.25 mm, which the DRC report quotes as "board setup constraints hole clearance
+# 0.2500 mm" -- is what has been enforcing it. That default is doing real work:
+# routing this board at 0.09/0.09 produced **49 hole-clearance violations at
+# 0.24 mm**, and every one of them was invisible to route.py, which models copper
+# and has no concept of a drill.
+#
+# Two things about it are worth carrying:
+#
+#   * **it does not scale with the copper class.** A hole clearance is drill
+#     positioning, not etching, so making the tracks finer buys nothing here. At
+#     the fitted 0.5 mm grid two vias two cells apart are 1.0 mm centre to
+#     centre and the rule is 0.7 mm clear; at 0.23 mm the same two cells are
+#     0.46 mm and it is not. via_neighbours() computes the *copper* ring and says
+#     nothing about this, which is why a finer grid needs a via lattice rule as
+#     well as a via ring;
+#   * **the value has not been read.** JLCPCB's capabilities page, quoted at the
+#     top of this file, gives the minimum via hole and diameter and this session
+#     did not find a hole-to-hole figure on it. So no constant is declared here:
+#     KiCad's default is in force, it is documented as such, and reading the real
+#     figure is what turns this comment into a rule. Declaring 0.25 because KiCad
+#     does would be inventing a fabrication limit, which is the thing section 6 of
+#     the spec forbids.
+#
+# The other seven violations at that class are a different fault and a router
+# one: block_pad_ring() grows a pad by `clearance + track / 2`, which is right for
+# a track and wrong for a **via**, whose copper is 0.3 mm from its centre rather
+# than 0.125. So via_fits() can place a via on a cell that is legal for a track
+# and illegal for the via that lands there -- a claim about one object applied to
+# another, in the fifth place this project has found one.
+
+
 def coarsest_class_for(pin_pitch, pad_width, margin=PITCH_MARGIN_MM):
     """The coarsest symmetric track/clearance at which `pin_pitch` is routable.
 
@@ -500,13 +632,100 @@ def coarsest_class_for(pin_pitch, pad_width, margin=PITCH_MARGIN_MM):
 def grid_cost(track, clearance, margin=PITCH_MARGIN_MM):
     """How many more grid cells a class costs, against the fitted one.
 
-    Quoted rather than guessed because the first draft of the controller note
-    said "four times the cells" for a class that costs 2.0x, and 4.7x for the
-    one that actually clears. The router's work is superlinear in this.
+    **Cells, and not time -- the two go in opposite directions and this was
+    measured after being asserted the other way.** This docstring said "the
+    router's work is superlinear in this", and the controller note used 4.7x the
+    cells as the cost of the 1 oz class. Timed, on this board, gen_pcb.py end to
+    end:
+
+        0.25 / 0.20, grid 0.50 mm, 1.0x cells      89.0 s
+        0.09 / 0.09, grid 0.23 mm, 4.7x cells      69.0 s
+
+    **22 % faster on 4.7 times the cells.** The runtime is dominated by
+    contention -- routes that fail, probe for what is in the way, rip it up and
+    try again -- and not by the size of the grid. A finer grid has more cells and
+    far less contention, so nets get through on the first attempt: 1457 track
+    runs and 492 vias at the fine class against 1547 and 561 at the fitted one,
+    and no net needed a fan-out escape at all.
+
+    So cell count is a proxy that omits the term that dominates, which is the
+    same mistake track_current() records about A/mm2 and RAIL_FILTER_ESR records
+    upstream. The ratio is still worth returning -- it is what memory and the
+    grid's own bookkeeping scale with -- but it is not the cost, and nothing here
+    should quote it as one.
     """
     fitted = route_pitch()
     finer = route_pitch(track=track, clearance=clearance, margin=margin)
     return {"grid_mm": finer, "cells": (fitted / finer) ** 2}
+
+
+# ---------------------------------------------------------------------------
+# Current, and the figure of merit that was the wrong instrument
+# ---------------------------------------------------------------------------
+
+# IPC-2221's current-capacity curve, as the empirical fit everybody quotes:
+#
+#     I = k * dT^0.44 * A^0.725      A in square mils, dT in degrees C,
+#                                    k = 0.048 external, 0.024 internal
+#
+# **The source is secondary and this says so.** IPC-2221 is paywalled and has
+# not been read here. What was read is a set of independent third-party
+# calculators that agree on the exponents and on both constants, which is
+# corroboration and not a datasheet -- and CLAUDE.md records two claims in this
+# project already overturned by a datasheet contradicting a research summary.
+#
+# It is quoted anyway, because **the conclusion survives the source being wrong
+# by a lot**: dT goes as k^(-1/0.44), so a k three times smaller than this only
+# multiplies the answer by 12.6, and the answer is a third of a degree. That is
+# the same shape as design.controller_supply()'s efficiency bound -- an
+# inequality that cannot be wrong, in place of a number that could be.
+IPC_2221_K_EXTERNAL = 0.048
+IPC_2221_K_INTERNAL = 0.024
+IPC_2221_DT_EXPONENT = 0.44
+IPC_2221_AREA_EXPONENT = 0.725
+COPPER_OZ_UM = 35.0                    # one ounce, in micrometres
+
+
+def track_current(amps, width_mm=TRACK_MM, oz=None, external=True):
+    """What a track that width costs in temperature rise. Not amps -- degrees.
+
+    **A/mm2 was the wrong instrument and this function exists because it was
+    used.** The last pass flagged the coil nets at "29 A/mm2 on 0.09 mm of 1 oz
+    copper", called it a number wanting a curve read, and put it in the way of a
+    fabrication decision. Current density carries no thermal information at all:
+    it divides by the cross-section, which is what carries the current, and omits
+    the surface area, which is what does the cooling. A thin trace has a worse
+    density and a *better* perimeter-to-area ratio, which is exactly why
+    IPC-2221's exponent on area is 0.725 rather than 1.
+
+    Asked properly -- what rise does 92.7 mA cause -- the answer at the finest
+    class this board could be ordered at is **0.33 degrees**, and at the fitted
+    class 0.019. The question was never close, and the figure that made it look
+    close was one this repo already knows the failure mode of: RAIL_FILTER_ESR
+    records a number that was not wrong so much as computed without the term
+    that dominates.
+
+    `amps` is the current in the trace, not on the rail: design.supply_load()
+    puts 94.95 mA on V5 and three relay coils are 30.9 mA each, so the trunk
+    beside the regulator is the worst single conductor on this board.
+    """
+    oz = COPPER_OZ if oz is None else oz
+    thickness_mil = oz * COPPER_OZ_UM / 25.4
+    area_mil2 = (width_mm / 0.0254) * thickness_mil
+    k = IPC_2221_K_EXTERNAL if external else IPC_2221_K_INTERNAL
+    scale = k * area_mil2 ** IPC_2221_AREA_EXPONENT
+    return {
+        "amps": amps,
+        "width_mm": width_mm,
+        "oz": oz,
+        "area_mil2": area_mil2,
+        "amps_at_10c": scale * 10.0 ** IPC_2221_DT_EXPONENT,
+        "rise_c": (amps / scale) ** (1.0 / IPC_2221_DT_EXPONENT),
+        # What the answer becomes if the borrowed constant is three times out.
+        "rise_c_if_k_is_3x_out": ((amps / (scale / 3.0))
+                                  ** (1.0 / IPC_2221_DT_EXPONENT)),
+        "density_a_per_mm2": amps / (width_mm * oz * COPPER_OZ_UM * 1e-3),
+    }
 
 
 # The classes this board could be ordered at, read off the capabilities page
@@ -684,6 +903,15 @@ def _report():
               f"{rung['worst_offset_mm']:.3f} mm worst phase -- {verdict}")
     solved = coarsest_class_for(QFN_PIN_PITCH_MM, QFN_PAD_WIDTH_MM)
     cost = grid_cost(solved["width_mm"], solved["width_mm"])
+    print(f"  and the coil nets are not the objection to a finer class -- "
+          f"A/mm2 was the wrong instrument:")
+    for width, oz in ((TRACK_MM, COPPER_OZ), (0.15, 2), (0.09, 1)):
+        row = track_current(0.0927, width_mm=width, oz=oz)
+        print(f"      {width:.2f} mm at {oz} oz  {row['density_a_per_mm2']:>6.1f}"
+              f" A/mm2, and {row['rise_c']:.3f} C of rise at 92.7 mA "
+              f"({row['amps_at_10c'] * 1e3:.0f} mA would be 10 C; "
+              f"{row['rise_c_if_k_is_3x_out']:.1f} C if the borrowed constant "
+              f"is 3x out)")
     print(f"  a 0.40 mm pitch needs {solved['width_mm']:.2f}/"
           f"{solved['width_mm']:.2f} mm or finer -- a {solved['grid_mm']:.2f} mm "
           f"grid, {cost['cells']:.1f}x the cells -- which is below the 2 oz "

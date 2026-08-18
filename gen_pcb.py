@@ -662,7 +662,14 @@ def build():
         rectangle, board.pad_boxes(), obstacles=stitch_copper,
         rules={"pitch": ROUTE_PITCH_MM, "track": TRACK_MM,
                "clearance": CLEARANCE_MM, "via": VIA_DIAMETER_MM,
-               "edge": EDGE_CLEARANCE_MM},
+               "edge": EDGE_CLEARANCE_MM,
+               # Derived, not assumed. rules.via_exclusion() is three
+               # distances -- to a track, to another via, to a pad's copper --
+               # each the stricter of a copper rule that shrinks with the
+               # fabrication class and a hole rule that does not. route.py used
+               # to carry the first of them as a ring of four cells, correct at
+               # a 0.5 mm grid and written as though it were geometry.
+               "via_reach": rules.via_exclusion()},
         skip=("MAGND", "MDGND"),
         reserve=((left, iso_y, iso_x, bottom),
                  ("VIN", "VIN_J", "IGND", "IGND_J", "VIN_P")),

@@ -950,6 +950,37 @@ def check_fail_safe(nets, values):
 # reaches it; below `grid`, two pins have to share one grid line and nothing
 # this router draws gets there. The RP2040's 0.40 mm QFN-56 is the third rung
 # and design.controller_package() is where that is priced.
+# **It is 10 and every one is V5, and the number went up because the router
+# started modelling a rule it had always broken.** Correcting via clearance --
+# rules.via_exclusion(), three distances rather than a ring of four cells -- costs
+# the fitted class the 5 V rail and 5x the routing time. Measured, all four
+# combinations, gen_pcb.py end to end:
+#
+#     class          via rules      time     unrouted   DRC violations
+#     0.25/0.20 2oz  ring of four    89 s        0            0
+#     0.09/0.09 1oz  ring of four    69 s        0           56
+#     0.25/0.20 2oz  corrected      454 s       10 (V5)       0
+#     0.09/0.09 1oz  corrected       89 s        0            0
+#
+# **The board that used to close was closing on geometry the router had no rule
+# for**, and DRC agreed because the two illegal cases -- a via inside the annulus
+# 0.325 to 0.5 mm from a foreign pad, and two vias on diagonal cells 0.707 mm
+# apart against a 0.8 mm requirement -- were never attempted at that grid. They
+# were latent, not absent. So this number going from 0 to 10 is the router
+# becoming honest, and the rule this file runs on says it may: **down as copper is
+# laid, up only with the nets named.** V5 is the name.
+#
+# **And the last row is the class decision, answered by measurement.** Only
+# 0.09/0.09 gives a complete DRC-clean board once via clearance is modelled, and
+# it does it in 89 s with no fan-out escape anywhere. That is a fabrication
+# decision -- 0.09/0.09 is 1 oz outer copper only -- so it is not taken here;
+# rules.COPPER_OZ and the two constants above it are the one-line change, and
+# design.controller_package() carries what it buys.
+# **Back to 0, and the way it got there is the record worth keeping.** It was 10
+# in the two hours between the via rules being corrected and the fabrication
+# class being decided -- V5, the 5 V rail, which the coarse class could not close
+# once route.py stopped placing vias it had no rule for. The table above is why
+# the class moved; rules.COPPER_OZ carries the decision.
 UNROUTED_ITEMS = 0
 
 

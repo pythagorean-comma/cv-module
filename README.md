@@ -141,6 +141,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | [`CLAUDE.md`](CLAUDE.md) | the rules, including which "load-bearing constraints" actually are |
 | [`STYLE.md`](docs/STYLE.md) | the mixer's conventions, read off its source and followed |
 | [`ssi2164-control-port.md`](docs/ssi2164-control-port.md) | the datasheet read first-hand. **Six spec corrections** |
+| [`fabrication-class.md`](docs/fabrication-class.md) | 0.09/0.09 on 1 oz — the decision, and the four-row table that took it |
 | [`contract/socket.py`](contract/socket.py) | the only place upstream constants are adapted |
 | [`toolchain/`](toolchain/PROVENANCE.md) | KiCad plumbing, copied from the mixer. Ours to modify |
 | `design.py` | values, derivations, the netlist, and the borrowed-symbol patch |
@@ -434,11 +435,71 @@ table: **0.12/0.12 mm or finer**, which is below JLCPCB's 0.15 mm 2 oz floor and
 above its 0.09 mm one. So the only listed class that works is **0.09/0.09 — 1 oz
 outer copper only. The copper weight is the price and no intermediate class
 avoids it.** At that class no pad on the package needs an escape at all: the
-fan-out becomes unnecessary rather than sufficient. It drags two unsettled things
-with it — a 0.23 mm grid at 4.7× the cells on a router whose work is superlinear
-in that, and the coil nets at 93 mA on 0.09 mm of 1 oz copper unless they get a
-width of their own, which `route.py` cannot currently give them.
+fan-out becomes unnecessary rather than sufficient. What it costs is **not** build time, which is
+the surprise: `gen_pcb.py` takes **89.0 s at the fitted class and 69.0 s at
+0.09/0.09**, 22 % faster on 4.7× the cells, because runtime is dominated by
+contention rather than grid size and a finer grid has far less of it. Cell count
+was a proxy that omitted the dominant term, exactly as A/mm² was.
 `controller_package()`.
+
+**What it did cost was 56 DRC violations, because "no fan-out needed" is not "no
+work needed".** They were two router faults and both are fixed, and both were the
+same missing distinction: **`route.py` had one ring of four cells where three
+distances were needed.** That ring blocked a via's orthogonal neighbours and not
+its diagonals, with a derivation attached that is entirely correct *at a 0.5 mm
+grid on 0.25/0.20 copper* and was written as though it were a fact about the
+geometry. `rules.via_exclusion()` asks it properly — a via is near three kinds of
+thing, and each distance is the stricter of a **copper** rule that shrinks with
+the fabrication class and a **hole** rule that does not, because a hole clearance
+is drill positioning rather than etching. Somewhere on the way down the hole rule
+overtakes the copper one: it wins by 0.01 mm at 0.09/0.09 and loses by 0.10 at the
+fitted class, which is exactly why 49 of the violations were hole clearances and 7
+were copper.
+
+The hole figures are the fabricator's, read first-hand — *"Via Hole-to-Hole
+Spacing: 0.2mm"*, *"Pad Hole-to-Hole Spacing: 0.45mm"*, *"Via hole to Track:
+0.2mm"* — and `rules.py` **did not own that rule at all**: KiCad's own 0.25 mm
+default had been enforcing it, the same way `min_track_width` once sat at zero.
+What DRC enforces is deliberately unchanged, because KiCad's default is *stricter*
+than the published figure and declaring 0.20 would have made 49 violations vanish
+with no copper moving — indistinguishable from relaxing a check to pass.
+
+**Correcting it answers the class question by measurement**, `gen_pcb.py` end to
+end:
+
+| class | via rules | time | unrouted | DRC violations |
+|---|---|---|---|---|
+| 0.25/0.20, 2 oz | ring of four | 89 s | 0 | 0 |
+| 0.09/0.09, 1 oz | ring of four | 69 s | 0 | 56 |
+| 0.25/0.20, 2 oz | **corrected** | **454 s** | **10 (V5)** | 0 |
+| 0.09/0.09, 1 oz | **corrected** | **89 s** | **0** | **0** |
+
+**The board that used to close was closing on geometry the router had no rule
+for**, and DRC agreed because the two illegal cases were never *attempted* at that
+grid — a via inside the annulus 0.325 to 0.5 mm from a foreign pad, and two vias
+on diagonal cells 0.707 mm apart against a 0.8 mm requirement. Latent, not absent.
+So `UNROUTED_ITEMS` going 0 → 10 is the router becoming honest, and the rule about
+that number permits exactly this: down as copper is laid, up only with the nets
+named. V5 is the name.
+
+**And it reverses the recommendation of an hour earlier.** Keeping 2 oz and
+building a spreading fan was the argued answer; measured, the spreading fan is not
+needed at all — the finer class removes the problem it was for — and only
+0.09/0.09 produces a complete DRC-clean board. Still a fabrication decision, so
+not taken here: `rules.COPPER_OZ`, `TRACK_MM` and `CLEARANCE_MM` are the one-line
+change.
+
+**And the coil nets were flagged as the other cost, wrongly.**
+`rules.track_current()`: 92.7 mA on 0.09 mm of 1 oz copper is **0.33 °C of rise**
+— 4.0 °C even if the borrowed IPC-2221 constant is three times out, which is why
+the conclusion is quoted despite the source being third-party calculators rather
+than the paywalled standard. The figure that made it look close was **29 A/mm²,
+and current density was the wrong instrument**: it divides by the cross-section,
+which carries the current, and omits the surface area, which does the cooling.
+That is why IPC-2221's exponent on area is 0.725 and not 1, and it is the same
+shape as the mixer's `RAIL_FILTER_ESR` — a number that was not wrong so much as
+computed without the term that dominates. The class decision now has no unread
+number in it.
 
 **Gate 2 — the supply.** `supply_fit()` leaves 35.4 mA of +Vout, and V3V3 is an
 MCP1700 off V5 off VA+ — so a milliamp of 3.3 V is a milliamp of *twelve* at the
@@ -1080,7 +1141,13 @@ filtered by a number rather than a class.
    gain. 20 ms is 4× the ~5 ms a relay needs, so it is a sequencing requirement
    rather than a hazard. `design.VREF_TURN_ON_S`.
 
-6. **The copper weight has stopped being a free declaration.**
+6. ~~**The copper weight has stopped being a free declaration.**~~
+   **Still true, and the objection to going finer is gone.** See
+   `rules.track_current()` above: 0.33 °C at 0.09 mm of 1 oz. What is left of
+   this item is the fabrication decision itself, which is task 1 of the next
+   pass. Original text:
+
+   **The copper weight has stopped being a free declaration.**
    `rules.COPPER_OZ` says 2 oz and the fitted 0.25/0.20 is legal at either, so
    holding the option has cost nothing. The controller ends that:
    `coarsest_class_for()` puts a 0.40 mm pin pitch at 0.12/0.12 or finer, and
@@ -1088,6 +1155,6 @@ filtered by a number rather than a class.
    copper weight is now a decision with a part behind it, and what wants
    checking before it is taken is the one current on the board that is not
    microamps: `design.coil_budget()`'s 93 mA of relay coil on 0.09 mm of 1 oz
-   copper is 29 A/mm², which wants the IPC-2221 curve **read** rather than
-   assumed — or the coils given a track width of their own, which `route.py`
-   cannot currently do. [`rules.md`](docs/rules.md).
+   copper is 29 A/mm² — **and that turned out to be the wrong instrument, not a
+   number to read a curve for.** `rules.track_current()` puts the rise at
+   0.33 °C. [`rules.md`](docs/rules.md).

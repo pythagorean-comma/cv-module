@@ -507,10 +507,89 @@ floor and above its 0.09 mm one. So the only listed class that works is
 **0.09/0.09, which is 1 oz outer copper only: the copper weight is the price and
 no intermediate class avoids it.** At that class no pad on the package needs an
 escape at all — the fan-out becomes unnecessary rather than sufficient — and the
-grid goes to 0.23 mm, 4.7× the cells. It drags two unsettled things with it: a
-router whose work is superlinear in cell count, and the coil nets at 93 mA on
-0.09 mm of 1 oz copper unless they get a width of their own, which `route.py`
-cannot currently give them.
+grid goes to 0.23 mm, 4.7× the cells.
+
+**The coil nets were flagged as an objection to that and they are not one.**
+`rules.track_current()`: 92.7 mA on 0.09 mm of 1 oz copper is **0.33 °C of
+rise**, and 4.0 °C even if the borrowed IPC-2221 constant is three times out.
+The figure that made it look close was **29 A/mm², and current density was the
+wrong instrument** — it divides by the cross-section, which carries the current,
+and omits the surface area, which does the cooling. That is why IPC-2221's
+exponent on area is 0.725 and not 1, and it is the same shape as
+`RAIL_FILTER_ESR`: a number computed without the term that dominates.
+
+**Build time was the other predicted cost and it is measured, and it goes the
+other way.** `gen_pcb.py` end to end: **89.0 s at 0.25/0.20 and 69.0 s at
+0.09/0.09** — 22 % faster on 4.7× the cells, with 1457 track runs and 492 vias
+against 1547 and 561, and no fan-out escape needed anywhere. Runtime is dominated
+by *contention* — failed routes, probes, rip-ups — not by grid size, and a finer
+grid has far less of it. Cell count was a proxy that omits the dominant term:
+`rules.grid_cost()` says so now, having asserted the opposite.
+
+**"No fan-out needed" was read as "no work needed", and the 1 oz board came back
+with 56 DRC violations.** They were two router faults, both fixed, and both were
+the same missing distinction: **`route.py` had one ring of four cells where three
+different distances were needed.**
+
+That ring blocked a via's four orthogonal neighbours and not its diagonals, with a
+derivation attached — a via is 0.6 mm across and a track 0.25, so at one 0.5 mm
+pitch their copper is 0.075 mm apart, and at a diagonal it is 0.28 mm and clears.
+All true, all true **at a 0.5 mm grid on 0.25/0.20 copper**, and written as though
+it were a fact about the geometry. `rules.via_exclusion()` asks it properly, and
+it is three questions because a via is near three kinds of thing:
+
+| | copper rule | hole rule |
+|---|---|---|
+| to a track's centre | `via/2 + track/2 + clearance` | `drill/2 + hole` |
+| to another via | `via + clearance` | `drill + hole` |
+| to a pad's copper | `via/2 + clearance` | `drill/2 + hole` |
+
+**The left column shrinks with the fabrication class and the right column does
+not**, because a hole clearance is drill positioning rather than etching — so
+somewhere on the way down the hole rule *overtakes* the copper rule and becomes
+binding. It does: copper wins by 0.10 mm at the fitted class and the hole rule
+wins by 0.01 at 0.09/0.09. The 49 hole violations and the 7 copper ones were the
+two halves of that.
+
+**The hole figures are the fabricator's and `rules.py` did not own the rule at
+all** — KiCad's own 0.25 mm default had been enforcing it unowned, exactly as
+`min_track_width` once sat at zero. Read first-hand off the same JLCPCB page:
+*"Via Hole-to-Hole Spacing: 0.2mm"*, *"Pad Hole-to-Hole Spacing: 0.45mm"*,
+*"Via hole to Track: 0.2mm"*. **What DRC enforces is deliberately unchanged**:
+KiCad's default is *stricter* than the published figure, and declaring 0.20 would
+have made 49 violations vanish with no copper moving, which is indistinguishable
+from relaxing a check to make it pass. The router is held to the stricter of the
+two, the figures are recorded, and designing to the fabricator's real limit is a
+decision left with whoever takes the class decision.
+
+### What correcting it cost, and it answers the class question
+
+Measured, `gen_pcb.py` end to end, all four combinations:
+
+| class | via rules | time | unrouted | DRC violations |
+|---|---|---|---|---|
+| 0.25/0.20, 2 oz | ring of four | 89 s | 0 | 0 |
+| 0.09/0.09, 1 oz | ring of four | 69 s | 0 | 56 |
+| 0.25/0.20, 2 oz | **corrected** | **454 s** | **10 (V5)** | 0 |
+| 0.09/0.09, 1 oz | **corrected** | **89 s** | **0** | **0** |
+
+**The board that used to close was closing on geometry the router had no rule
+for.** DRC agreed with it, because the two illegal cases — a via inside the
+annulus 0.325 to 0.5 mm from a foreign pad, and two vias on diagonal cells
+0.707 mm apart against a 0.8 mm requirement — were never *attempted* at that grid.
+Latent, not absent. So `verify.UNROUTED_ITEMS` going from 0 to 10 is the router
+becoming honest, and this repo's rule about that number permits it: down as copper
+is laid, **up only with the nets named**. V5 is the name.
+
+**And the last row is the class decision, answered by measurement rather than by
+argument.** Only 0.09/0.09 gives a complete DRC-clean board once via clearance is
+modelled, and it does it in 89 s with no fan-out escape anywhere — while the
+fitted class cannot close the 5 V rail and takes five times as long. That reverses
+the recommendation this file carried an hour earlier, which was for keeping 2 oz
+and building a spreading fan. The spreading fan is not needed at all; the finer
+class removes the problem it was for. **It is still a fabrication decision** —
+0.09/0.09 is 1 oz outer copper only — so it is not taken here: `rules.COPPER_OZ`
+with `TRACK_MM` and `CLEARANCE_MM` is the one-line change.
 
 **Gate 2 — the supply, `controller_supply()`.** `supply_fit()` leaves **35.4 mA**
 of +Vout. V3V3 is an MCP1700 off V5 off VA+, so a milliamp of 3.3 V is a
@@ -661,6 +740,8 @@ cv-module/
     element-revisit.md   SSI2164 vs THAT2180 vs THAT4301, and where it landed
     supply-decision.md   isolated DC-DC at >=300 kHz, and why. Carries its own
                          index of six numbers that moved once it was drawn
+    fabrication-class.md 0.09/0.09 on 1 oz, and the four-row measurement that
+                         decided it rather than an argument
     FINDINGS.md          anything wrong in the mixer repo — noted, never fixed
     ASSUMPTIONS.md       everything guessed                      [generated]
     constraints.md       does each constraint have a mechanism?  [generated]
@@ -735,6 +816,43 @@ worth not being confused by: `gen_pcb.py` and `gen_project.py` both import it,
 so its constants are already in force by the time anything runs. Its own line
 only writes `docs/rules.md`.
 
+**And the property `PDF_EPOCH` exists to give the plots, the *board* does not
+have.** `out/cv-module.kicad_pcb` is not a function of the design: KiCad mints a
+fresh UUID for every footprint, pad and segment on each build and the
+serialisation order follows them, so a rebuild of an unchanged design rewrites
+**102,909 lines of a 6.5 MB tracked file** — measured, with the geometry
+bit-for-bit identical either side (same 266 refs, 960 footprint positions, 26,347
+segments, 694 vias). That is exactly the condition `PDF_EPOCH`'s own comment
+calls out: *a tracked binary that churns on every run is one whose history says
+nothing*. It propagates, too — the layout PDF's content stream follows the
+board's item order, so the plot churns for the same reason one level up, and
+normalising the timestamp does not touch it.
+
+**The fix is deterministic UUIDs** — derived from the designator and pad number
+rather than taken from KiCad's generator, plus emission in a sorted order — and
+it is a pass of its own. Until then, a board diff is not evidence of a design
+change, and the way to ask is to compare extracted geometry rather than bytes.
+
+**One misread worth recording, because it is how this hid.** A `git diff --quiet`
+on the board returned clean and was read as evidence the generator is
+deterministic. It was not evidence of anything: the file had just been committed
+from that same run, so it matched for that reason. A tautology read as a
+measurement.
+
+**`python3 gen_plots.py --verify` is a mode and deliberately not a stage.**
+`PDF_EPOCH` makes each tracked plot a function of the board, and that half holds
+— two plots of one board are byte-identical, measured. The other half is whether
+the plots on disk are a function of *this* board, and nothing covered it: a commit
+taken after `gen_pcb.py` writes the board and before `gen_plots.py` replots it
+captures a board and a plot from two different runs. **Commit `789c4ba` is exactly
+that**, by 534 bytes. `check_plots()` replots the tracked board into a temporary
+directory and compares bytes; it was validated by running it against `789c4ba`,
+where it fails on the layout PDF and passes on the other two. It is not in the
+run order on purpose: after `gen_plots.py` it would compare files just written
+against themselves and pass for free, and before it, on a board that has
+legitimately changed, it would fail for the expected reason and be switched off
+inside a week. Its place is a clean checkout, or before a commit.
+
 **`gen_plots.py` produces the only outputs a person can look at without
 installing KiCad** — the schematic, one plotted page per copper layer, and a
 render of the board. It must run after `gen_pcb.py`, and it rewrites each PDF's
@@ -758,6 +876,19 @@ used to read `out/cv-module.net`, written by `gen_netlist.py` from the same
 transcription error because there was no transcription. It also runs
 `kicad-cli sch erc`, and `verify.ERC_ALLOWED` declares the residue with a reason
 and an exact count, so a new violation of a declared class still fails.
+
+**And the class decision killed two more planted faults, which is the same
+lesson a third time.** *"A net class clearance drifts off rules.py"* and *"the
+board carries a track of an undeclared width"* mutated by `str.replace` on the
+literals `'"clearance": 0.2'` and `'(width 0.25)'` — values `rules.py` owns.
+The moment the class moved to 0.09/0.09 neither matched anything: the replace
+wrote the file back unchanged, `check_rules()` correctly found no problem, and
+both reported MISSED. **A mutation whose target is a value another file owns
+goes dead when that file changes**, and the fix is the same shape twice: read
+the value from where it lives, and make the harness refuse a mutation that
+changes nothing. `dead_mutations()` guards `set.discard`; the file-rewriting
+cases now guard `str.replace` the same way, and the guard was validated by
+restoring the stale literal and watching it report DEAD.
 
 **`test_verify.py` checks its own faults now, and it had to.** Three planted
 mutations named the bypass relay's contacts as IEC numbers, which was right
