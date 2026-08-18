@@ -188,4 +188,4 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 The deferred blocks, each with its reason. None of them is costed here, so the totals above are a floor for the module and not its price.
 
-- **controller** — RP2040 and its QSPI flash, crystal, USB and MIDI: shared block, and the scope statement puts shared blocks after one channel is complete.
+- **controller** — RP2040, and the part is settled -- controller_fit() is the derived case for it. What is not settled is two computed gates: controller_package() says a 0.40 mm QFN-56 is unreachable at this fabrication class, and controller_supply() says the linear V3V3 chain cannot carry it out of 35.4 mA of +Vout. Both are decisions above the drawing.

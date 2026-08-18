@@ -59,6 +59,10 @@ the commit named in contract/PINNED.md. Nothing upstream is retyped.
 import math
 
 import contract.socket as socket
+# The fabrication rules, because whether a package can be *routed* is a design
+# input and not a layout detail -- see controller_package(). rules.py imports
+# nothing but math, which is what makes this safe at the top of the chain.
+import rules
 
 CHANNELS = socket.CHANNELS
 
@@ -133,6 +137,32 @@ MEASURED = {
                    "supply sized on an invented maximum is exactly what "
                    "section 6 forbids, and because fitting the H grade -- "
                    "which is read -- would settle it by choosing a part."),
+
+    "mcu_rail_ma": Assumption(
+        value=52.1, units=" mA on 3.3 V, RP2040 alone, maximum average",
+        low=19.2, high=52.1,
+        question="What does the RP2040 draw on the 3.3 V side in *this* "
+                 "application? Its datasheet's Table 637 measures four use "
+                 "cases rather than specifying a maximum, and none of them is "
+                 "this one: 'Popcorn' is VGA video at 48 MHz and is the "
+                 "heaviest at 52.1 mA (DVDD 16.6 + IOVDD 35.5, worst-case "
+                 "device over temperature), 'BOOTSEL idle' the lightest active "
+                 "at 19.2 mA. This board runs 125 MHz with almost no IO "
+                 "activity -- six PWM at 30.5 kHz, one 10.4 MHz clock -- and "
+                 "XIP from flash, which Table 635 prices at 37.6 uA/MHz on "
+                 "DVDD and which firmware can retire by running from SRAM. "
+                 "The range is the datasheet's own measurements; the value is "
+                 "its top.",
+        sets="nothing, and that is the point -- controller_supply() shows the "
+             "linear V3V3 chain fails at both ends of this range and a "
+             "switcher clears both, so no topology decision waits on it",
+        when_wrong="Only the size of the switcher, not whether there is one. "
+                   "The bound that decides is conservation of energy: a "
+                   "converter's input current is at least vout/vin times its "
+                   "output, so 3.3/12 x 52.1 = 14.3 mA against 35.4 mA of "
+                   "+Vout headroom, and any efficiency above 40 % clears it. "
+                   "Measuring this would size a part; it would not change the "
+                   "topology."),
 
     "servo_vos": Assumption(
         value=0.5e-3, units=" V, servo amplifier input offset",
@@ -1479,19 +1509,46 @@ ENV_ADC_MCLK_INTERNAL = (3.3e6, 6.6e6)
 # the settings that could reach 2 kHz on six channels inside the 20 MHz clock
 # limit are listed; the rest of the table runs to OSR 98304.
 ENV_ADC_OSR = {32: (96, 16), 64: (192, 19), 128: (384, 22), 256: (768, 24)}
-# **Which string goes on which channel is free, and this is what spends it.**
-# A TSSOP's pins are 0.65 mm apart and the router's grid is 0.5 mm, so
-# rules.pad_reach() shows some pads contain no grid cell at all -- and no
-# placement fixes it, because a pad wide enough to always contain one would be
-# closer to its neighbour than this board's own clearance rule allows. What a
-# placement *can* do is choose *which* pads lose, and the loser here costs
-# nothing: CH4 and CH7 are grounded, so the six channels take CH0-CH3, CH5 and
-# CH6 and the two pads the grid cannot reach carry no routed net. See
-# placement.SUPPLY's note at U17 and gen_pcb.check_fine_pitch_access(), which
-# is what holds the phase.
+# **Which string goes on which channel is free again, and the map is the simple
+# one.** It was CH0-CH3, CH5 and CH6, and the reason was real while it lasted: a
+# TSSOP's pins are 0.65 mm apart and the router's grid is 0.5 mm, so
+# rules.pad_reach() shows two of the ten pin rows hold no grid cell at any
+# placement whatsoever -- and no placement fixes that, because a pad wide enough
+# to always contain a cell would sit closer to its neighbour than this board's
+# own clearance rule allows. What a placement could choose was *which* two rows
+# lose, and this dict spent that on the ADC's two grounded channels.
+#
+# **The fan-out removes the constraint rather than easing it.**
+# route.Grid.escape() lays a pad's escape as fixed copper on the pad's own
+# centre line, so a pin row with no cell in it is entered anyway -- see
+# rules.track_offset_limit(). There is no longer a row that costs anything, so
+# there is nothing to spend and the map is CH0 to CH5 in order.
+#
+# **So the map is free, and it is kept anyway -- which is a different statement
+# from the one that was here and the difference is the whole point.** CH0 to CH5
+# in order was drawn, routed and measured. It is electrically identical, it is
+# what firmware would naively expect, and it puts all six inputs on the west row
+# where they face the dividers -- CH6 is pin 11, on the *logic* side, so the old
+# map makes ENVA6 get round the package on a board whose whole reason for
+# rotation 0 is that the analogue pins face the divider columns.
+#
+# **It cost a net 30 mm away.** Moving the channels down one pin makes a fifth
+# pad need an escape -- pin 9 instead of pin 10 -- and the escape's halo takes
+# cells out of the one corridor the six ENVA{n} runs already converge into. The
+# router closed all six ENVA nets and dropped **CVN3**, in the CV band, with
+# DRC still at zero violations and two unconnected items. That is the honest
+# price and it is not one worth paying for a tidier dict: verify.UNROUTED_ITEMS
+# at 0 is a stronger property than a firmware convenience.
+#
+# **The finding is that an escape's copper is not free and it is not spent where
+# it is laid.** Four escapes at U17 closed four nets there and shortened the
+# whole fan -- 1547 track runs against 1489. A fifth closed nothing extra and
+# broke something in another zone. Nothing in this repo would have predicted
+# either; the router is the only instrument that knows.
 #
 # Firmware reads the mapping from here; nothing electrical distinguishes one
-# channel from another.
+# channel from another, and this dict is now a *record of a measurement* rather
+# than a constraint.
 ENV_ADC_CHANNEL = {1: "CH0", 2: "CH1", 3: "CH2", 4: "CH3", 5: "CH5", 6: "CH6"}
 ENV_ADC_GROUNDED = ("CH4", "CH7")
 ENV_ADC_PRESCALE = 1
@@ -1796,6 +1853,359 @@ def envelope_adc_reference():
         "current_to_move_100uv_ma": target / load_reg,
         "logic_load_ma": reference_load()["step_amps"] * 1e3,
         "adc_avdd_ma": ENV_ADC_AIDD_MA[1],
+    }
+
+
+# ---------------------------------------------------------------------------
+# The controller, and the positive case for it
+# ---------------------------------------------------------------------------
+# **The part is the RP2040 and what was missing was the argument for it.**
+# 00-current-state.md's corrections table records the choice at entry 9 --
+# *"Teensy 4.1 / RP2350B for the controller"* overturned because *"both have
+# mandatory buck converters"*, found by *"deep dive"* -- and that is a
+# **negative**: the other candidates carry a switcher onto a board whose whole
+# supply argument is keeping switchers away from a multiplier. Nobody ever
+# wrote the positive, which is that this part does the job with room to spare,
+# so the choice rested on a comparison instead of on a requirement.
+#
+# **Claim 9 is marked as not relied upon, and here is why that is the honest
+# state rather than a hedge.** Its "mandatory" came from a deep dive in the
+# parent project's documents 0-4, which are not in this repo; no RP2350 or
+# Teensy datasheet page is cited anywhere here; and entry 10 of the same table
+# says the MCU was never the load-bearing choice in the first place. So the
+# claim may well be true and nothing in this repo can check it. controller_fit()
+# is what the decision rests on instead: every row is a requirement this board
+# makes and a number read off the RP2040's own datasheet, and the smallest
+# margin in it is 2.1x. That is this repo's own rule about a constraint with
+# margin -- do it, do not defend it as load-bearing -- applied to a part.
+#
+# Raspberry Pi RP2040 datasheet, build-date 2024-11-05, read first-hand. Every
+# figure below is quoted from it with the table or section named. The URL below
+# is the one Raspberry Pi publish and it was fetched and seen to resolve --
+# through two redirects, to pip-assets.raspberrypi.com, which is why the
+# canonical form is the one recorded rather than the final one.
+CONTROLLER = "RP2040"
+CONTROLLER_REF = "U19"
+CONTROLLER_MPN = "SC0914(13)"
+CONTROLLER_DATASHEET = ("https://datasheets.raspberrypi.com/rp2040/"
+                        "rp2040-datasheet.pdf")
+CONTROLLER_REVISION = "RP2040 Datasheet, build-date 2024-11-05"
+# Section 1.2, "Key features", and section 4.5.1 for the PWM shape.
+CONTROLLER_CLOCK_HZ = 133e6            # "clk_sys ... maximum frequency 133MHz"
+CONTROLLER_CLOCK_TYPICAL_HZ = 125e6    # the frequency PWM_CARRIER is set from
+CONTROLLER_GPIO = 30                   # "30 GPIO pins, 4 of which ... analogue"
+CONTROLLER_ADC_CHANNELS = 4
+CONTROLLER_PWM_SLICES = 8              # "8 identical slices"
+CONTROLLER_PWM_OUTPUTS = 16            # "up to 16 controllable PWM outputs"
+CONTROLLER_UARTS = 2
+CONTROLLER_SPI = 2
+CONTROLLER_SRAM_KB = 264
+# Section 1.4.1: "The USB bootloader requires a 12MHz crystal or 12MHz clock
+# input", which is what makes the crystal a value rather than a choice.
+CONTROLLER_XTAL_HZ = 12e6
+# Section 1.4.2: "VREG_VOUT ... nominal voltage 1.1V, 100mA max current", and
+# Table 192 gives IMAX 100 mA, ILIMIT 150 mA minimum, VREG_VIN 1.63-3.63 V.
+CONTROLLER_VREG_IMAX_MA = 100.0
+CONTROLLER_VREG_VIN = (1.63, 3.63)
+# Table 625, IO characteristics: "Maximum Total IOVDD current IIOVDD_MAX 50 mA
+# -- Sum of all current being sourced by GPIO and QSPI pins". A limit, not a
+# draw, and it is quoted because it is the only hard current number the part
+# gives for the 3.3 V side.
+CONTROLLER_IIOVDD_MAX_MA = 50.0
+# Table 637, "Power Consumption", both columns. The rows are use cases rather
+# than an electrical maximum, and the document is explicit about what each
+# column means: 'Typical Average Current' is "averaged over several seconds
+# ... at room temperature and nominal voltage", 'Maximum Average Current' is
+# "the maximum ... on a worst-case RP2040 device, across the temperature
+# extremes, and maximum voltage".
+#
+#   use case                 DVDD typ/max   IOVDD typ/max   USB_VDD typ/max
+CONTROLLER_USE_CASES = {
+    "Popcorn":        ((10.9, 16.6), (24.8, 35.5), (0.0, 0.0)),
+    "BOOTSEL active": ((9.4, 14.7), (1.2, 4.3), (1.4, 2.0)),
+    "BOOTSEL idle":   ((9.0, 14.3), (1.2, 4.3), (0.2, 0.6)),
+}
+# The 7x7 QFN-56 of section 5.1, and the only package RP2040 is made in.
+CONTROLLER_PIN_PITCH_MM = rules.QFN_PIN_PITCH_MM
+CONTROLLER_PAD_WIDTH_MM = rules.QFN_PAD_WIDTH_MM
+# Where the controller meets this board. Five of the mixer's own 5-way headers,
+# declared here so controller_asks() counts what they carry rather than
+# repeating it -- a table of what a connector carries is a second copy of the
+# connector, and the two would be free to disagree.
+CONTROLLER_HEADERS = ("J9", "J10", "J11", "J12", "J13")
+# **The MCLK divisor, and it is a choice among seven rather than a solution.**
+# envelope_adc_clock() puts the floor at 9.216 MHz and the MCP3564's external
+# clock range at 1-20 MHz, so every integer divide of 125 MHz from 7 to 13
+# lands inside the window -- 17.86 MHz down to 9.615. 12 is the design point
+# because it is the middle of that run and 13 % above the floor; the row in
+# controller_fit() is worth reading as "seven divisors clear it" rather than as
+# a ratio, because what makes an integer divide the right answer is that the
+# ADC's conversions are not on a jittered clock, and that is true of all seven.
+CONTROLLER_MCLK_DIVIDE = 12
+
+
+def controller_asks():
+    """What this board asks of a controller, counted rather than listed.
+
+    **The signal count comes off the netlist and not off a table**, because a
+    table of what the connectors carry is a second copy of the connectors. J9
+    to J13 are where the controller lands -- five of the mixer's own 5-way
+    headers, grounds between the signals -- so what crosses is whatever those
+    parts carry that is not a ground.
+
+    Everything else here is a figure some other function in this file derived,
+    quoted rather than restated:
+
+      * MCLK from envelope_adc_clock(), which is the one genuinely awkward ask;
+      * the control frame from spec section 4.3 and the envelope frame from
+        envelope_sample_rate();
+      * the fail-safe's pump frequency from PUMP_HZ;
+      * the PWM count from CHANNELS, and its carrier from PWM_CARRIER -- which
+        is already derived *from this part's clock*, and is noted below as
+        margin rather than as a reason.
+    """
+    signals = sorted(
+        net for ref in CONTROLLER_HEADERS
+        for (owner, _), net in DESIGN.pin_owner().items()
+        if owner == ref and net not in ("MDGND", "MAGND"))
+    return {
+        "headers": list(CONTROLLER_HEADERS),
+        "signals": signals,
+        "signal_count": len(set(signals)),
+        "pwm": CHANNELS,
+        "mclk_hz": envelope_adc_clock()["mclk_min"],
+        "control_frame_hz": FRAME_RATE,
+        "envelope_frame_hz": ENV_SAMPLE_HZ,
+        "pump_hz": PUMP_HZ,
+        "analogue_in": 1,          # the expression pedal
+        "digital_in": 1,           # the tap footswitch
+        "uart": 1,                 # DIN MIDI in and out
+        "usb": 1,                  # USB MIDI
+    }
+
+
+def controller_fit():
+    """Every ask against the RP2040's own number, with the margin.
+
+    **This is the table that was missing.** The decision used to rest on
+    00-current-state.md's entry 9, which says only that two other candidates
+    have switching regulators; nothing said what this part has to do or whether
+    it does it. Here is the second half.
+
+    Two rows are worth reading rather than skimming:
+
+      * **USB MIDI is one of one**, and that is not a thin margin -- the board
+        needs one USB device interface and the part has one. A ratio is the
+        wrong instrument on a row where the requirement is a yes;
+      * **MCLK is the only row with real arithmetic behind it**, and the answer
+        is not the ratio either. envelope_adc_clock() puts the floor at
+        9.216 MHz because the MCP3564 multiplexes one modulator across six
+        channels without pipelining them, and what matters is that 125 MHz
+        divides to it by an *integer* -- a fractional divide would put the
+        conversions on a jittered clock. Seven divisors do: 7 through 13,
+        17.86 MHz down to 9.615. CONTROLLER_MCLK_DIVIDE picks 12.
+
+    Every other row is between 2x and four orders of magnitude, which is the
+    shape of a part that is comfortably sufficient rather than one chosen
+    against the requirement. **The smallest countable margin is 2x, on the
+    UARTs and the SPI controllers**, and the row that would move first if this
+    board grew is GPIO at 2.14x -- 14 pins of 30.
+
+    **PWM_CARRIER is in the table as margin and not as a reason**, and the
+    distinction matters because it is the one place this board's arithmetic
+    already depends on this part's clock. 125 MHz / 2^12 = 30.5 kHz, which
+    pwm_ripple() puts 83 dB down for 0.0027 dB of gain error. A different clock
+    would land somewhere else and also be fine -- the CV filter has 15 to 20 dB
+    of rejection to spare -- so the number is a consequence of the choice, not
+    an argument for it.
+    """
+    asks = controller_asks()
+    mclk = asks["mclk_hz"]
+    divisors = [d for d in range(1, 64)
+                if ENV_ADC_MCLK_RANGE[0]
+                <= CONTROLLER_CLOCK_TYPICAL_HZ / d <= ENV_ADC_MCLK_RANGE[1]
+                and CONTROLLER_CLOCK_TYPICAL_HZ / d >= mclk]
+    fitted = CONTROLLER_CLOCK_TYPICAL_HZ / CONTROLLER_MCLK_DIVIDE
+    rows = [
+        ("signals across J9-J13", asks["signal_count"], CONTROLLER_GPIO,
+         "GPIO", "count"),
+        ("PWM outputs", asks["pwm"], CONTROLLER_PWM_OUTPUTS,
+         f"on {CONTROLLER_PWM_SLICES} slices", "count"),
+        ("MCLK for the envelope ADC", mclk, fitted,
+         f"125 MHz / {CONTROLLER_MCLK_DIVIDE}, one of "
+         f"{len(divisors)} integer divides", "Hz"),
+        ("control frame, all channels", asks["control_frame_hz"] * CHANNELS,
+         CONTROLLER_CLOCK_TYPICAL_HZ, "clk_sys", "Hz"),
+        ("envelope frame, all channels", asks["envelope_frame_hz"] * CHANNELS,
+         CONTROLLER_CLOCK_TYPICAL_HZ, "clk_sys", "Hz"),
+        ("the fail-safe pump on a GPIO", asks["pump_hz"],
+         CONTROLLER_CLOCK_TYPICAL_HZ, "clk_sys", "Hz"),
+        ("expression pedal", asks["analogue_in"], CONTROLLER_ADC_CHANNELS,
+         "ADC channels", "count"),
+        ("DIN MIDI in and out", asks["uart"], CONTROLLER_UARTS,
+         "UARTs", "count"),
+        ("SPI to the envelope ADC", 1, CONTROLLER_SPI,
+         "SPI controllers", "count"),
+        ("USB MIDI", asks["usb"], 1, "USB 1.1 device", "count"),
+    ]
+    scalable = [has / needs for _, needs, has, _, _ in rows if has != needs]
+    counted = min(((has / needs, name) for name, needs, has, _, units in rows
+                   if units == "count" and has != needs), default=(0.0, ""))
+    return {
+        "rows": [{"asked": name, "needs": needs, "has": has, "units": units,
+                  "note": note, "ratio": has / needs if needs else float("inf")}
+                 for name, needs, has, note, units in rows],
+        "tightest": min(scalable),
+        "tightest_count": counted[0],
+        "tightest_count_row": counted[1],
+        "mclk_divisors": divisors,
+        "mclk_hz": fitted,
+        "mclk_margin": fitted / mclk,
+        # Margin, stated as margin. See the docstring.
+        "pwm_carrier_hz": PWM_CARRIER,
+        "pwm_carrier_from_clock": CONTROLLER_CLOCK_TYPICAL_HZ / 2 ** PWM_BITS,
+    }
+
+
+def controller_package():
+    """Can this router reach a 0.40 mm pin pitch? No, and it is arithmetic.
+
+    **The gate nobody had looked for, because every package on this board so
+    far has been a SOIC or a TSSOP.** rules.fan_out_class() is the ladder and
+    the RP2040's QFN-56 falls off the bottom of it on two independent counts,
+    neither of which a placement or a rotation touches:
+
+      * **the escape is too wide.** A 0.40 mm pitch on 0.20 mm pads -- and
+        0.20 is already the widest a pad may be, because two pads are two nets
+        and `pin_pitch - clearance` is 0.20 -- leaves 0.30 mm from a pad's
+        centre line to its neighbour's near edge. A track laid there has to fit
+        `clearance + track / 2` into 0.30, so the widest legal escape is
+        **0.20 mm against this board's 0.25**. It is also under the board's own
+        min_track_width rule, which is a rule rather than a preference;
+      * **there are not enough cells.** An escape ends on a grid cell and may
+        move at most half a pitch across the row to get there, so pins map onto
+        grid lines in order -- and 0.40 mm of pitch on a 0.50 mm grid means two
+        pins have to share a line. Two nets cannot own one cell. Fourteen pins
+        a side over 5.2 mm want fourteen lines and the grid offers eleven.
+
+    **The second one is why a thinner escape is not the answer on its own.**
+    0.15 mm of track clears by 25 um and is inside the 2 oz class this board is
+    already ordered at, so the fabricator does not care -- but the counting
+    limit is about the *grid*, and the grid is `track + clearance + margin`.
+    Bringing it under 0.40 mm means bringing the class to the 2 oz minimum,
+    0.15/0.15, for all 164 nets and 1500 pads on the board. That is a
+    fabrication decision and a re-route of everything, and it is exactly the
+    trade rules.class_table() prices -- for a different reason than the one
+    that function was written for, which was the corridor between two SOIC
+    pins.
+
+    **The class table below is the answer and it is cheaper than it sounds.**
+    At the 2 oz minimum -- 0.15/0.15 mm, the class JLCPCB's own page gives for
+    the copper weight this board is already ordered at -- the grid comes down to
+    0.35 mm, the widest escape rises to 0.30 mm, and both conditions clear. So
+    the fabricator does not charge for this and the fabricator is not the
+    obstacle: what it costs is every track on the board at 0.15 mm instead of
+    0.25, a routing grid with four times the cells, and a re-route of all 164
+    nets. That is a decision about the board, taken to fit one package, and it
+    is not a decision a drawing pass gets to take.
+
+    The alternative is a spreading fan: outer pins running further out and
+    turning further across, in lanes, with a width per escape. That breaks the
+    counting limit honestly and it is a different mechanism from the single jog
+    route.Grid.escape() lays. Either way it is a pass of its own.
+    """
+    rung = rules.fan_out_class(CONTROLLER_PIN_PITCH_MM, CONTROLLER_PAD_WIDTH_MM)
+    return {
+        **rung,
+        "pins": 56,
+        "pins_per_side": 14,
+        # What the class would have to become for the counting limit to clear,
+        # read off rules.FAB_CLASSES rather than chosen.
+        "classes": [
+            {"class": name, "track_mm": track, "clearance_mm": clearance,
+             "grid_mm": rules.route_pitch(track=track, clearance=clearance),
+             **rules.fan_out_class(CONTROLLER_PIN_PITCH_MM,
+                                   CONTROLLER_PAD_WIDTH_MM,
+                                   grid=rules.route_pitch(track=track,
+                                                          clearance=clearance),
+                                   track=track, clearance=clearance)}
+            for name, track, clearance, _ in rules.FAB_CLASSES],
+    }
+
+
+def controller_supply():
+    """What the controller costs the converter, and the topology decides it.
+
+    **The linear chain cannot carry it and the arithmetic is v5_regulator()'s,
+    one rail further down.** V3V3 is an MCP1700 off V5, V5 is an NCP1117 off
+    VA+, and VA+ is the converter's +Vout -- so a milliamp of 3.3 V is a
+    milliamp of *twelve* volts at the converter's pin, dissipated twice on the
+    way. supply_fit() leaves **35.4 mA** of the part's 250, and that is the
+    whole budget for the controller, its flash, its crystal, its USB PHY and
+    its MIDI.
+
+    **The RP2040's own measured range straddles that, and the decision does not
+    depend on where in the range it lands** -- which is the useful thing about
+    it. Table 637's heaviest use case is 52.1 mA on the 3.3 V side and its
+    lightest *active* one is 19.2 mA; the top of that fails outright, and the
+    bottom leaves 16.2 mA for a QSPI flash whose read current is tens of
+    milliamps, a DIN MIDI current loop and an opto-isolator. Neither end is a
+    board that works, so MEASURED["mcu_rail_ma"] records the range without
+    anything waiting on it.
+
+    **A switcher from VA+ is the only topology with room, and the honest way to
+    say so does not need an efficiency figure.** A converter's input current is
+    at best `vout / vin` times its output current -- that is conservation of
+    energy and not a datasheet reading -- so the floor is
+
+        3.3 / 12 x 52.1 mA  =  14.3 mA        at 100 % efficiency
+
+    and the real part draws `that / efficiency`. So the question "does a
+    switcher fit" has an answer with no invented number in it: it fits at any
+    efficiency above
+
+        14.3 / 35.4  =  40 %
+
+    and there is no buck converter that is not. Quoting 85 % here would have
+    been a plausible number about a part nobody has chosen, which is the thing
+    section 6 of the spec forbids; the bound is stronger anyway, because it
+    cannot be wrong.
+
+    **What it costs is a switching aggressor on VA+ and MDGND**, sharing both
+    with the audio domain -- which is why the requirement below is stated as
+    numbers rather than a part, exactly as supply_requirement() stated the
+    converter's before a part existed. supply_beat() is what has to price its
+    frequency, and note what that function already found: the >= 300 kHz rule is
+    a fundamental-only rule, so a second unit's frequency has to be checked
+    against the mixer's pump harmonics *and* against this converter's own
+    522-638 kHz band. Two switchers on one board beat with each other as well.
+    """
+    fit = supply_fit()
+    head = fit["positive_headroom_ma"]
+    low = sum(rail[1] for rail in CONTROLLER_USE_CASES["BOOTSEL idle"])
+    high = sum(rail[1] for rail in CONTROLLER_USE_CASES["Popcorn"])
+    ratio = V3V3_VOLTS / SUPPLY_VOUT
+    return {
+        "headroom_ma": head,
+        "mcu_ma": (low, high),
+        "linear_cost_ma": (low, high),
+        "linear_fits": (low <= head, high <= head),
+        "linear_watts": ((SUPPLY_VOUT - V5_VOLTS) * high * 1e-3
+                         + (V5_VOLTS - V3V3_VOLTS) * high * 1e-3),
+        "switcher_ratio": ratio,
+        "switcher_floor_ma": (low * ratio, high * ratio),
+        "switcher_min_efficiency": high * ratio / head,
+        # The requirement on a part nobody has chosen, in the shape
+        # supply_requirement() uses for the converter.
+        "requires": {
+            "vin_v": SUPPLY_VOUT,
+            "vout_v": V3V3_VOLTS,
+            "iout_ma": high,
+            "min_efficiency": high * ratio / head,
+            "min_khz": SUPPLY_MIN_KHZ,
+            "beats_the_pump_at_khz": supply_beat()["worst_beat_khz"],
+            "and_the_converter_at_khz": SUPPLY_KHZ,
+        },
     }
 
 
@@ -4173,9 +4583,39 @@ DEFERRED = {
     # below by ripple, and there is no release bound at all. Twelve op-amp
     # sections, twelve diodes, thirty resistors and six capacitors later, the
     # only thing still deferred about it is the ADC it feeds.
-    "controller": "RP2040 and its QSPI flash, crystal, USB and MIDI: shared "
-                  "block, and the scope statement puts shared blocks after "
-                  "one channel is complete.",
+    # **The reason changed, and the change is the result of this pass.** It
+    # read "shared block, and the scope statement puts shared blocks after one
+    # channel is complete", which was a scope statement rather than a finding
+    # -- true of every shared block, and by now the only one it was still true
+    # of. Deriving what the block asks for turned it into two computed gates,
+    # and both are decisions above a drawing:
+    #
+    #   * **the package.** controller_package(): RP2040 ships only in a 7x7
+    #     QFN-56 at 0.40 mm pitch, and rules.fan_out_class() puts that off the
+    #     bottom of the ladder on two independent counts. The widest escape
+    #     that clears the next pin is 0.20 mm against this board's 0.25, and
+    #     0.40 mm of pitch on a 0.50 mm grid gives fourteen pins a side eleven
+    #     grid lines to land on. It clears at the 2 oz *minimum* class,
+    #     0.15/0.15, which costs nothing at the fabricator and re-routes all
+    #     164 nets on a grid with four times the cells;
+    #   * **the supply.** controller_supply(): supply_fit() leaves 35.4 mA of
+    #     +Vout, V3V3 is two linear rails below it, and a milliamp of 3.3 V is
+    #     a milliamp of twelve at the converter's pin. The part's own measured
+    #     range is 19.2 to 52.1 mA and neither end leaves room for the flash
+    #     and the MIDI. A switcher from VA+ clears it at any efficiency above
+    #     40 %, and is a new aggressor supply_beat() has to price.
+    #
+    # What is *not* open any more is the part or the case for it:
+    # controller_fit() is the derived table, every row read off the RP2040's
+    # own datasheet, and 00-current-state.md's entry 9 is marked as not relied
+    # upon. See CONTROLLER.
+    "controller": "RP2040, and the part is settled -- controller_fit() is the "
+                  "derived case for it. What is not settled is two computed "
+                  "gates: controller_package() says a 0.40 mm QFN-56 is "
+                  "unreachable at this fabrication class, and "
+                  "controller_supply() says the linear V3V3 chain cannot "
+                  "carry it out of 35.4 mA of +Vout. Both are decisions "
+                  "above the drawing.",
     # **"envelope ADC" was here and it is drawn.** Its reason read
     # "ADS131M08 or MCP3564, undecided in spec section 4.4", and what settled
     # it was neither channel count nor price: the ADS131M08's external
@@ -4999,7 +5439,8 @@ def envelope_adc(design):
     # floating node the SCAN sequencer can be told to read. A no-connect flag
     # would declare the opposite of what is wanted -- see NO_CONNECT, which is
     # for pins that must stay open. See ENV_ADC_CHANNEL for why they are CH4
-    # and CH7 rather than CH6 and CH7.
+    # and CH7: the fan-out has removed the reason, and CH0-CH5 was measured and
+    # costs a net in another zone.
     design.connect("MAGND", *[(ENV_ADC_REF, ENV_ADC_PINS[name])
                               for name in ENV_ADC_GROUNDED])
     for name, net in (("SCK", "SCLK"), ("SDI", "MOSI"), ("SDO", "MISO"),
@@ -5740,6 +6181,53 @@ def _report():
               f"across the fretted range (fret {row['worst_fret']}), "
               f"{row['folds_to_dc_db']:+.1f} dB folding to "
               f"{row['folds_to_dc_hz']:.0f} Hz")
+    print()
+
+    print(f"the controller -- {CONTROLLER}, and the case for it is derived now")
+    fit = controller_fit()
+    for row in fit["rows"]:
+        if row["units"] == "count":
+            need = f"{row['needs']:.0f}"
+            has = f"{row['has']:.0f}"
+        else:
+            need = f"{row['needs'] / 1e6:.3f} MHz"
+            has = f"{row['has'] / 1e6:.3f} MHz"
+        print(f"  {row['asked']:<30}{need:>11} -> {has:<11} "
+              f"{row['note']}")
+    print(f"  -> the tightest row is MCLK at {fit['mclk_margin']:.2f}x, and it "
+          f"is not a margin to spend: {len(fit['mclk_divisors'])} integer "
+          f"divisors clear the floor and the point is the integer. The "
+          f"tightest countable row is {fit['tightest_count']:.2f}x, on "
+          f"{fit['tightest_count_row']}")
+    print(f"  PWM_CARRIER is margin, not a reason: "
+          f"{fit['pwm_carrier_from_clock'] / 1e3:.1f} kHz is 125 MHz / 2^"
+          f"{PWM_BITS}, and pwm_ripple() has 83 dB on it either way")
+    pack = controller_package()
+    print(f"  package                  QFN-56, {pack['pin_pitch_mm']:.2f} mm "
+          f"pitch on {pack['pad_width_mm']:.2f} mm pads -- the only one "
+          f"{CONTROLLER} is made in")
+    print(f"    widest legal escape    {pack['escape_track_mm']:.2f} mm "
+          f"against this board's {rules.TRACK_MM} mm track, and "
+          f"{pack['pins_per_side']} pins a side want "
+          f"{pack['pins_per_side']} grid lines from "
+          f"{pack['pin_pitch_mm'] / pack['grid_mm']:.1f} per pin")
+    for row in pack["classes"]:
+        print(f"    {row['class']:<13} {row['track_mm']:.2f}/"
+              f"{row['clearance_mm']:.2f} mm -> {row['grid_mm']:.2f} mm grid, "
+              f"escape {row['escape_track_mm']:.2f} mm -- "
+              f"{'reachable' if row['reachable'] else 'unreachable'}")
+    sup = controller_supply()
+    print(f"    supply                 +Vout has "
+          f"{sup['headroom_ma']:.1f} mA and the part alone is "
+          f"{sup['mcu_ma'][0]:.1f}-{sup['mcu_ma'][1]:.1f} mA on 3.3 V, "
+          f"one for one through two linear rails "
+          f"({sup['linear_watts'] * 1e3:.0f} mW dissipated)")
+    print(f"      a switcher's floor is {sup['switcher_ratio']:.3f} x that = "
+          f"{sup['switcher_floor_ma'][1]:.1f} mA, so it clears at any "
+          f"efficiency over {sup['switcher_min_efficiency'] * 100:.0f} % -- "
+          f"no efficiency figure needed, and none invented")
+    print(f"  -> both gates are decisions above a drawing, so the block stays "
+          f"in DEFERRED with them written down")
     print()
 
     print(f"the envelope ADC -- {ENV_ADC}, and the full scale chose it")

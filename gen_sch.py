@@ -1101,7 +1101,15 @@ def adc_block(sch, y):
     # single-ended measurements".
     _drop_out(sch, adc, str(P["REFIN-"]), "MAGND", dx=-20.32, dy=-12.7)
 
-    # -- the two grounded spares, on the logic side -----------------------
+    # -- the two grounded spares, one on each row --------------------------
+    #
+    # **The offsets are per-pin because the pair could move.** CH4 and CH7 sit
+    # one on each row, so one offset each clears everything. The CH6/CH7 pair
+    # design.ENV_ADC_CHANNEL records having tried puts them adjacent on the east
+    # row, where two drops of the same dx would share a column and one's wire
+    # end would land on the other's leg -- the fault _drop_out()'s own docstring
+    # records at the op-amp inputs. It needed +20.32 and +27.94, and that is
+    # why this reads the pair rather than the pin numbers.
     for name, dx, dy in ((circuit.ENV_ADC_GROUNDED[0], -20.32, 15.24),
                          (circuit.ENV_ADC_GROUNDED[1], 20.32, -15.24)):
         _drop_out(sch, adc, str(P[name]), "MAGND", dx=dx, dy=dy)

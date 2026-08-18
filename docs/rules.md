@@ -7,7 +7,11 @@ rules: 0.25 mm track, 0.2 mm clearance, 0.6/0.3 mm via, 2 oz outer
   routing pitch 0.5 mm = track + clearance + 0.05 mm margin; adjacent tracks 0.25 mm apart against 0.2 mm
   a via clears a track by 0.075 mm orthogonally (blocks) and 0.282 mm diagonally (clears)
   a TSSOP leaves 0.25 mm and its window is -0.40 mm -- -0.02 at the finest class -- so no track centre exists between two of its pins and every pin escapes outward
-  and no cell inside one either: a pad holds a cell at every phase only above 0.70 mm of pitch, and a TSSOP is 50 um under it -- see rules.pad_reach() and design.ENV_ADC_CHANNEL
+  and no cell inside one either: a pad holds a cell at every phase only above 0.70 mm of pitch, and a TSSOP is 50 um under it -- see rules.pad_reach(), and route.Grid.escape() for what is done about it
+  what closes it is the fan-out, and it is a ladder with three rungs rather than a threshold:
+      SOIC    1.27 mm pitch on 0.60 mm pads, 0.970 mm to the next edge, widest escape 1.54 mm (>= 0.25), one cell per pin -- a track starts inside the pad
+      TSSOP   0.65 mm pitch on 0.40 mm pads, 0.450 mm to the next edge, widest escape 0.50 mm (>= 0.25), one cell per pin -- no cell inside the pad; an escape reaches it
+      QFN-56  0.40 mm pitch on 0.20 mm pads, 0.300 mm to the next edge, widest escape 0.20 mm (< 0.25), two pins per cell -- unreachable: neither a cell nor an escape
   a SOIC leaves 0.67 mm between pads:
       fitted        0.25/0.20 mm, either weight    window +0.020 mm against a 0.45 mm floor -- no cell fits, at any pitch
       2 oz minimum  0.15/0.15 mm, 2 oz outer       window +0.220 mm against a 0.30 mm floor -- no cell fits, at any pitch

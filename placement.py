@@ -371,11 +371,15 @@ SHARED = {
     # are MAGND, which the router skips because stitch_grounds() has already
     # connected them. See design.ENV_ADC_CHANNEL.
     #
-    # **The window is 45 um wide, so it is checked rather than trusted.**
-    # gen_pcb.check_fine_pitch_access() computes it against the grid the
-    # router actually builds, and fails the build with the nudge if the board
-    # outline ever moves this package's phase -- which anything added north of
-    # it can do.
+    # **The 45 um window is gone and the 0.21 is kept, and the distinction is
+    # worth the two lines.** The window was the phase at which the two pin
+    # rows that hold no grid cell landed on AGND/DGND and CH4/CH7 rather than
+    # on a routed net, and anything added north of this package moved it. The
+    # fan-out removes the constraint entirely -- route.Grid.escape() lays a
+    # pad's escape on its own centre line, so a pin row with no cell in it is
+    # reached anyway -- so no phase is special any more. The offset stays
+    # because moving it would re-route the board for no reason, not because
+    # anything depends on it.
     "U17": (70.0, SHARED_Y + 10.21, 0),
     # The three locals, each at the pin it serves: AVDD, DVDD, REFIN+. **All
     # three north of the package, and the third one moved there for a reason

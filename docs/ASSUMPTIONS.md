@@ -70,6 +70,16 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **When wrong:** Nothing. It is common to all six channels -- same part, matched -- so it is a law error and not a matching error, and 0.23 % over a 61 dB span is 0.14 dB. Calibratable in firmware from a single measured curve if it ever matters.
 
+### `mcu_rail_ma` = 52.1 mA on 3.3 V, RP2040 alone, maximum average
+
+**Range:** 19.2 .. 52.1
+
+**Question:** What does the RP2040 draw on the 3.3 V side in *this* application? Its datasheet's Table 637 measures four use cases rather than specifying a maximum, and none of them is this one: 'Popcorn' is VGA video at 48 MHz and is the heaviest at 52.1 mA (DVDD 16.6 + IOVDD 35.5, worst-case device over temperature), 'BOOTSEL idle' the lightest active at 19.2 mA. This board runs 125 MHz with almost no IO activity -- six PWM at 30.5 kHz, one 10.4 MHz clock -- and XIP from flash, which Table 635 prices at 37.6 uA/MHz on DVDD and which firmware can retire by running from SRAM. The range is the datasheet's own measurements; the value is its top.
+
+**Sets:** nothing, and that is the point -- controller_supply() shows the linear V3V3 chain fails at both ends of this range and a switcher clears both, so no topology decision waits on it
+
+**When wrong:** Only the size of the switcher, not whether there is one. The bound that decides is conservation of energy: a converter's input current is at least vout/vin times its output, so 3.3/12 x 52.1 = 14.3 mA against 35.4 mA of +Vout headroom, and any efficiency above 40 % clears it. Measuring this would size a part; it would not change the topology.
+
 ### `noise_floor` = 0.000144V rms
 
 **Range:** 5e-05 .. 0.0004
@@ -121,7 +131,7 @@ None. The one entry was the pad relay — a part the spec asks for by function, 
 
 Not assumptions so much as absences, listed because a section 5 check against a partial board proves less than it appears to.
 
-- **controller** — RP2040 and its QSPI flash, crystal, USB and MIDI: shared block, and the scope statement puts shared blocks after one channel is complete.
+- **controller** — RP2040, and the part is settled -- controller_fit() is the derived case for it. What is not settled is two computed gates: controller_package() says a 0.40 mm QFN-56 is unreachable at this fabrication class, and controller_supply() says the linear V3V3 chain cannot carry it out of 35.4 mA of +Vout. Both are decisions above the drawing.
 
 ### Pins waiting on a deferred block
 

@@ -327,81 +327,180 @@ of them disagreed. That list is at the head of the ADC section in `design.py`.
 
 ---
 
-## The router reaches a pad only if a cell lands inside it
+## The router reaches a pad only if a track can *legally* land inside it
 
-**`rules.pad_reach()`, and it is one line further out than
-`escape_corridor()`.** That function asks whether a track can pass *between*
-two pins; this asks whether one can *start* on one. `route.access()` will only
-join a net to a pad at a grid cell whose centre is inside the pad, so:
+**Three boxes, three answers, and the check that existed to predict this
+measured the wrong one.** A pad has a bounding box; `route.block_pad_copper()`
+insets that by half a track so a track drawn on a cell stays inside the pad's
+own copper; and DRC asks a third question, whether the track's edge clears the
+*next pin*. For a TSSOP-20 pad, 0.40 mm across on a 0.65 mm pitch, those are:
 
-* a pad holds a cell at **every** phase only if it is wider than the grid;
-* a pad can be at most `pin_pitch − clearance` wide, because two pads are two
-  nets.
+| box | a cell within | what used it |
+|---|---|---|
+| the pad | 0.200 mm of the centre line | `check_fine_pitch_access()`, since removed |
+| inset by half a track | 0.075 mm | `route.access()` |
+| clearance to the next pin | **0.125 mm** | DRC, and `rules.track_offset_limit()` |
 
-So a package is reachable at every placement only above **`grid + clearance`**
-of pitch — 0.70 mm here. A SOIC's 1.27 mm clears it by 0.57. **A TSSOP's
-0.65 mm misses by 0.05 mm**, so two of the ADC's ten pin rows hold no cell at
-any placement whatsoever, and no amount of room around the package changes it.
-Nor can the stub reach out: the nearest cell is 0.20–0.25 mm away and a track
-laid to it comes within 0.075 mm of the neighbouring pad against a 0.2 mm rule.
+So the check passed on four pads the router then refused, and
+`verify.UNROUTED_ITEMS` was **8 while the instrument written to explain it
+reported nothing**. It was not wrong about the box it measured. It measured the
+pad, and what gets drawn is a track — this repo's oldest failure, inside the
+function written to catch this repo's oldest failure.
 
-What a placement *can* choose is **which** rows lose. `design.ENV_ADC_CHANNEL`
-spends that on the two grounded channels — the router skips MAGND entirely,
-because `stitch_grounds()` has already connected it — and the six strings take
-CH0–CH3, CH5 and CH6. The window is **45 µm wide**, so
-`gen_pcb.check_fine_pitch_access()` computes it against the grid the router
-actually builds and fails the build with the arithmetic. Anything added north
-of the ADC moves the board outline, which moves the grid origin, which moves
-the phase.
+`rules.pad_reach()` is still the arithmetic for *whether a cell lands in the
+pad*: a pad holds one at every phase only above `grid + clearance` of pitch,
+0.70 mm here, and a TSSOP's 0.65 misses by 0.05. What that costs is now zero,
+because the escape does not need a cell in the pad.
 
-**Three readings of the same symptom were wrong before this one.** Unrouted
-nets at a package read as congestion, then as "not enough room", then as "the
-wrong rotation" — and the first two cost a placement change each. From outside,
-an unreachable pad and a full board look identical.
+### The fan-out, and it is what closed the number
 
-**And the check is two conditions, not one, because `Q801` is not a fault.**
-`route.access()` has a fallback — the nearest cell outside the pad — and it is
-safe exactly when the stub reaching it does not sweep another net's copper. A
-SOT-523's pads hold no cell in y either and that part has routed correctly on
-every build this board has had, because its neighbours are on the far side of
-the package. A check that fires on a working board is the fastest way to get a
-check switched off.
+**`route.Grid.escape()` lays each unreachable pin's escape as fixed copper on
+the pad's own centre line, before `route_all()` runs.** Four things about it
+must survive compaction:
+
+* **Along the pad's own axis first, across to the grid second.** Inside the pin
+  row the escape is the safest track on the board, because it is exactly where
+  the pad already is — offset zero, 0.325 mm to the neighbour. It turns for the
+  grid only past `rules.escape_reach()`, which is the pad's own clearance halo
+  plus half a track, so the snapped grid line cannot land on the halo's own
+  boundary.
+* **Which pads get one is `route.access()`'s own answer, not a prediction.** The
+  first attempt computed the criterion a second time in `gen_pcb.py` and the
+  second opinion was wrong: it measured from the pad's *centre line*, which is
+  the only candidate a TSSOP pin has and one of a hundred an NCP1117's DPAK tab
+  has, so it declared the 5 V regulator unreachable and refused its escape.
+  `gen_pcb.escape_plan()` now answers only the question that file is the only
+  one able to answer — **which way is out** — and the router decides need.
+* **The escape is a track and its halo is one half-track wider than a pad's.**
+  `block_pad_ring()` is handed a pad's copper *rectangle* and grows it by
+  `clearance + track/2`. `block_escape_ring()` is handed a centre *line*, so the
+  reach is `track + clearance`. Using the pad's number would leave every
+  neighbouring cell half a track too close — the same claim-about-a-pad,
+  applied-to-a-track fault, arriving from the other side.
+* **Its clearance is measured, not asked of the grid.** `escape_clearances()` is
+  geometric, against the real pad boxes. Asking the grid would be wrong in both
+  directions at once: it would refuse the escape, because the cells beside a
+  fine-pitch pin are blocked to routing and rightly so, and it would pass copper
+  the grid does not own.
+
+**One notion of where a pad is.** `pad_boxes()` keys on the bounding box centre
+and `escape_plan()` first keyed on `GetPosition()`. They agree to within a
+nanometre and not to within a float comparison: ENVA1 and MISO matched, ENVA2
+and MOSI missed, and the router reported "no escape axis" for a pad 1.475 by
+0.400 mm.
+
+**The result: `UNROUTED_ITEMS` is 0, DRC is 0, four escapes at U17.** 1547 track
+runs and 561 vias against 1489 and 516 — the escapes did not only close their
+own pads, they freed enough room for the rest of the fan to take shorter paths.
+
+**`design.ENV_ADC_CHANNEL` is a record of a measurement now, not a constraint.**
+It existed to spend the choice of *which* two pin rows lose on the ADC's grounded
+channels. With the constraint gone, CH0–CH5 in order was drawn and routed — and
+**it cost a net 30 mm away.** Moving the channels down one pin makes a fifth pad
+need an escape, the escape's halo takes cells out of the one corridor the six
+`ENVA{n}` runs already converge into, and the router dropped **CVN3** in the CV
+band with DRC still at zero. The map is kept, and the finding is the general one:
+**an escape's copper is not free and it is not spent where it is laid.** Four
+escapes closed four nets and *shortened* the whole fan; the fifth closed nothing
+and broke something in another zone. The router is the only instrument that
+knows.
+
+### The two claims that had to be fixed first, and they were about a pad
+
+Both were found by **DRC**, on the first board this project built with a 0.65 mm
+pitch on it, and both had been true for as long as every package was a SOIC.
+Neither was catchable from inside the router: `check_no_shorts()` looks for
+shorts and both are clearances, and in both cases the offending copper is the
+piece the grid does not own.
+
+* **`block_pad_copper`** exempts a pad's own cells from clearance — *"a segment
+  inside a pad's own copper cannot be too close to anything, because the pad
+  already is not."* True of the pad. What the router draws there is a **0.25 mm
+  track**, and a TSSOP pad is 0.40 mm across, so a cell more than **0.075 mm**
+  off its centre line puts copper past the pad's edge and at the neighbour. The
+  box is inset by half a track.
+* **`route.access()`**'s docstring said a pad with no free interior cell "cannot
+  be reached on this grid, and `route_all()` reports the net". Its last line
+  returned the nearest cell *outside* the pad — the only case that line ever ran
+  in. The fallback stays, because Q801 needs it, and `_stub_is_clear()` tests
+  that stub the way every other piece of track is tested.
+
+**Fixing them made the number go up and the board better**, which is the rule
+about that number: 8 unmade and named beats 6 drawn 0.15 mm from a neighbouring
+pin. The fan-out then took it to 0.
+
+### The ladder, and the rung the RP2040 falls off
+
+`rules.fan_out_class()` collects the three questions into the one a package is
+chosen against, and the answer has three rungs:
+
+| | |
+|---|---|
+| `pin_pitch > grid + clearance` | a track starts inside the pad at any placement. **SOIC, 1.27 mm** |
+| `2(edge − clearance) >= track` and `pin_pitch >= grid` | it cannot, but an escape on the pad's own centre line reaches it. **TSSOP, 0.65 mm** |
+| neither | nothing this router draws gets there. **QFN-56, 0.40 mm** |
+
+with `edge = pin_pitch − pad_width/2`.
+
+**The second condition of the middle rung is the counting one and it is the one
+nobody would think of.** An escape ends on a grid cell and may move at most half
+a pitch across the row to get there, so pins map onto grid lines *in order* — and
+two pins closer together than one grid pitch have to share a line, which two
+nets cannot. Fourteen pins a side over 5.2 mm want fourteen lines and a 0.5 mm
+grid offers eleven. A *spreading* fan breaks that limit honestly and is a
+different mechanism from the single jog.
+
+**Q801 is still why the check is two conditions and not one.** A SOT-523's pads
+hold no grid cell in y either and that part has routed correctly on every build
+this board has had, because its nearest neighbour across that axis is 1.0 mm
+away: its limit is 0.475 mm and no phase can reach it. A check that fires on a
+working board is the fastest way to get a check switched off, and a fan-out that
+fires on one is 1.6 mm of pointless copper on every SOT-23.
 
 ---
 
-## Two claims in `route.py` were about a pad and were applied to a track
+## The controller: the part is settled and the block is still not drawn
 
-Both were found by DRC, on the first board this project has built with a
-0.65 mm pin pitch on it, and both had been true for as long as every package
-was a SOIC.
+**`design.DEFERRED` is not empty and its one entry changed kind.** It read
+*"shared block, and the scope statement puts shared blocks after one channel is
+complete"* — a scope statement, true of every shared block and by then the only
+one it was still true of. Deriving what the block asks for turned it into two
+computed gates, and **both are decisions above a drawing.**
 
-* **`block_pad_copper`** exempts a pad's own cells from clearance — *"a
-  segment inside a pad's own copper cannot be too close to anything, because
-  the pad already is not."* True of the pad. What the router draws there is a
-  **0.25 mm track**, and a TSSOP pad is 0.40 mm across, so a cell more than
-  **0.075 mm** off its centre line puts copper past the pad's edge and at the
-  neighbour. The box is inset by half a track now.
-* **`route.access()`**'s docstring says a pad with no free interior cell
-  "cannot be reached on this grid, and `route_all()` reports the net". Its last
-  line returned the nearest cell *outside* the pad — which is the only case
-  that line ever ran in. The fallback stays, because `Q801` needs it, but
-  `_stub_is_clear()` now tests the stub the way every other piece of track is
-  tested.
+**What is closed.** `design.controller_fit()` is the positive case that never
+existed: ten requirements this board makes, counted off the netlist where they
+are countable, against ten numbers read first-hand from the RP2040 datasheet.
+Fourteen signals across J9–J13 against 30 GPIO; 6 PWM against 16 on 8 slices;
+MCLK ≥ 9.216 MHz met by **seven** integer divides of 125 MHz. Tightest countable
+margin 2×. `00-current-state.md`'s claim 9 — *"both have mandatory buck
+converters"* — is marked **not relied upon**: it is a negative, its "mandatory"
+came from documents 0–4 which are not in this repo, no RP2350 datasheet page is
+cited anywhere here, and claim 10 says the MCU was never load-bearing anyway.
 
-**Neither was catchable from inside the router.** `check_no_shorts()` looks for
-shorts and both are clearances; the grid's own bookkeeping was correct, because
-in both cases the offending copper is the piece the grid does not own. The
-general form is this repo's oldest one, in a new place: **a claim that is true
-of one object, applied to a different object that happens to sit in the same
-cell.**
+**Gate 1 — the package, `controller_package()`.** RP2040 ships only in a 7×7
+QFN-56 at 0.40 mm pitch. It fails *both* conditions of the middle rung above:
+the widest escape that clears the next pin is **0.20 mm against this board's
+0.25**, and 0.40 mm of pitch on a 0.50 mm grid gives fourteen pins a side eleven
+lines to land on. It clears at the **2 oz *minimum* class, 0.15/0.15** — which
+costs nothing at the fabricator, because that is the class JLCPCB gives for the
+copper weight this board already orders — and what it costs is every track at
+0.15 mm, a grid with four times the cells, and a re-route of all 164 nets.
 
-**The number that measures it went up and the board got better.**
-`verify.UNROUTED_ITEMS` is 8, naming four nets, where before six of those
-connections were drawn 0.15 mm from a neighbouring pin. What closes it is a
-fan-out pass — fine-pitch escapes laid as fixed copper on each pad's own centre
-line before the router runs, the way `stitch_grounds()` already lays 133 vias.
+**Gate 2 — the supply, `controller_supply()`.** `supply_fit()` leaves **35.4 mA**
+of +Vout. V3V3 is an MCP1700 off V5 off VA+, so a milliamp of 3.3 V is a
+milliamp of *twelve* at the converter's pin. The RP2040's own measured range is
+19.2–52.1 mA (Table 637) and **neither end works**: the top fails outright, the
+bottom leaves 16.2 mA for a QSPI flash, a MIDI current loop and an opto. **A
+switcher from VA+ is the only topology with room, and saying so needs no
+efficiency figure** — conservation of energy puts its input current at least
+`3.3/12 × 52.1 = 14.3 mA`, so it clears at any efficiency above **40 %**.
+Quoting 85 % would have been a plausible number about a part nobody has chosen.
+`supply_beat()` is what has to price its frequency, and note what that function
+already found: the ≥300 kHz rule is fundamental-only, so a second unit has to be
+checked against the pump's harmonics *and* against this converter's own
+522–638 kHz band.
 
----
+**Do not raise `SUPPLY_IOUT_MA`.** It is a datasheet reading.
 
 ## Toolchain
 
@@ -526,8 +625,11 @@ cv-module/
   docs/                  every document a person reads
     hardware-spec-v0.md  authoritative spec — read first. Carries an index of
                          its own overturned claims; it is v0 and unedited
-    00-current-state.md  context: why the choices are what they are. Two of its
-                         claims lose to delta.py, marked at the top
+    00-current-state.md  context: why the choices are what they are. Three of
+                         its claims lose to delta.py, marked at the top; two
+                         rows are stale in their own right and marked in place
+                         -- the envelope ADC's, and the controller's, whose
+                         claim 9 is now marked "not relied upon"
     STYLE.md             the mixer's conventions, written after reading it
     ssi2164-control-port.md  the datasheet read first-hand — spec corrections
     element-revisit.md   SSI2164 vs THAT2180 vs THAT4301, and where it landed

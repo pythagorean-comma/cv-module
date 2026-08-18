@@ -297,6 +297,121 @@ class Grid:
             elif held != net:
                 self.take(layer, column, row, "blocked")
 
+    def block_escape_copper(self, layer, points, net):
+        """The cells a fan-out escape's own copper sits exactly on.
+
+        The pad equivalent is block_pad_copper(), and the difference between
+        them is the difference between a pad and a track. A pad is a rectangle
+        and the cells inside it are a region; an escape is a polyline of
+        `track`-wide copper, and the only cells whose centres are *on* it are
+        the ones its own segments pass through. In practice that is the cell
+        it lands on and nothing else, because the segment along the pad's
+        centre line is off-grid by construction -- being off-grid is why the
+        escape exists.
+
+        Claimed as `copper` for the same reason a pad's cells are: it stops a
+        neighbour's ring from marking the cell "blocked" on the way past, and
+        that cell is the one the router has to start the net at.
+        """
+        for column, row in self.escape_cells(points):
+            index = self.index(column, row)
+            if (index in self.copper[layer]
+                    and self.owner[layer][index] not in (None, net)):
+                continue
+            self.take(layer, column, row, net)
+            self.copper[layer].add(index)
+
+    def escape_cells(self, points):
+        """Every cell an escape's own copper sits on. Usually just the landing.
+
+        Separate from block_escape_copper() because _one_pass() has to ask the
+        question before it acts on it: an escape is only accepted if every cell
+        it would claim is free to its own net, and claiming first and checking
+        afterwards is how a "blocked" cell -- one that is inside two pads'
+        clearance rings, and is blocked for exactly the reason the escape
+        exists -- would get quietly handed back to the router.
+        """
+        for start, end in zip(points, points[1:]):
+            x0, x1 = sorted((start[0], end[0]))
+            y0, y1 = sorted((start[1], end[1]))
+            for column, row in self._cells_within(x0, y0, x1, y1, 0.0):
+                yield column, row
+
+    def block_escape_ring(self, layer, points, net):
+        """The halo around an escape, and **its reach is one track wider.**
+
+        block_pad_ring() is handed the pad's own copper rectangle and grows it
+        by `clearance + track / 2` -- the clearance itself, plus the half
+        width of the track that might be laid in the cell. That is right
+        because the rectangle it was given *is* the copper.
+
+        Here the polyline is a centre line and the copper is `track` wide
+        around it, so the reach is
+
+            track / 2  +  clearance  +  track / 2   =   track + clearance
+
+        and using block_pad_ring()'s number would leave every neighbouring
+        cell half a track too close. This is the same distinction that put
+        eight clearance violations on the last board, arriving from the other
+        side: there, a claim about a pad was applied to a track; here, a
+        reach computed for a rectangle would be applied to a line.
+        """
+        reach = self.track + self.clearance
+        for start, end in zip(points, points[1:]):
+            x0, x1 = sorted((start[0], end[0]))
+            y0, y1 = sorted((start[1], end[1]))
+            for column, row in self._cells_within(x0, y0, x1, y1, reach):
+                index = self.index(column, row)
+                if index in self.copper[layer]:
+                    continue
+                held = self.owner[layer][index]
+                if held is None:
+                    self.take(layer, column, row, net)
+                elif held != net:
+                    self.take(layer, column, row, "blocked")
+
+    def escape(self, pad, out):
+        """Where a fan-out escape lands, and the copper that gets it there.
+
+        `pad` is the pad centre and `out` the point on the pad's own centre
+        line beyond which the escape may turn -- rules.escape_reach() sets it
+        and gen_pcb.py measures the pad. Returns `(cell, points)`.
+
+        Two segments, and the order is the whole point:
+
+          * **along the pad's own axis**, from the pad centre outwards. Inside
+            the pin row this is the one line where a track is as safe as the
+            pad it sits on, because it is where the pad is;
+          * **then across, to the grid**, which is at most half a pitch and
+            happens outside the package where there is nothing to be near.
+
+        The turn is snapped to the first grid line at or beyond `out`, so the
+        escape can only ever get longer than the reach it was given, never
+        shorter.
+        """
+        px, py = pad
+        ox, oy = out
+        if abs(ox - px) >= abs(oy - py):
+            axis, along, across = 0, ox - px, py
+        else:
+            axis, along, across = 1, oy - py, px
+        origin = self.left if axis == 0 else self.top
+        far = ox if axis == 0 else oy
+        steps = (far - origin) / self.pitch
+        index = int(math.ceil(steps - 1e-9) if along > 0
+                    else math.floor(steps + 1e-9))
+        other = int(round(((across - (self.top if axis == 0 else self.left))
+                           / self.pitch)))
+        column, row = (index, other) if axis == 0 else (other, index)
+        if not self.inside(column, row):
+            return None, []
+        corner_x, corner_y = self.point_of(column, row)
+        if axis == 0:
+            corner = (corner_x, py)
+        else:
+            corner = (px, corner_y)
+        return (column, row), [(px, py), corner, (corner_x, corner_y)]
+
     def access(self, layer, x, y, half_w, half_h, net):
         """The cell a route joins this pad at, and **it is inside the pad**.
 
@@ -508,6 +623,78 @@ class Grid:
         return None
 
 
+def _box_gap(first, second):
+    """Edge-to-edge distance between two axis-aligned boxes. 0 if they touch."""
+    ax0, ay0, ax1, ay1 = first
+    bx0, by0, bx1, by1 = second
+    dx = max(bx0 - ax1, ax0 - bx1, 0.0)
+    dy = max(by0 - ay1, ay0 - by1, 0.0)
+    return math.hypot(dx, dy)
+
+
+def _as_box(start, end):
+    return (min(start[0], end[0]), min(start[1], end[1]),
+            max(start[0], end[0]), max(start[1], end[1]))
+
+
+def escape_clearances(points, net, layer, pads, obstacles, laid, track,
+                      clearance):
+    """Everything a proposed escape comes too close to. Empty is legal.
+
+    **Geometric, and not a question about grid cells, because the escape is
+    not on the grid.** Every other clearance test in this file asks whether a
+    cell is free, which works because everything else the router draws is
+    centred on a cell. The escape's first segment is deliberately off-grid --
+    it is on the *pad's* centre line, which is where the grid is not -- so
+    asking the grid would give the wrong answer in both directions at once.
+    It would refuse the escape, because the cells beside a fine-pitch pin are
+    blocked to routing and rightly so; and it would pass copper the grid does
+    not own, which is exactly the class of fault that put eight violations on
+    the last board.
+
+    So this measures the copper. The escape's own half width is `track / 2`,
+    a pad's copper is its box, and another escape has a half width too:
+
+        to a pad or an obstacle:  gap >= clearance + track / 2
+        to another escape:        gap >= clearance + track
+
+    A pad of this net is not an obstruction to it, and neither is the pad the
+    escape starts on -- which is the one box every escape overlaps.
+    """
+    problems = []
+    for start, end in zip(points, points[1:]):
+        box = _as_box(start, end)
+        for other, entries in pads.items():
+            if other == net:
+                continue
+            for x, y, half_w, half_h, layers in entries:
+                if layer not in layers:
+                    continue
+                gap = _box_gap(box, (x - half_w, y - half_h,
+                                     x + half_w, y + half_h))
+                if gap < clearance + track / 2:
+                    problems.append(
+                        f"{gap:.3f} mm to {other or 'unnetted'} copper at "
+                        f"({x:.2f}, {y:.2f})")
+        for layers, x, y, half_w, half_h in obstacles:
+            if layer not in layers:
+                continue
+            gap = _box_gap(box, (x - half_w, y - half_h,
+                                 x + half_w, y + half_h))
+            if gap < clearance + track / 2:
+                problems.append(
+                    f"{gap:.3f} mm to stitched copper at ({x:.2f}, {y:.2f})")
+        for other, other_layer, other_points in laid:
+            if other == net or other_layer != layer:
+                continue
+            for other_start, other_end in zip(other_points, other_points[1:]):
+                gap = _box_gap(box, _as_box(other_start, other_end))
+                if gap < clearance + track:
+                    problems.append(
+                        f"{gap:.3f} mm to the escape on {other}")
+    return problems
+
+
 def _order(pads):
     """Pads nearest-neighbour first, which is a cheap spanning tree.
 
@@ -593,13 +780,15 @@ def _connect(grid, net, entries, access, crossable=None, claim=True):
     return tracks, vias, cells, displaced
 
 
-def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None):
+def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None,
+              escapes=None):
     """Route every net once, on a clean grid, in an order this pass is given.
 
     `first` is the nets to attempt before the rest; everything else follows in
     the size order below. Returns tracks, vias and the nets missed, in the
     order they were missed -- which is what the next pass promotes.
     """
+    escapes = escapes or {}
     grid = Grid(rect, rules["pitch"], rules["track"], rules["clearance"],
                 rules["via"])
     grid.block_edge(rules["edge"])
@@ -649,6 +838,85 @@ def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None):
                    key=lambda net: (rank.get(net, len(rank)), -len(pads[net]),
                                     net))
 
+    # **The fan-out, and it goes down before anything is routed.** A pad whose
+    # every grid offset fails rules.track_offset_limit() cannot be entered by
+    # the router at all -- there is no cell it can start a track on without
+    # that track's own copper coming inside the clearance of the next pin
+    # along. What a person drawing this by hand does instead is lay the escape
+    # first, on the pad's own centre line, and pick the grid up outside the
+    # package; this is that, and gen_pcb.fan_out() is what measures which pads
+    # need it.
+    #
+    # It is the same shape as stitch_grounds() handing its 133 vias over as
+    # `obstacles`, with one difference that decides the whole design: ground
+    # stitching is *finished* copper and the router only has to keep away from
+    # it, while an escape is copper the router has to **continue from**. So it
+    # cannot be an obstacle. It is blocked in the two stages a pad is -- its
+    # own cell as `copper`, then its halo as a ring -- and the cell it lands on
+    # becomes that pad's entry in `access`, which is the one place the router
+    # ever joins a net to a pad.
+    #
+    # An escape that cannot be laid legally is refused rather than laid
+    # anyway, and its net is reported by name. That is the same rule the rest
+    # of this file runs on: a router that gives up and says so beats one that
+    # trades violations for finished connections.
+    # **Which pads need one is route.access()'s own answer, not a prediction.**
+    # The first version of this asked the arithmetic directly -- offset against
+    # rules.track_offset_limit() -- and got two things wrong that are the same
+    # thing: it measured from the pad's *centre line*, which is the only
+    # candidate a narrow pad has and one of a hundred that U16's DPAK tab has,
+    # so it declared the 5 V regulator's tab unreachable and refused its
+    # escape. A criterion computed beside the function it is meant to agree
+    # with is a second opinion, and the second opinion was wrong.
+    #
+    # access() already returns None for exactly the pads that have no legal
+    # entry, for exactly the reason rules.track_offset_limit() states -- no
+    # cell inside the pad, and _stub_is_clear() refusing the one outside it --
+    # and it runs before any track is laid, so its answer is a property of the
+    # placement rather than of the routing order.
+    #
+    # **The pre-pass is not tidiness either.** An escape's halo blocks cells,
+    # so an escape laid part-way through the access loop can block a cell
+    # already handed to a net that was assigned earlier -- and _connect() takes
+    # its source and target cells as given rather than re-testing them, so
+    # nothing downstream would notice. Every escape goes down before any pad is
+    # assigned.
+    needy = []
+    for net in order:
+        for x, y, half_w, half_h, layers in _order(pads[net]):
+            if grid.access(min(layers), x, y, half_w, half_h, net) is None:
+                needy.append((net, x, y, min(layers)))
+
+    fitted, laid, refused, escaped = {}, [], {}, []
+    for net, x, y, layer in needy:
+        out = escapes.get((net, x, y))
+        if out is None:
+            refused[net] = (f"no escape plan for the pad at "
+                            f"({x:.4f}, {y:.4f}) -- see "
+                            f"gen_pcb.escape_plan()")
+            continue
+        cell, points = grid.escape((x, y), out)
+        if cell is None:
+            refused[net] = "the escape runs off the board"
+            continue
+        problems = escape_clearances(points, net, layer, pads, obstacles, laid,
+                                    grid.track, grid.clearance)
+        blocked = [(column, row) for column, row in grid.escape_cells(points)
+                   if not grid.free(layer, column, row, net)]
+        if blocked:
+            problems.append(f"{len(blocked)} of the cells it lands on are not "
+                            f"free to {net}")
+        if problems:
+            refused[net] = "; ".join(sorted(set(problems))[:3])
+            continue
+        laid.append((net, layer, points))
+        fitted[(net, x, y)] = (layer, cell, points)
+        escaped.append((net, x, y) + grid.point_of(*cell))
+    for net, layer, points in laid:
+        grid.block_escape_copper(layer, points, net)
+    for net, layer, points in laid:
+        grid.block_escape_ring(layer, points, net)
+
     # **Every pad gets a stub from its own centre to its access cell**, and the
     # reason is that a pad is not on the grid. cell_of() rounds, so the nearest
     # cell is up to 0.35 mm away, and the first routed board ended with 173
@@ -658,9 +926,18 @@ def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None):
     # any route.
     tracks, vias, missed = [], [], []
     unreachable, access, ordered = set(), {}, {}
+    unreachable.update(refused)
     for net in order:
         ordered[net] = entries = _order(pads[net])
+        if net in unreachable:
+            continue
         for x, y, half_w, half_h, layers in entries:
+            escape = fitted.get((net, x, y))
+            if escape is not None:
+                layer, cell, points = escape
+                access[(net, x, y)] = cell
+                tracks.append((net, layer, points))
+                continue
             cell = grid.access(min(layers), x, y, half_w, half_h, net)
             if cell is None:
                 unreachable.add(net)
@@ -722,7 +999,7 @@ def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None):
         if net not in seen and net not in routed:
             seen.add(net)
             ordered_misses.append(net)
-    return tracks, vias, ordered_misses
+    return tracks, vias, ordered_misses, refused, escaped
 
 
 # How many times the whole board may be routed from scratch, each pass a
@@ -733,7 +1010,8 @@ def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None):
 RETRY_PASSES = 4
 
 
-def route_all(rect, pads, obstacles, rules, skip=(), reserve=None):
+def route_all(rect, pads, obstacles, rules, skip=(), reserve=None,
+              escapes=None):
     """Route every net in `pads`. Returns tracks, vias and what was missed.
 
     `pads` is {net: [(x, y, half_width, half_height, layers), ...]} in
@@ -805,7 +1083,8 @@ def route_all(rect, pads, obstacles, rules, skip=(), reserve=None):
     best = None
     first, tally = [], {}
     for _ in range(RETRY_PASSES):
-        result = _one_pass(rect, pads, obstacles, rules, skip, first, reserve)
+        result = _one_pass(rect, pads, obstacles, rules, skip, first, reserve,
+                           escapes)
         if best is None or len(result[2]) < len(best[2]):
             best = result
         if not result[2]:
@@ -816,7 +1095,7 @@ def route_all(rect, pads, obstacles, rules, skip=(), reserve=None):
         # this file on one board must lay down the same copper.
         first = [net for net, _ in sorted(tally.items(),
                                           key=lambda item: (-item[1], item[0]))]
-    return best[0], best[1], sorted(best[2])
+    return best[0], best[1], sorted(best[2]), best[3], best[4]
 
 
 def check_no_shorts(tracks, vias, pitch):

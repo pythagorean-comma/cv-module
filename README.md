@@ -16,9 +16,11 @@ and never writes to it — see [`contract/PINNED.md`](contract/PINNED.md).
 
 ## Status
 
-**A spike, and an honest one.** All seven tasks of the brief are complete. Every
-number carries its arithmetic, every check can be shown to fail, and everything
-guessed is in [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
+**A spike, and an honest one.** Every number carries its arithmetic, every check
+can be shown to fail, and everything guessed is in
+[`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md). **The board is finished copper** — 0 DRC
+violations and 0 unconnected items — and the one block still not drawn is not
+drawn for two reasons that are now arithmetic rather than scope.
 
 | | |
 |---|---|
@@ -33,7 +35,8 @@ guessed is in [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
 | section 5 constraints | ✅ checked mechanically, **71** planted faults caught — and the faults themselves are checked too |
 | deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
-| board | ⚠️ placed, poured and routed, **0 DRC violations** — and **8 unconnected items at the ADC, named**. A 0.65 mm pin pitch does not fit a 0.5 mm routing grid: `rules.pad_reach()` |
+| board | ✅ placed, poured, routed and **finished** — **0 DRC violations and 0 unconnected items**. The 0.65 mm pin pitch is closed by a fan-out pass: `route.Grid.escape()` |
+| the fan-out | ✅ **four escapes at U17, laid as fixed copper on each pad's own centre line before the router runs.** Which pads need one is `route.access()`'s own answer; the arithmetic is `rules.track_offset_limit()`, and it is general — no SOIC pad on this board can ever need one and `Q801` still does not |
 | the design rules | ✅ one copy in `rules.py`, and DRC is finally enforcing them |
 | the two `UNSPECIFIED` parts | ✅ **chosen** — Omron G6S-2 DC5 and Diodes DMG1012T. `UNSPECIFIED` is empty and no courtyard is reserved |
 | the Schottky clamp | ✅ **read, and it had failed** — the BAT54 missed by 5.5 dB. PMEG2010AEH fits with 1.5 dB |
@@ -45,8 +48,11 @@ guessed is in [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
 | the 3.3 V rail | ✅ **real now, and it had been declared for four passes with no net** — `RAILS` said `V3V3` and `supply-decision.md` said there is no such rail. `check_rails_are_drawn()` is the instrument |
 | the inlet fuse | ❌ **derived and not fitted.** The converter's datasheet asks for 1.6 A slow blow and the assessment says yes — the inlet is shared with a fabricated board that has none. No part number was verified this session, and a plausible order code is worse than an absent part |
 
+| the controller | ⚠️ **the part is settled and the block is not drawn, and the reason changed kind.** `controller_fit()` is the derived case for the RP2040 — fourteen signals against 30 GPIO, MCLK met by seven integer divides, tightest countable margin 2× — and claim 9 is marked **not relied upon**. Two computed gates stop it: `controller_package()` (a 0.40 mm QFN-56 is off the bottom of `rules.fan_out_class()`'s ladder at this fabrication class) and `controller_supply()` (35.4 mA of +Vout against 19.2–52.1 mA at 3.3 V through two linear rails). Both are decisions above a drawing |
+
 **One shared block is deferred** with its reason in `design.DEFERRED`: the
-controller. The envelope ADC was the second and the supply the third. There
+controller — and that reason is now two computed gates rather than a scope
+statement. The envelope ADC was the second and the supply the third. There
 were six. The relay drive is not deferred but
 deleted, along with the pad it drove; the envelope rectifier and the fail-safe
 are drawn. **`design.UNSPECIFIED` is empty**: the bypass relay and its MOSFET
@@ -258,46 +264,176 @@ whether "only SPI" was four things or six. None of it was catchable, for the
 same reason each time: the block was not drawn, and deferral suspends every
 instrument at once.
 
-**A 0.65 mm pin pitch does not fit a 0.5 mm routing grid, and finding that out
-cost three wrong diagnoses and a bug in the router.** This is the longest thread
-of the pass and every step of it looked like the last one.
+**A 0.65 mm pin pitch does not fit a 0.5 mm routing grid, and closing it took
+four wrong readings of one symptom and then twenty lines of copper.** This is the
+longest thread the project has had and every step of it looked like the last one.
 
-The symptom was unrouted nets at the ADC. It read first as congestion, then as
-too little room, then as the wrong rotation — three placements, and the count
-went 4, 3, 2. Two real findings came out of those:
+The symptom was unrouted nets at the envelope ADC. It read first as congestion,
+then as too little room, then as the wrong rotation — three placements, and the
+count went 4, 3, 2. Two real findings came out of those:
 
 | | |
 |---|---|
 | **`rules.escape_corridor()`** at 0.65 mm pitch on 0.40 mm pads gives a window of **−0.40 mm** at the fitted class and −0.02 at the finest. Not a fine-grid problem, a *negative* one: no legal track centre exists between two of its pins, so every pin escapes outward |
-| **`rules.pad_reach()`**, one line further out: a pad holds a grid cell at every phase only if it is **wider than the grid pitch**, and it can be at most `pin_pitch − clearance` wide. So a package is reachable at every placement only above `grid + clearance` = **0.70 mm**. A SOIC clears it by 0.57; a TSSOP misses by 0.05, and no placement fixes that. What a placement *can* choose is which pin rows lose, so `design.ENV_ADC_CHANNEL` gives them to the two grounded channels and the six strings take CH0–CH3, CH5 and CH6 |
+| **`rules.pad_reach()`**, one line further out: a pad holds a grid cell at every phase only if it is **wider than the grid pitch**, and it can be at most `pin_pitch − clearance` wide. So a package is reachable at every placement only above `grid + clearance` = **0.70 mm**. A SOIC clears it by 0.57; a TSSOP misses by 0.05, and no placement fixes that |
 
-**And then DRC found what none of it had.** Eight clearance violations at
-0.15 mm against a 0.2 mm rule, every one a track beside a TSSOP pin. The router
-had been *drawing* the connections it could not legally make — through cells
-exempted from clearance because they are a pad's own copper. `block_pad_copper`
-says "a segment inside a pad's own copper cannot be too close to anything,
-because the pad already is not", which is true of the **pad** and not of the
-**0.25 mm track** the router then lays through that cell. A TSSOP pad is
-0.40 mm across, so a cell more than 0.075 mm off its centre line draws copper
-past the pad's edge and straight at the neighbour. At 1.27 mm pitch the
-overhang reaches nobody, which is why no board before this one showed it.
+**And then DRC found what none of it had.** Eight clearance violations at 0.15 mm
+against a 0.2 mm rule, every one a track beside a TSSOP pin. The router had been
+*drawing* the connections it could not legally make — through cells exempted from
+clearance because they are a pad's own copper. `block_pad_copper` says "a segment
+inside a pad's own copper cannot be too close to anything, because the pad
+already is not", which is true of the **pad** and not of the **0.25 mm track**
+the router then lays through that cell. At 1.27 mm pitch the overhang reaches
+nobody, which is why no board before this one showed it. `route.access()` had a
+second one of the same shape, in the one function whose docstring forbids it.
 
-`route.access()` had a second one of the same shape: its docstring says a pad
-with no free interior cell "cannot be reached on this grid, and route_all()
-reports the net", and its last line returned the nearest cell *outside* the pad
-— the one case that line ever ran in. `_stub_is_clear()` now tests that stub
-the way every other piece of track is tested, and the copper claim is inset by
-half a track.
+**The fourth wrong reading was the check written to predict the third**, and it
+is the one worth carrying. `check_fine_pitch_access()` — since removed — asked
+whether a grid cell falls inside the pad's *bounding box*. Three boxes, three
+answers:
 
-**The number went up and the board got better.** `verify.UNROUTED_ITEMS` is 8
-now, naming `ENVA1`, `ENVA2`, `MISO` and `MOSI`, where before six of those
-connections were drawn 0.15 mm from a neighbouring pin. A router that gives up
-and says so beats one that trades violations for finished connections, which is
-this repo's own rule about the number. **What would close it is a fan-out
-pass**, laying each fine-pitch pin's escape as fixed copper on the pad's own
-centre line before the router runs — the way `stitch_grounds()` already lays 133
-vias, and the way a person drawing this by hand would do it without thinking
-about it. That is a pass of its own.
+| box | a cell within | who used it |
+|---|---|---|
+| the pad, 0.400 mm | 0.200 mm of the centre line | the check |
+| inset by half a track | 0.075 mm | `route.access()` |
+| clearance to the next pin | **0.125 mm** | DRC |
+
+So the check passed on four pads the router then refused, and
+`verify.UNROUTED_ITEMS` was 8 while the instrument written to explain it reported
+nothing. It was not wrong about the box it measured. It measured the pad, and
+what gets drawn is a track — this repo's oldest failure, inside the function
+written to catch this repo's oldest failure.
+`rules.track_offset_limit()` is the arithmetic now.
+
+**What closed it is the fan-out**, laying each unreachable pin's escape as fixed
+copper on the pad's own centre line before `route_all()` runs — the way
+`stitch_grounds()` already lays 133 vias, and the way a person drawing this by
+hand would do it without thinking about it. Along the pad's own axis first,
+because inside the pin row that is the safest track on the board; across to the
+grid only past the pad's clearance halo, where there is nothing to be near.
+
+Three things about it are the design and not the implementation:
+
+| | |
+|---|---|
+| **which pads get one is `route.access()`'s own answer** | The first attempt computed the criterion a second time in `gen_pcb.py`, and the second opinion was wrong: it measured from the pad's *centre line*, which is the only candidate a TSSOP pin has and one of a hundred an NCP1117's DPAK tab has, so it declared the 5 V regulator unreachable and refused its escape. `gen_pcb.escape_plan()` now answers only **which way is out** |
+| **an escape is a track, so its halo is one half-track wider than a pad's** | `block_pad_ring()` grows a pad's copper *rectangle* by `clearance + track/2`; `block_escape_ring()` is handed a centre *line*, so the reach is `track + clearance`. The pad's number would leave every neighbour half a track too close — the same fault, from the other side |
+| **its clearance is measured, not asked of the grid** | `escape_clearances()` is geometric, against the real pad boxes. The grid would be wrong both ways at once: it would refuse the escape, because the cells beside a fine-pitch pin are blocked to routing and rightly so, and it would pass copper the grid does not own |
+
+**One notion of where a pad is.** `pad_boxes()` keys on the bounding-box centre
+and `escape_plan()` first keyed on `GetPosition()`. They agree to within a
+nanometre and not to within a float comparison: ENVA1 and MISO matched, ENVA2 and
+MOSI missed by one, and the router reported "no escape axis" for a pad 1.475 by
+0.400 mm.
+
+**`UNROUTED_ITEMS` is 0 and DRC is still 0.** Four escapes, all at U17, and 1547
+track runs and 561 vias against 1489 and 516 with the four nets unmade — so the
+escapes did not only close their own pads, they freed enough room for the rest of
+the fan to take shorter paths.
+
+**`ENV_ADC_CHANNEL` is a record of a measurement now rather than a constraint,
+and the measurement is the interesting part.** It existed to spend the choice of
+*which* two pin rows lose on the ADC's grounded channels, so with the constraint
+gone the map is free — and CH0–CH5 in order is what firmware would expect, and
+it removes a crossing nobody had priced, because CH6 is pin 11 on the *logic*
+side and ENVA6 has to get round the package to reach it. It was drawn and routed,
+and **it cost a net 30 mm away**: moving the channels down one pin makes a fifth
+pad need an escape, whose halo takes cells out of the one corridor the six
+`ENVA{n}` runs already converge into, and the router closed all six ENVA nets and
+dropped **CVN3** in the CV band — DRC still at zero, two unconnected items. The
+old map is kept, because 0 unrouted items is a stronger property than a tidier
+dict.
+
+**The general finding is that an escape's copper is not free and it is not spent
+where it is laid.** Four escapes closed four nets *and shortened the whole fan*.
+The fifth closed nothing extra and broke something in another zone. Nothing in
+this repo would have predicted either; the router is the only instrument that
+knows, which is the argument for running it rather than reasoning about it.
+
+**The ladder it leaves behind is the reusable part.** `rules.fan_out_class()`
+collects three questions into the one a package is chosen against:
+
+| | |
+|---|---|
+| `pin_pitch > grid + clearance` | a track starts inside the pad at any placement. **SOIC, 1.27 mm** |
+| `2(edge − clearance) >= track` **and** `pin_pitch >= grid` | it cannot, but an escape on the pad's own centre line reaches it. **TSSOP, 0.65 mm** |
+| neither | nothing this router draws gets there. **QFN-56, 0.40 mm** |
+
+The second condition of the middle rung is a *counting* one and it is the one
+nobody would think of: an escape ends on a grid cell and may move at most half a
+pitch to get there, so pins map onto grid lines in order — and two pins closer
+together than one grid pitch have to share a line, which two nets cannot.
+Fourteen pins a side over 5.2 mm want fourteen lines and a 0.5 mm grid offers
+eleven.
+
+## The controller: the part is settled and the block is still not drawn
+
+**`design.DEFERRED` still holds one entry and its reason changed kind.** It read
+*"shared block, and the scope statement puts shared blocks after one channel is
+complete"* — true of every shared block, and by then the only one it was still
+true of. Deriving what the block asks for turned it into two computed gates.
+
+**The case for the RP2040 is derived now, and it never was.**
+`00-current-state.md`'s claim 9 is the only case this project ever had for the
+part — *"Teensy 4.1 / RP2350B … both have mandatory buck converters"* — and it is
+a **negative**: it says what the other candidates carry, not what this one does.
+`controller_fit()` is the other half, every row a requirement this board makes
+against a number read first-hand from the RP2040 datasheet:
+
+| asked of the controller | RP2040 | |
+|---|---|---|
+| 14 signals across J9–J13, counted off the netlist | 30 GPIO | 2.14× |
+| 6 PWM outputs | 16, on 8 slices | 2.67× |
+| MCLK ≥ 9.216 MHz, `envelope_adc_clock()` | 10.417 MHz = 125/12, **one of seven integer divides** | 1.13× |
+| 8 kHz control frame, 2 kHz envelope frame, all channels | 125 MHz `clk_sys` | 2600× / 10400× |
+| ~10 kHz on a GPIO for the fail-safe pump | 125 MHz `clk_sys` | 12500× |
+| USB MIDI, DIN MIDI, tap switch, expression pedal | USB 1.1 device, 2 UARTs, GPIO, 4 ADC channels | |
+
+The tightest row is MCLK and it is not a margin to spend: what makes an integer
+divide the right answer is that the ADC's conversions are not on a jittered
+clock, and that is true of all seven divisors. `PWM_CARRIER` is in the table as
+**margin rather than as a reason** — 125 MHz / 2¹² = 30.5 kHz is already derived
+from this part's clock, and `pwm_ripple()` puts it 83 dB down for 0.0027 dB of
+gain error, so a different clock would also be fine.
+
+**Claim 9 is marked as not relied upon rather than left standing.** Its
+"mandatory" came from a deep dive in the parent project's documents 0–4, which
+are not in this repo; no RP2350 or Teensy datasheet page is cited anywhere here;
+and claim 10 in the same table says the MCU was never the load-bearing choice
+anyway. It may well be true and nothing here can check it — which is this repo's
+own rule about a constraint with margin, applied to a part.
+
+**Gate 1 — the package.** RP2040 ships only in a 7×7 QFN-56 at 0.40 mm pitch, and
+`rules.fan_out_class()` puts that off the bottom of the ladder above on both
+counts: the widest escape that clears the next pin is **0.20 mm against this
+board's 0.25**, and fourteen pins a side get eleven grid lines. It clears at the
+2 oz **minimum** class, 0.15/0.15 — which costs nothing at the fabricator,
+because that is the class JLCPCB publishes for the copper weight this board
+already orders. What it costs is every track at 0.15 mm, a grid with four times
+the cells, and a re-route of all 164 nets. `controller_package()`.
+
+**Gate 2 — the supply.** `supply_fit()` leaves 35.4 mA of +Vout, and V3V3 is an
+MCP1700 off V5 off VA+ — so a milliamp of 3.3 V is a milliamp of *twelve* at the
+converter's pin. The RP2040's own measured range (Table 637: 19.2 mA idle in
+BOOTSEL, 52.1 mA running the VGA demo) straddles that, and **neither end is a
+board that works**: the top fails outright and the bottom leaves 16.2 mA for a
+QSPI flash whose read current is tens of milliamps, a DIN MIDI current loop and
+an opto-isolator. So `MEASURED["mcu_rail_ma"]` records the range and nothing
+waits on it.
+
+**A switcher from VA+ is the only topology with room, and saying so needs no
+efficiency figure.** Conservation of energy puts a converter's input current at
+least `vout/vin` times its output — 3.3/12 × 52.1 = **14.3 mA** — so it clears at
+any efficiency above **40 %**, and there is no buck that is not. Quoting 85 %
+would have been a plausible number about a part nobody has chosen, which is what
+§6 of the spec forbids; the bound is stronger anyway, because it cannot be wrong.
+What it costs is a new switching aggressor on VA+ and MDGND, which `supply_beat()`
+has to price — and note what that function already found: the ≥300 kHz rule is
+fundamental-only, so a second unit has to clear the pump's harmonics *and* this
+converter's own 522–638 kHz band.
+
+**Neither gate is a drawing decision, so the block is not drawn.** `SUPPLY_IOUT_MA`
+is a datasheet reading and was not touched.
 
 **The 2-bit coarse pad is gone, and it is the largest thing this repo has
 deleted.** 36 parts, 52 % of the placed courtyard, about two thirds of the BOM,
@@ -859,8 +995,14 @@ Three more things the pass turned up, each recorded where it happened:
 
 ## Open, in the order worth taking
 
-Two of the four items this pass was set are closed and two are not, and the two
-that are not are open for different reasons.
+~~**The fan-out.**~~ **Closed.** `UNROUTED_ITEMS` is 0 and DRC is 0. See the
+fine-pitch section above.
+
+**The controller.** ⚠️ **Not closed, and it is the one thing this pass was set
+that is not drawn.** The part is settled and derived; two computed gates stop the
+drawing and both are decisions above it — `controller_package()` wants the board
+at the 2 oz *minimum* class, 0.15/0.15 mm, and `controller_supply()` wants a
+switcher for V3V3 or a larger converter. Item 2 below.
 
 ~~**The pad relay.**~~ **Closed** by deleting the pad rather than by choosing a
 relay — see the pad result above.
@@ -882,17 +1024,18 @@ filtered by a number rather than a class.
    `DESIGN.md` upstream calls it "the measurement worth taking" and it is still
    this module's most load-bearing unknown.
 
-2. **The DC-DC itself.** Its requirement is now a set of numbers rather than a
-   topology — isolated, ≥300 kHz, ±12 V at 110 mA, +5 V at 93 mA, 3.10 W — so
-   what is left is choosing a part against them and drawing the inlet, the
-   module and its filtering. That is the next increment, and it is the smallest
-   of the three deferred blocks.
+2. **The controller's two gates, and they are one decision each.**
+   `controller_package()`: 0.40 mm of pin pitch needs the routing grid under
+   0.40 mm, which needs the fabrication class at 0.15/0.15 — free at the
+   fabricator, a re-route of all 164 nets here. `controller_supply()`: a
+   switcher for V3V3, whose requirement is stated as numbers (12 V in, 3.3 V out,
+   52 mA, >40 % efficient, and a frequency `supply_beat()` has to clear against
+   both the mixer's pump harmonics and this converter's own 522–638 kHz band) —
+   or a converter with more than 250 mA on +Vout, which is a part decision about
+   a part already chosen and drawn. Neither is a drawing pass.
 
-3. **The other two deferred blocks**, and they are deferred rather than open:
-   the controller (RP2040, QSPI flash, crystal, USB, MIDI) and the envelope ADC
-   (ADS131M08 or MCP3564, sample rate settled at 2 kHz). Each is a block of its
-   own, not a value to fill in, and drawing one badly is worse than leaving it
-   declared — spec §6's rule applied to a schematic.
+3. ~~**The DC-DC itself.**~~ ~~**The envelope ADC.**~~ **Both closed** —
+   TMR 6-2422WI with its inlet choke, and MCP3564 with a real 3.3 V rail.
 
 4. **`MEASURED["vca_rin"]` — R_IN is a free choice again, and it was not.**
    12k1 was forced by the pad's top step having to stay inside the part's
@@ -907,10 +1050,13 @@ filtered by a number rather than a class.
    gain. 20 ms is 4× the ~5 ms a relay needs, so it is a sequencing requirement
    rather than a hazard. `design.VREF_TURN_ON_S`.
 
-6. **The copper weight is still a declaration rather than a decision.**
-   `rules.COPPER_OZ` says 2 oz and the fitted rules are legal at either, so it
-   costs nothing to hold the option — right up until something wants
-   0.09/0.09 mm, which is 1 oz only. Nothing does: the largest current on the
-   board is `design.coil_budget()`'s 93 mA of relay coil. Worth deciding when
-   the supply lands, because that is the block that would change the answer.
+6. **The copper weight is still a declaration rather than a decision, and
+   something wants a finer class now.** `rules.COPPER_OZ` says 2 oz and the
+   fitted 0.25/0.20 is legal at either, so it has cost nothing to hold the
+   option. The controller changes that: `controller_package()` needs the grid
+   under 0.40 mm, which needs **0.15/0.15 — still 2 oz**, so the copper weight
+   survives and the *fitted class* is what moves. 0.09/0.09 remains 1 oz only
+   and nothing needs it. The largest current on the board is
+   `design.coil_budget()`'s 93 mA of relay coil, and 0.15 mm of 2 oz copper
+   carries about 1 A, so the electrical side of the trade is free.
    [`rules.md`](docs/rules.md).

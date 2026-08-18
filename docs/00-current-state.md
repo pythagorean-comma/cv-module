@@ -89,7 +89,7 @@ For 40 dB of musical gate depth: per-channel depth **≥47 dB**, per-pair isolat
 | | Current position | Was |
 |---|---|---|
 | **Element** | **SSI2164** quad VCA, −33 mV/dB. Unchanged | — |
-| **Controller** | **RP2040** (on-chip LDO, production to 2041) or STM32G474. Top three within 4 points — the choice barely matters | Teensy 4.1 / RP2350B — *both fail the switching-regulator gate* |
+| **Controller** | **RP2040**, and the case for it is derived now rather than comparative — `design.controller_fit()`. ~~or STM32G474~~. **Not drawn, and the reason changed**: two computed gates, both decisions above a drawing. `controller_package()` — RP2040 ships only in a 0.40 mm QFN-56 and `rules.fan_out_class()` puts that off the bottom of the ladder at this fabrication class. `controller_supply()` — 35.4 mA of +Vout against 19.2–52.1 mA at 3.3 V through two linear rails | Teensy 4.1 / RP2350B — *both fail the switching-regulator gate*, and see row 9 |
 | **CV generation** | **PWM + 74AHC541 from a precision reference** → 6× AD5683R daisy-chained → DAC8568 with 8 CS pulses | DAC8568 in a single-SYNC burst — *not possible, `t4` min SYNC HIGH = 80 ns* |
 | **Control frame rate** | **8 kHz** | 32 kHz — the aggressor argument dies once the CV filter exists |
 | **CV filter** | **2-pole, 200–400 Hz, per channel. Mandatory.** Worth 15–20 dB of AM noise and doubles as the de-click | 2 kHz single-pole, treated as cosmetic |
@@ -164,7 +164,7 @@ Every claim overturned so far, so the pattern is visible.
 | 6 | Five shut strings sum at +14 dB | +7 dB (power sum). +14 dB is crosstalk only | measurement |
 | 7 | Spread-60° null gives 4.2 dB | 9.85 dB with a realistic source | **user's ear** |
 | 8 | The synthesised source decayed like a guitar | No pick transient at all; it swelled into the note | **user's ear** |
-| 9 | Teensy 4.1 / RP2350B for the controller | Both have mandatory buck converters | deep dive |
+| 9 | Teensy 4.1 / RP2350B for the controller | Both have mandatory buck converters — **and this verdict is now marked as NOT RELIED UPON.** It is the only case this project ever had for the RP2040 and it is a *negative*: it says what the other candidates carry, not what this one does. Its "mandatory" came from a deep dive in documents 0–4, which are not in this repo; no RP2350 or Teensy datasheet page is cited anywhere here; and row 10 below says the MCU was never the load-bearing choice anyway. The positive case is `design.controller_fit()` — ten requirements this board makes against ten numbers read off the RP2040's own datasheet, tightest countable margin 2×. The claim may well be true and nothing here can check it, which is exactly this repo's rule about a constraint with margin applied to a part | deep dive, **unverifiable here** |
 | 10 | The MCU is the load-bearing choice | The DAC is; and then neither, really | deep dive |
 | 11 | DAC8568 can stream frames under one SYNC | It cannot — `t4` min SYNC HIGH = 80 ns | **user reading the datasheet** |
 | 12 | PWM loses on cost and accuracy | Leading option once the CV filter is mandatory anyway | consequence of 11 |

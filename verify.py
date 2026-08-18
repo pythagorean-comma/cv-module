@@ -902,38 +902,55 @@ def check_fail_safe(nets, values):
 # this is where the number goes back -- with the net named, not with the
 # category filtered out.
 #
-# **It has gone back, to eight, and every one is at the envelope ADC.** The
-# four nets are ENVA1, ENVA2, MISO and MOSI -- two channel dividers into CH0
-# and CH1, and two SPI lines into SDO and SDI -- and the cause is one number
-# that rules.pad_reach() now carries: **a TSSOP-20's pad is 0.40 mm across and
-# a track is 0.25**, so a track drawn through that pad has 0.075 mm of latitude
-# either side before it overhangs the copper it is sitting on. The routing
-# grid is 0.5 mm and the pin pitch is 0.65, so a cell lands within 0.075 mm of
-# a pin's centre line for four pins in every ten. The other six have no legal
-# place for a track to end.
+# **It went to eight and it is back to zero, and the route between those two
+# numbers is the most useful thing in this file's history.** Both ends are at
+# the envelope ADC, and what happened in between was one symptom read four ways.
 #
-# **Every step of the way here was a wrong reading of the same symptom, and
-# they are worth listing because each one was plausible.** Unrouted nets at a
-# package read first as congestion, then as too little room, then as the wrong
-# rotation; three placements were tried and the count went 4, 3, 2. What was
-# actually happening only became visible when DRC reported eight clearance
-# violations at 0.15 mm against a 0.2 mm rule -- the router was *drawing* the
+# The four nets were ENVA1, ENVA2, MISO and MOSI -- two channel dividers into
+# CH0 and CH1, two SPI lines into SDO and SDI. The symptom was unrouted nets at
+# a package, and it read first as congestion, then as too little room, then as
+# the wrong rotation; three placements were tried and the count went 4, 3, 2.
+# Then **DRC** reported eight clearance violations at 0.15 mm against a 0.2 mm
+# rule, and the real fault was visible: the router had been *drawing* the
 # connections it could not legally make, through cells exempted from clearance
 # because they are a pad's own copper. The exemption is about the pad and what
-# gets drawn is a track. See route.Grid.block_pad_copper().
+# gets drawn is a track. route.Grid.block_pad_copper() is where that is now
+# recorded, and inseting the exemption by half a track is what took the count
+# from "six connections drawn wrong" to "eight connections unmade and named".
 #
-# So this number is larger than it was an hour ago and the board is better:
-# **DRC is at zero and these eight connections are unmade and named**, where
-# before six of them were drawn 0.15 mm from a neighbouring pin. A router that
-# gives up and says so beats one that trades violations for finished
-# connections, and that is this file's own rule.
+# **What closed it is a fan-out pass**, and three things about it are worth
+# carrying past a compaction:
 #
-# **What would fix it is a fan-out pass**, laying each fine-pitch pin's escape
-# as fixed copper on the pad's own centre line before the router runs -- the
-# way stitch_grounds() already lays 133 vias and their stubs, and the way a
-# person drawing this by hand would do it without thinking about it. That is a
-# pass of its own and it is written down here rather than attempted.
-UNROUTED_ITEMS = 8
+#   * **the escape is fixed copper on the pad's own centre line**, laid before
+#     route_all() runs, turning for the grid only once it is clear of the pin
+#     row. Inside the row it is the safest track on the board, because it is
+#     exactly where the pad already is. route.Grid.escape();
+#   * **which pads get one is route.access()'s own answer**, not a prediction.
+#     The first attempt computed rules.track_offset_limit() a second time
+#     beside the function it had to agree with, and the second opinion was
+#     wrong -- it measured from the pad's *centre line*, which is the only
+#     candidate a TSSOP pin has and one of a hundred an NCP1117's DPAK tab has,
+#     so it declared the 5 V regulator unreachable and refused its escape;
+#   * **there is a third box, and three boxes were three answers.** The pad's
+#     bounding box says a cell is within 0.200 mm of the centre line; inset by
+#     half a track it says 0.075; the clearance to the next pin says 0.125. The
+#     check that existed to predict this number measured the first, access()
+#     used the second, and DRC uses the third -- so the check passed on four
+#     pads the router then refused, and this constant was eight while the
+#     instrument written to explain it reported nothing.
+#
+# **Four escapes, all at U17, and no net given up.** 1547 track runs and 561
+# vias, against 1489 and 516 with the four nets unmade -- so the escapes did
+# not just close their own pads, they freed enough room for the rest of the fan
+# to take shorter paths. DRC stayed at zero throughout.
+#
+# **And the thing the fan-out cannot reach is now arithmetic rather than a
+# surprise.** rules.fan_out_class() is a ladder: above `grid + clearance` of
+# pitch a track starts inside the pad; between `grid` and that, an escape
+# reaches it; below `grid`, two pins have to share one grid line and nothing
+# this router draws gets there. The RP2040's 0.40 mm QFN-56 is the third rung
+# and design.controller_package() is where that is priced.
+UNROUTED_ITEMS = 0
 
 
 def read_drc(board, destination):

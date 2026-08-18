@@ -244,6 +244,17 @@ def escape_corridor(track=TRACK_MM, clearance=CLEARANCE_MM,
 TSSOP_PIN_PITCH_MM = 0.65
 TSSOP_PAD_WIDTH_MM = 0.40
 
+# **The finest pitch this project has had to price, and it is the RP2040's.**
+# Read off KiCad's own footprint rather than the datasheet drawing, for the
+# reason the SOIC's numbers are:
+# Package_DFN_QFN.pretty/QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm.kicad_mod, pad 1:
+#     (at -3.4375 -2.6) (size 0.875 0.2)
+# so 0.20 mm pads on a 0.40 mm pitch, which leaves 0.20 mm of copper-free gap
+# between two pads -- exactly this board's clearance, and the reason the
+# footprint itself is DRC-legal here at all. RP2040 ships in no other package.
+QFN_PIN_PITCH_MM = 0.40
+QFN_PAD_WIDTH_MM = 0.20
+
 def pad_reach(pin_pitch=TSSOP_PIN_PITCH_MM, pad_width=TSSOP_PAD_WIDTH_MM,
               grid=None, clearance=CLEARANCE_MM):
     """Can a routing cell exist *inside* a pad? One line further out than
@@ -278,7 +289,9 @@ def pad_reach(pin_pitch=TSSOP_PIN_PITCH_MM, pad_width=TSSOP_PAD_WIDTH_MM,
     pin pitch and grid share a common divisor the pattern repeats -- for 0.65
     against 0.5 the offsets are all ten multiples of 0.05, and two rows always
     land outside. design.ENV_ADC_CHANNEL spends that on the ADC's two grounded
-    channels; gen_pcb.check_fine_pitch_access() is what holds it.
+    channels. **That is no longer load-bearing and the note is kept for the
+    arithmetic**: the fan-out closes the pads that lose, so which two rows they
+    are is free again. See track_offset_limit() and route.Grid.escape().
     """
     grid = route_pitch() if grid is None else grid
     widest = pin_pitch - clearance
@@ -294,6 +307,132 @@ def pad_reach(pin_pitch=TSSOP_PIN_PITCH_MM, pad_width=TSSOP_PAD_WIDTH_MM,
         "stub_to_neighbour_mm": (pin_pitch - pad_width / 2 - grid / 2
                                  - TRACK_MM / 2),
         "clearance_mm": clearance,
+    }
+
+
+# ---------------------------------------------------------------------------
+# The fan-out: what a track may do inside a pad it cannot land in the middle of
+# ---------------------------------------------------------------------------
+
+def track_offset_limit(edge_mm, track=TRACK_MM, clearance=CLEARANCE_MM):
+    """How far off a pad's centre line a track through that pad may sit.
+
+    **pad_reach() asks whether a cell lands inside the pad. This asks the
+    question that actually decides, and the two are not the same** -- which is
+    the whole of why verify.UNROUTED_ITEMS was eight while
+    gen_pcb.check_fine_pitch_access() reported nothing. That function is gone --
+    the fan-out closes the pads it used to predict, and gen_pcb.escape_plan() is
+    what stands where it stood.
+
+    A pad is copper and is allowed to sit closer to its neighbour than the
+    clearance rule, because two pads are placed by the footprint and not by
+    the router: a TSSOP's pads are 0.40 mm across on a 0.65 mm pitch, so the
+    copper-free gap between two of them is 0.25 mm against a 0.20 mm rule. A
+    *track* laid through that pad has no such licence. Its own copper is
+    `track` wide wherever it is drawn, so what matters is not whether its
+    centre is inside the pad but how close its edge comes to the neighbour:
+
+        edge_mm                 pad centre line to the nearest other copper,
+                                measured across the pad's short axis
+        limit  = edge_mm - clearance - track / 2
+
+    At 0.65 mm of pitch on 0.40 mm pads that is 0.45 - 0.20 - 0.125 =
+    **0.125 mm**, and the routing grid offers offsets that are multiples of
+    0.05 up to 0.25. So three phases in five are legal and two are not, and no
+    placement removes the two -- see pad_reach() for why the pad cannot simply
+    be made wider.
+
+    **The number this replaces was 0.075 mm and it was a true statement about
+    a different question.** route.Grid.block_pad_copper() insets a pad by half
+    a track before claiming its cells, so that a track drawn on one of them
+    stays *inside the pad's own copper* -- 0.075 mm here. That is the right
+    rule for the exemption it guards (a segment inside the pad cannot be too
+    close to anything, because the pad already is not), and it is stricter
+    than this one by 0.05 mm. Neither is wrong; they answer "does the track
+    overhang the pad" and "does the overhang reach the neighbour", and only
+    the second is a design rule.
+    """
+    return edge_mm - clearance - track / 2
+
+
+def escape_reach(half_length_mm, track=TRACK_MM, clearance=CLEARANCE_MM):
+    """How far out along its own axis a fan-out escape runs before it may turn.
+
+    An escape is fixed copper laid on the pad's own centre line, so that a pad
+    whose every grid offset fails track_offset_limit() is entered at zero
+    offset instead -- the thing a person drawing this by hand does without
+    thinking about it. Inside the pin row it is the safest track on the board,
+    because it is exactly where the pad already is. The moment it turns, it is
+    ordinary track and 0.65 mm from a neighbour is not enough for one.
+
+    So it may only turn once it is clear of the pin row, and "clear" is the
+    pad's own clearance halo rather than the pad:
+
+        half_length + clearance + track / 2      the halo route.py blocks
+        half_length + clearance + track          this, one half-track further
+
+    The extra half track is not a fudge: the escape is snapped *outward* to
+    the next grid line after this point, so what the margin buys is that the
+    snapped line cannot land on the halo's own boundary, where a cell is
+    admitted or not depending on a floating-point comparison.
+    """
+    return half_length_mm + clearance + track
+
+
+def fan_out_class(pin_pitch, pad_width, grid=None, track=TRACK_MM,
+                  clearance=CLEARANCE_MM):
+    """Which of three regimes a package's pin pitch puts it in. A ladder.
+
+    escape_corridor() asks whether a track fits *between* two pins.
+    pad_reach() asks whether a cell falls *inside* one. track_offset_limit()
+    asks whether a track on that cell clears the next pin. This collects the
+    three into the question a package is actually chosen against, and the
+    answer has three rungs rather than two:
+
+        pin_pitch > grid + clearance         a track can start inside the pad
+                                             at any placement. **SOIC, 1.27**
+        2 (edge - clearance) >= track        it cannot, but an escape laid on
+          and pin_pitch >= grid              the pad's own centre line can.
+                                             **TSSOP, 0.65**
+        neither                              nothing this router draws reaches
+                                             the pad. **QFN-56, 0.40**
+
+    with `edge = pin_pitch - pad_width / 2`, the distance from a pad's centre
+    line to the next pad's near edge.
+
+    **The second condition of the middle rung is the counting one and it is
+    the one nobody would think of.** An escape ends on a grid cell, and it may
+    move at most half a pitch across the row before it gets there -- so pins
+    map onto grid lines in order, and two pins closer together than one grid
+    pitch have to share a line. They cannot: two nets cannot own one cell. A
+    spreading fan, where the outer pins run further out and turn further
+    across, breaks that limit and is a different mechanism from the single
+    jog Grid.escape() lays -- it needs a width per escape, a turn of several
+    pitches, and lanes to run them in.
+
+    So the RP2040's package is not a placement problem and not a room problem:
+    **0.40 mm of pitch on 0.20 mm pads leaves 0.30 mm from a pad's centre line
+    to its neighbour's edge, which allows a 0.20 mm track against this board's
+    0.25 mm one** -- and 0.20 would clear only by being exactly the clearance,
+    which PITCH_MARGIN_MM's own argument refuses. 0.15 mm clears by 25 um and
+    is inside the 2 oz class; it is also below this board's own
+    min_track_width rule, so it is a fabrication decision rather than a
+    drawing one. See design.controller_package().
+    """
+    grid = route_pitch() if grid is None else grid
+    edge = pin_pitch - pad_width / 2
+    widest = 2 * (edge - clearance)
+    return {
+        "pin_pitch_mm": pin_pitch,
+        "pad_width_mm": pad_width,
+        "grid_mm": grid,
+        "edge_mm": edge,
+        "lands_in_pad": pin_pitch > grid + clearance,
+        "escape_track_mm": widest,
+        "escape_fits": widest >= track,
+        "one_cell_per_pin": pin_pitch >= grid,
+        "reachable": (pin_pitch > grid + clearance
+                      or (widest >= track and pin_pitch >= grid)),
     }
 
 
@@ -437,7 +576,29 @@ def _report():
     print(f"  and no cell inside one either: a pad holds a cell at every "
           f"phase only above {reach['needed_pitch_mm']:.2f} mm of pitch, and "
           f"a TSSOP is {reach['short_by_mm'] * 1e3:.0f} um under it -- "
-          f"see rules.pad_reach() and design.ENV_ADC_CHANNEL")
+          f"see rules.pad_reach(), and route.Grid.escape() for what is done "
+          f"about it")
+    print(f"  what closes it is the fan-out, and it is a ladder with three "
+          f"rungs rather than a threshold:")
+    for name, pitch_mm, pad_mm in (("SOIC", SOIC_PIN_PITCH_MM,
+                                    SOIC_PAD_WIDTH_MM),
+                                   ("TSSOP", TSSOP_PIN_PITCH_MM,
+                                    TSSOP_PAD_WIDTH_MM),
+                                   ("QFN-56", QFN_PIN_PITCH_MM,
+                                    QFN_PAD_WIDTH_MM)):
+        rung = fan_out_class(pitch_mm, pad_mm)
+        if rung["lands_in_pad"]:
+            verdict = "a track starts inside the pad"
+        elif rung["reachable"]:
+            verdict = "no cell inside the pad; an escape reaches it"
+        else:
+            verdict = "unreachable: neither a cell nor an escape"
+        print(f"      {name:<7} {pitch_mm:.2f} mm pitch on {pad_mm:.2f} mm "
+              f"pads, {rung['edge_mm']:.3f} mm to the next edge, widest "
+              f"escape {rung['escape_track_mm']:.2f} mm "
+              f"({'>=' if rung['escape_fits'] else '<'} {TRACK_MM}), "
+              f"{'one cell per pin' if rung['one_cell_per_pin'] else 'two pins per cell'}"
+              f" -- {verdict}")
     print(f"  a SOIC leaves {escape_corridor()['gap_mm']:.2f} mm between pads:")
     for row in class_table():
         print(f"      {row['class']:<13} {row['track_mm']:.2f}/"
