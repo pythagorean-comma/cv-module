@@ -385,55 +385,128 @@ def fan_out_class(pin_pitch, pad_width, grid=None, track=TRACK_MM,
 
     escape_corridor() asks whether a track fits *between* two pins.
     pad_reach() asks whether a cell falls *inside* one. track_offset_limit()
-    asks whether a track on that cell clears the next pin. This collects the
-    three into the question a package is actually chosen against, and the
-    answer has three rungs rather than two:
+    asks whether a track on that cell clears the next pin. This collects them
+    into the question a package is actually chosen against, and the answer has
+    three rungs and **three** conditions on the middle one:
 
-        pin_pitch > grid + clearance         a track can start inside the pad
-                                             at any placement. **SOIC, 1.27**
-        2 (edge - clearance) >= track        it cannot, but an escape laid on
-          and pin_pitch >= grid              the pad's own centre line can.
-                                             **TSSOP, 0.65**
-        neither                              nothing this router draws reaches
-                                             the pad. **QFN-56, 0.40**
+        no escape needed        `limit >= grid / 2` -- every phase is legal,
+                                because half a grid pitch is the furthest the
+                                nearest grid line can ever be. **SOIC**
+        an escape reaches it    `2 (edge - clearance) >= track`, so the escape
+                                fits on the pad's centre line;
+                                `pin_pitch >= grid`, so pins get a grid line
+                                each; and the jog clears the neighbour.
+                                **TSSOP**
+        unreachable             any of those failing. **QFN-56**
 
-    with `edge = pin_pitch - pad_width / 2`, the distance from a pad's centre
-    line to the next pad's near edge.
+    with `edge = pin_pitch - pad_width / 2` and `limit` from
+    track_offset_limit().
 
-    **The second condition of the middle rung is the counting one and it is
-    the one nobody would think of.** An escape ends on a grid cell, and it may
-    move at most half a pitch across the row before it gets there -- so pins
-    map onto grid lines in order, and two pins closer together than one grid
-    pitch have to share a line. They cannot: two nets cannot own one cell. A
-    spreading fan, where the outer pins run further out and turn further
-    across, breaks that limit and is a different mechanism from the single
-    jog Grid.escape() lays -- it needs a width per escape, a turn of several
-    pitches, and lanes to run them in.
+    **The counting condition is the one nobody would think of.** An escape ends
+    on a grid cell and may move at most half a pitch across the row to get
+    there, so pins map onto grid lines in order -- and two pins closer together
+    than one grid pitch have to share a line, which two nets cannot.
 
-    So the RP2040's package is not a placement problem and not a room problem:
-    **0.40 mm of pitch on 0.20 mm pads leaves 0.30 mm from a pad's centre line
-    to its neighbour's edge, which allows a 0.20 mm track against this board's
-    0.25 mm one** -- and 0.20 would clear only by being exactly the clearance,
-    which PITCH_MARGIN_MM's own argument refuses. 0.15 mm clears by 25 um and
-    is inside the 2 oz class; it is also below this board's own
-    min_track_width rule, so it is a fabrication decision rather than a
-    drawing one. See design.controller_package().
+    **The jog condition is the one this function did not have, and its absence
+    made a wrong claim about the RP2040.** The jog is `grid / 2` of ordinary
+    track pointing at a neighbour `pin_pitch` away, and two tracks need
+    `clearance + track` between centres:
+
+        pin_pitch - grid / 2  >=  clearance + track
+
+    **The fitted class fails that for the TSSOP and the four escapes on this
+    board are legal anyway**, which is worth being exact about rather than
+    grateful for. Adjacent pins' offsets differ by `pin_pitch mod grid` -- 0.15
+    mm at 0.65 against 0.5 -- and both pins need an escape only when both
+    offsets exceed the limit. At this class that is impossible with the *same*
+    sign: 0.125 + 0.15 is more than the 0.25 an offset can reach. So whenever
+    two adjacent pins both escape here, their jogs point **away** from each
+    other, structurally rather than by luck. `same_direction` is that
+    arithmetic, and where it is true the jog condition has to be met outright.
+
+    So a package is reachable when it needs no escape at all, or when the
+    escape fits, the pins get a line each, and either the jog clears or the
+    arithmetic forbids two adjacent jogs pointing the same way.
     """
     grid = route_pitch() if grid is None else grid
     edge = pin_pitch - pad_width / 2
     widest = 2 * (edge - clearance)
+    limit = track_offset_limit(edge, track=track, clearance=clearance)
+    half = grid / 2
+    step = round(pin_pitch % grid, 9)
+    same_direction = (limit + step < half) or (limit < step - half)
+    needs_escape = limit < half
+    jog_clear = pin_pitch - half >= clearance + track
+    escape_works = (widest >= track and pin_pitch >= grid
+                    and (jog_clear or not same_direction))
     return {
         "pin_pitch_mm": pin_pitch,
         "pad_width_mm": pad_width,
         "grid_mm": grid,
         "edge_mm": edge,
-        "lands_in_pad": pin_pitch > grid + clearance,
+        "offset_limit_mm": limit,
+        "worst_offset_mm": half,
+        "needs_escape": needs_escape,
+        "lands_in_pad": not needs_escape,
         "escape_track_mm": widest,
         "escape_fits": widest >= track,
         "one_cell_per_pin": pin_pitch >= grid,
-        "reachable": (pin_pitch > grid + clearance
-                      or (widest >= track and pin_pitch >= grid)),
+        "jog_clear": jog_clear,
+        "same_direction": same_direction,
+        "escape_works": escape_works,
+        "reachable": not needs_escape or escape_works,
     }
+
+
+def coarsest_class_for(pin_pitch, pad_width, margin=PITCH_MARGIN_MM):
+    """The coarsest symmetric track/clearance at which `pin_pitch` is routable.
+
+    **Solved rather than tabulated, because the answer for the RP2040 is not in
+    FAB_CLASSES and saying "the 2 oz minimum clears it" was wrong.** Two of
+    fan_out_class()'s conditions clear at 0.15/0.15 and the jog condition does
+    not, so the honest question is not "which listed class" but "how fine does
+    it have to be", and then which copper weight that lands in.
+
+    With `track = clearance = w` and `grid = 2w + margin`, the two ways a
+    package can be reachable are
+
+        no escape needed:  edge - w - w/2      >=  (2w + margin) / 2
+        the jog clears:    pin_pitch - grid/2  >=  2w
+
+    Both are linear in `w`, so this steps a fine ladder and returns the largest
+    that satisfies either. At 0.40 mm of pitch on 0.20 mm pads the answer is
+    **0.11 mm**, which is below JLCPCB's 0.15/0.15 2 oz floor and above its
+    0.09/0.09 1 oz one -- so the copper weight is the price, and there is no
+    intermediate class that avoids paying it.
+    """
+    edge = pin_pitch - pad_width / 2
+    best = None
+    for step in range(1, 401):
+        w = step * 0.005
+        grid = 2 * w + margin
+        no_escape = edge - w - w / 2 >= grid / 2
+        jog = pin_pitch - grid / 2 >= 2 * w
+        if (no_escape or jog) and pin_pitch >= grid:
+            best = w
+    return {
+        "width_mm": best,
+        "grid_mm": None if best is None else 2 * best + margin,
+        "weight": None if best is None else next(
+            (weight for _, track, clearance, weight in FAB_CLASSES
+             if best >= track and best >= clearance), "finer than any listed"),
+    }
+
+
+def grid_cost(track, clearance, margin=PITCH_MARGIN_MM):
+    """How many more grid cells a class costs, against the fitted one.
+
+    Quoted rather than guessed because the first draft of the controller note
+    said "four times the cells" for a class that costs 2.0x, and 4.7x for the
+    one that actually clears. The router's work is superlinear in this.
+    """
+    fitted = route_pitch()
+    finer = route_pitch(track=track, clearance=clearance, margin=margin)
+    return {"grid_mm": finer, "cells": (fitted / finer) ** 2}
 
 
 # The classes this board could be ordered at, read off the capabilities page
@@ -587,18 +660,35 @@ def _report():
                                    ("QFN-56", QFN_PIN_PITCH_MM,
                                     QFN_PAD_WIDTH_MM)):
         rung = fan_out_class(pitch_mm, pad_mm)
-        if rung["lands_in_pad"]:
-            verdict = "a track starts inside the pad"
+        if not rung["needs_escape"]:
+            verdict = "a track starts inside the pad at every phase"
         elif rung["reachable"]:
-            verdict = "no cell inside the pad; an escape reaches it"
+            verdict = ("an escape reaches it, and adjacent jogs are forced "
+                       "apart" if not rung["jog_clear"]
+                       else "an escape reaches it")
         else:
-            verdict = "unreachable: neither a cell nor an escape"
+            why = []
+            if not rung["escape_fits"]:
+                why.append(f"escape wants {rung['escape_track_mm']:.2f} mm")
+            if not rung["one_cell_per_pin"]:
+                why.append("two pins per grid line")
+            if not rung["jog_clear"] and rung["same_direction"]:
+                why.append(f"the jog comes "
+                           f"{pitch_mm - rung['worst_offset_mm']:.3f} mm to a "
+                           f"neighbour against "
+                           f"{CLEARANCE_MM + TRACK_MM:.2f}")
+            verdict = "unreachable -- " + "; ".join(why)
         print(f"      {name:<7} {pitch_mm:.2f} mm pitch on {pad_mm:.2f} mm "
-              f"pads, {rung['edge_mm']:.3f} mm to the next edge, widest "
-              f"escape {rung['escape_track_mm']:.2f} mm "
-              f"({'>=' if rung['escape_fits'] else '<'} {TRACK_MM}), "
-              f"{'one cell per pin' if rung['one_cell_per_pin'] else 'two pins per cell'}"
-              f" -- {verdict}")
+              f"pads, {rung['edge_mm']:.3f} mm to the next edge, offset limit "
+              f"{rung['offset_limit_mm']:+.3f} against a "
+              f"{rung['worst_offset_mm']:.3f} mm worst phase -- {verdict}")
+    solved = coarsest_class_for(QFN_PIN_PITCH_MM, QFN_PAD_WIDTH_MM)
+    cost = grid_cost(solved["width_mm"], solved["width_mm"])
+    print(f"  a 0.40 mm pitch needs {solved['width_mm']:.2f}/"
+          f"{solved['width_mm']:.2f} mm or finer -- a {solved['grid_mm']:.2f} mm "
+          f"grid, {cost['cells']:.1f}x the cells -- which is below the 2 oz "
+          f"floor of 0.15, so the copper weight is the price and no listed "
+          f"class avoids it")
     print(f"  a SOIC leaves {escape_corridor()['gap_mm']:.2f} mm between pads:")
     for row in class_table():
         print(f"      {row['class']:<13} {row['track_mm']:.2f}/"

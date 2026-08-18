@@ -9,9 +9,10 @@ rules: 0.25 mm track, 0.2 mm clearance, 0.6/0.3 mm via, 2 oz outer
   a TSSOP leaves 0.25 mm and its window is -0.40 mm -- -0.02 at the finest class -- so no track centre exists between two of its pins and every pin escapes outward
   and no cell inside one either: a pad holds a cell at every phase only above 0.70 mm of pitch, and a TSSOP is 50 um under it -- see rules.pad_reach(), and route.Grid.escape() for what is done about it
   what closes it is the fan-out, and it is a ladder with three rungs rather than a threshold:
-      SOIC    1.27 mm pitch on 0.60 mm pads, 0.970 mm to the next edge, widest escape 1.54 mm (>= 0.25), one cell per pin -- a track starts inside the pad
-      TSSOP   0.65 mm pitch on 0.40 mm pads, 0.450 mm to the next edge, widest escape 0.50 mm (>= 0.25), one cell per pin -- no cell inside the pad; an escape reaches it
-      QFN-56  0.40 mm pitch on 0.20 mm pads, 0.300 mm to the next edge, widest escape 0.20 mm (< 0.25), two pins per cell -- unreachable: neither a cell nor an escape
+      SOIC    1.27 mm pitch on 0.60 mm pads, 0.970 mm to the next edge, offset limit +0.645 against a 0.250 mm worst phase -- a track starts inside the pad at every phase
+      TSSOP   0.65 mm pitch on 0.40 mm pads, 0.450 mm to the next edge, offset limit +0.125 against a 0.250 mm worst phase -- an escape reaches it, and adjacent jogs are forced apart
+      QFN-56  0.40 mm pitch on 0.20 mm pads, 0.300 mm to the next edge, offset limit -0.025 against a 0.250 mm worst phase -- unreachable -- escape wants 0.20 mm; two pins per grid line; the jog comes 0.150 mm to a neighbour against 0.45
+  a 0.40 mm pitch needs 0.12/0.12 mm or finer -- a 0.30 mm grid, 2.8x the cells -- which is below the 2 oz floor of 0.15, so the copper weight is the price and no listed class avoids it
   a SOIC leaves 0.67 mm between pads:
       fitted        0.25/0.20 mm, either weight    window +0.020 mm against a 0.45 mm floor -- no cell fits, at any pitch
       2 oz minimum  0.15/0.15 mm, 2 oz outer       window +0.220 mm against a 0.30 mm floor -- no cell fits, at any pitch

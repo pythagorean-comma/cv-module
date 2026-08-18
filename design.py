@@ -2099,15 +2099,46 @@ def controller_package():
     that function was written for, which was the corridor between two SOIC
     pins.
 
-    **The class table below is the answer and it is cheaper than it sounds.**
-    At the 2 oz minimum -- 0.15/0.15 mm, the class JLCPCB's own page gives for
-    the copper weight this board is already ordered at -- the grid comes down to
-    0.35 mm, the widest escape rises to 0.30 mm, and both conditions clear. So
-    the fabricator does not charge for this and the fabricator is not the
-    obstacle: what it costs is every track on the board at 0.15 mm instead of
-    0.25, a routing grid with four times the cells, and a re-route of all 164
-    nets. That is a decision about the board, taken to fit one package, and it
-    is not a decision a drawing pass gets to take.
+    **There is a third condition and its absence made this function wrong.** The
+    two above were derived and a "2 oz minimum, 0.15/0.15, clears it" was
+    written under them -- because at that class the escape fits and the pins get
+    a grid line each. They do. What no one had derived is that the **jog** is
+    ordinary track pointing at a neighbour 0.40 mm away, and two tracks need
+    `clearance + track` between centres:
+
+        0.40 - grid / 2  >=  clearance + track
+
+    At 0.15/0.15 that is 0.225 against 0.30 and it fails, and unlike the TSSOP
+    it cannot be rescued by phase: rules.fan_out_class() computes whether the
+    arithmetic *forbids* two adjacent escapes pointing the same way, and at
+    0.65 mm on a 0.5 mm grid it does while at 0.40 on 0.35 it does not. So
+    adjacent QFN escapes can point into each other, and route.escape_clearances()
+    refuses the second one.
+
+    **How the wrong claim survived is the part to keep.** Two conditions were
+    enumerated, both were true, and the conclusion was stated as though the
+    enumeration were complete -- a rule whose stated *test* was narrower than
+    its stated *mechanism*, which is the failure floorplan.CROSSING_RULE
+    records one artefact along. Nothing would have caught it either: no board
+    has a 0.40 mm part on it, so there was nothing for a check to fail against.
+    It was caught by asking the arithmetic for the class rather than reading a
+    class off a table.
+
+    **rules.coarsest_class_for() solves it instead of tabulating**, and the
+    answer is **0.12/0.12 mm or finer** -- below JLCPCB's 0.15 mm 2 oz floor and
+    above its 0.09 mm one. So the only listed class that works is 0.09/0.09,
+    which is **1 oz outer copper only**: the copper weight is the price and no
+    intermediate class avoids paying it. At 0.09/0.09 the grid is 0.23 mm, the
+    offset limit rises to 0.165 mm against a 0.115 mm worst phase, and **no pad
+    on the package needs an escape at all** -- the fan-out becomes unnecessary
+    rather than sufficient.
+
+    Two things that decision drags with it, and neither is settled here:
+    2.8x to 4.7x the grid cells for the whole board, on a router whose work is
+    superlinear in that; and the coil nets, which carry 93 mA and would be at
+    0.09 mm of 1 oz copper unless they are given a width of their own -- and
+    route.py draws one width. rules.grid_cost() is the first; the second wants
+    the IPC-2221 curve read rather than assumed.
 
     The alternative is a spreading fan: outer pins running further out and
     turning further across, in lanes, with a width per escape. That breaks the

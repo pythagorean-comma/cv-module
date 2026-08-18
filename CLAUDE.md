@@ -436,11 +436,29 @@ chosen against, and the answer has three rungs:
 
 | | |
 |---|---|
-| `pin_pitch > grid + clearance` | a track starts inside the pad at any placement. **SOIC, 1.27 mm** |
-| `2(edge − clearance) >= track` and `pin_pitch >= grid` | it cannot, but an escape on the pad's own centre line reaches it. **TSSOP, 0.65 mm** |
-| neither | nothing this router draws gets there. **QFN-56, 0.40 mm** |
+| `limit >= grid/2` | a track starts inside the pad at every phase — half a grid pitch is the furthest the nearest line can be. **SOIC, 1.27 mm** |
+| `2(edge − clearance) >= track`, `pin_pitch >= grid`, **and the jog clears** | it cannot, but an escape on the pad's own centre line reaches it. **TSSOP, 0.65 mm** |
+| any of those failing | nothing this router draws gets there. **QFN-56, 0.40 mm** |
 
-with `edge = pin_pitch − pad_width/2`.
+with `edge = pin_pitch − pad_width/2` and `limit` from `track_offset_limit()`.
+
+**The middle rung has three conditions and the third was missing** — which made
+a wrong claim about the RP2040 that stood for one pass: *"it clears at the 2 oz
+minimum, 0.15/0.15"*. Two conditions were enumerated, both were true, and the
+conclusion was stated as though the enumeration were complete. The third is that
+the **jog** is ordinary track pointing at a neighbour `pin_pitch` away, so
+`pin_pitch − grid/2 >= clearance + track`. Nothing would have caught it: no board
+here has a 0.40 mm part on it, so there was nothing for a check to fail against.
+
+**The fitted class fails the jog condition for the TSSOP and the four escapes are
+legal anyway, and that is arithmetic rather than luck.** Adjacent pins' offsets
+differ by `pin_pitch mod grid` = 0.15 mm, and both pins escape only when both
+offsets exceed 0.125 — impossible with the *same* sign, because 0.125 + 0.15
+exceeds the 0.25 an offset can reach. So two adjacent escapes here always point
+**away** from each other. `fan_out_class()["same_direction"]` is that arithmetic,
+and where it is true the jog condition has to be met outright. At 0.40 mm on a
+0.35 mm grid it is true, so QFN escapes can point into each other and
+`escape_clearances()` refuses the second.
 
 **The second condition of the middle rung is the counting one and it is the one
 nobody would think of.** An escape ends on a grid cell and may move at most half
@@ -478,13 +496,21 @@ came from documents 0–4 which are not in this repo, no RP2350 datasheet page i
 cited anywhere here, and claim 10 says the MCU was never load-bearing anyway.
 
 **Gate 1 — the package, `controller_package()`.** RP2040 ships only in a 7×7
-QFN-56 at 0.40 mm pitch. It fails *both* conditions of the middle rung above:
-the widest escape that clears the next pin is **0.20 mm against this board's
-0.25**, and 0.40 mm of pitch on a 0.50 mm grid gives fourteen pins a side eleven
-lines to land on. It clears at the **2 oz *minimum* class, 0.15/0.15** — which
-costs nothing at the fabricator, because that is the class JLCPCB gives for the
-copper weight this board already orders — and what it costs is every track at
-0.15 mm, a grid with four times the cells, and a re-route of all 164 nets.
+QFN-56 at 0.40 mm pitch, and it fails **all three** conditions of the middle rung:
+the widest escape that clears the next pin is 0.20 mm against this board's 0.25;
+0.40 mm of pitch on a 0.50 mm grid gives fourteen pins a side eleven lines to land
+on; and the jog comes 0.150 mm to a neighbour against 0.45.
+
+**`rules.coarsest_class_for()` solves for the class rather than reading one off a
+table, and the answer is 0.12/0.12 mm or finer** — below JLCPCB's 0.15 mm 2 oz
+floor and above its 0.09 mm one. So the only listed class that works is
+**0.09/0.09, which is 1 oz outer copper only: the copper weight is the price and
+no intermediate class avoids it.** At that class no pad on the package needs an
+escape at all — the fan-out becomes unnecessary rather than sufficient — and the
+grid goes to 0.23 mm, 4.7× the cells. It drags two unsettled things with it: a
+router whose work is superlinear in cell count, and the coil nets at 93 mA on
+0.09 mm of 1 oz copper unless they get a width of their own, which `route.py`
+cannot currently give them.
 
 **Gate 2 — the supply, `controller_supply()`.** `supply_fit()` leaves **35.4 mA**
 of +Vout. V3V3 is an MCP1700 off V5 off VA+, so a milliamp of 3.3 V is a

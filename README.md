@@ -355,16 +355,36 @@ collects three questions into the one a package is chosen against:
 
 | | |
 |---|---|
-| `pin_pitch > grid + clearance` | a track starts inside the pad at any placement. **SOIC, 1.27 mm** |
-| `2(edge − clearance) >= track` **and** `pin_pitch >= grid` | it cannot, but an escape on the pad's own centre line reaches it. **TSSOP, 0.65 mm** |
-| neither | nothing this router draws gets there. **QFN-56, 0.40 mm** |
+| `limit >= grid/2` | a track starts inside the pad at every phase. **SOIC, 1.27 mm** |
+| `2(edge − clearance) >= track`, `pin_pitch >= grid`, **and the jog clears** | it cannot, but an escape on the pad's own centre line reaches it. **TSSOP, 0.65 mm** |
+| any of those failing | nothing this router draws gets there. **QFN-56, 0.40 mm** |
 
-The second condition of the middle rung is a *counting* one and it is the one
-nobody would think of: an escape ends on a grid cell and may move at most half a
-pitch to get there, so pins map onto grid lines in order — and two pins closer
-together than one grid pitch have to share a line, which two nets cannot.
-Fourteen pins a side over 5.2 mm want fourteen lines and a 0.5 mm grid offers
-eleven.
+The **counting** condition is one nobody would think of: an escape ends on a grid
+cell and may move at most half a pitch to get there, so pins map onto grid lines
+in order — and two pins closer together than one grid pitch have to share a line,
+which two nets cannot. Fourteen pins a side over 5.2 mm want fourteen lines and a
+0.5 mm grid offers eleven.
+
+**The jog condition was missing, and its absence made this section wrong for one
+pass.** It said the RP2040 "clears at the 2 oz minimum, 0.15/0.15". Two conditions
+were enumerated, both were true at that class, and the conclusion was written as
+though the enumeration were complete — a rule whose stated *test* was narrower
+than its stated *mechanism*, which is exactly what `floorplan.CROSSING_RULE`
+records one artefact along. The third condition is that the jog is ordinary track
+pointing at a neighbour `pin_pitch` away, so it needs
+`pin_pitch − grid/2 >= clearance + track`. Nothing would have caught it: no board
+here has a 0.40 mm part on it, so there was nothing for a check to fail against.
+It was caught by asking the arithmetic for a class instead of reading a class off
+a table.
+
+**The fitted class fails that condition for the TSSOP and the four escapes on
+this board are legal anyway — and that is arithmetic, not luck.** Adjacent pins'
+offsets differ by `pin_pitch mod grid` = 0.15 mm, and both pins escape only when
+both offsets exceed 0.125 mm, which is impossible with the *same* sign because
+0.125 + 0.15 exceeds the 0.25 an offset can reach. So two adjacent escapes here
+always point **away** from each other. At 0.40 mm on a 0.35 mm grid they need
+not, so QFN escapes can point into each other and `escape_clearances()` refuses
+the second.
 
 ## The controller: the part is settled and the block is still not drawn
 
@@ -404,13 +424,21 @@ anyway. It may well be true and nothing here can check it — which is this repo
 own rule about a constraint with margin, applied to a part.
 
 **Gate 1 — the package.** RP2040 ships only in a 7×7 QFN-56 at 0.40 mm pitch, and
-`rules.fan_out_class()` puts that off the bottom of the ladder above on both
-counts: the widest escape that clears the next pin is **0.20 mm against this
-board's 0.25**, and fourteen pins a side get eleven grid lines. It clears at the
-2 oz **minimum** class, 0.15/0.15 — which costs nothing at the fabricator,
-because that is the class JLCPCB publishes for the copper weight this board
-already orders. What it costs is every track at 0.15 mm, a grid with four times
-the cells, and a re-route of all 164 nets. `controller_package()`.
+`rules.fan_out_class()` puts that off the bottom of the ladder on **all three**
+counts: widest legal escape 0.20 mm against this board's 0.25 mm track, fourteen
+pins a side for eleven grid lines, and the jog coming 0.150 mm to a neighbour
+against 0.45.
+
+`rules.coarsest_class_for()` solves for the class rather than reading one off a
+table: **0.12/0.12 mm or finer**, which is below JLCPCB's 0.15 mm 2 oz floor and
+above its 0.09 mm one. So the only listed class that works is **0.09/0.09 — 1 oz
+outer copper only. The copper weight is the price and no intermediate class
+avoids it.** At that class no pad on the package needs an escape at all: the
+fan-out becomes unnecessary rather than sufficient. It drags two unsettled things
+with it — a 0.23 mm grid at 4.7× the cells on a router whose work is superlinear
+in that, and the coil nets at 93 mA on 0.09 mm of 1 oz copper unless they get a
+width of their own, which `route.py` cannot currently give them.
+`controller_package()`.
 
 **Gate 2 — the supply.** `supply_fit()` leaves 35.4 mA of +Vout, and V3V3 is an
 MCP1700 off V5 off VA+ — so a milliamp of 3.3 V is a milliamp of *twelve* at the
@@ -1025,9 +1053,11 @@ filtered by a number rather than a class.
    this module's most load-bearing unknown.
 
 2. **The controller's two gates, and they are one decision each.**
-   `controller_package()`: 0.40 mm of pin pitch needs the routing grid under
-   0.40 mm, which needs the fabrication class at 0.15/0.15 — free at the
-   fabricator, a re-route of all 164 nets here. `controller_supply()`: a
+   `controller_package()`: 0.40 mm of pin pitch needs 0.12/0.12 mm or finer,
+   so **0.09/0.09 and 1 oz outer copper** — the copper weight, a 0.23 mm grid
+   at 4.7× the cells, and a per-net width for the coils that `route.py` does
+   not have. The alternative is a **spreading fan** at 0.15/0.15, which keeps
+   2 oz and is router work instead. `controller_supply()`: a
    switcher for V3V3, whose requirement is stated as numbers (12 V in, 3.3 V out,
    52 mA, >40 % efficient, and a frequency `supply_beat()` has to clear against
    both the mixer's pump harmonics and this converter's own 522–638 kHz band) —
@@ -1050,13 +1080,14 @@ filtered by a number rather than a class.
    gain. 20 ms is 4× the ~5 ms a relay needs, so it is a sequencing requirement
    rather than a hazard. `design.VREF_TURN_ON_S`.
 
-6. **The copper weight is still a declaration rather than a decision, and
-   something wants a finer class now.** `rules.COPPER_OZ` says 2 oz and the
-   fitted 0.25/0.20 is legal at either, so it has cost nothing to hold the
-   option. The controller changes that: `controller_package()` needs the grid
-   under 0.40 mm, which needs **0.15/0.15 — still 2 oz**, so the copper weight
-   survives and the *fitted class* is what moves. 0.09/0.09 remains 1 oz only
-   and nothing needs it. The largest current on the board is
-   `design.coil_budget()`'s 93 mA of relay coil, and 0.15 mm of 2 oz copper
-   carries about 1 A, so the electrical side of the trade is free.
-   [`rules.md`](docs/rules.md).
+6. **The copper weight has stopped being a free declaration.**
+   `rules.COPPER_OZ` says 2 oz and the fitted 0.25/0.20 is legal at either, so
+   holding the option has cost nothing. The controller ends that:
+   `coarsest_class_for()` puts a 0.40 mm pin pitch at 0.12/0.12 or finer, and
+   the only listed class that reaches it is **0.09/0.09, 1 oz only**. So the
+   copper weight is now a decision with a part behind it, and what wants
+   checking before it is taken is the one current on the board that is not
+   microamps: `design.coil_budget()`'s 93 mA of relay coil on 0.09 mm of 1 oz
+   copper is 29 A/mm², which wants the IPC-2221 curve **read** rather than
+   assumed — or the coils given a track width of their own, which `route.py`
+   cannot currently do. [`rules.md`](docs/rules.md).
