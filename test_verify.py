@@ -65,7 +65,8 @@ def _design_restored():
     """
     saved = {name: copy.deepcopy(getattr(design, name))
              for name in ("NETS", "LOOM", "DEFERRED_PINS", "DEFERRED",
-                          "NO_CONNECT", "VCA_ROUT_OHMS", "CLAMP_VF_TABLE")}
+                          "NO_CONNECT", "VCA_ROUT_OHMS", "CLAMP_VF_TABLE",
+                          "SUPPLY_IOUT_MA")}
     try:
         yield
     finally:
@@ -443,6 +444,52 @@ def _(nets, values, open_pins, violations, drc, board):
     values["C803"] = "220n/50V X7R"
 
 
+# The supply. Four faults through the netlist and two through the geometry, and
+# the first of the four is the one that would destroy the board: a dual-output
+# converter's Com is pin 7 and its -Vout is pin 8, so swapping them makes
+# +12 V and 0 V where the design wants +12 and -12. Every op-amp on the board
+# then sits with its V- pin at MDGND and its V+ at 12, which works, and every
+# signal that should swing below ground clips at zero -- a fault that powers
+# up, passes ERC, passes DRC, and is wrong in a way no continuity test finds
+# because both nets exist and both are connected.
+@case("the converter's Com and -Vout are swapped", verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    com = str(design.SUPPLY_PINS["Com"])
+    neg = str(design.SUPPLY_PINS["-Vout"])
+    nets["MDGND"].discard((design.SUPPLY_REF, com))
+    nets["VN_RAW"].discard((design.SUPPLY_REF, neg))
+    nets["MDGND"].add((design.SUPPLY_REF, neg))
+    nets["VN_RAW"].add((design.SUPPLY_REF, com))
+
+
+@case("a rail filter is drawn across the rail", verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["VA_RAW"].discard(("R804", "1"))
+    nets["MDGND"].add(("R804", "1"))
+
+
+@case("a rail filter capacitor returns to MAGND", verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["MDGND"].discard(("C811", "2"))
+    nets["MAGND"].add(("C811", "2"))
+
+
+@case("a secondary part hangs off the primary", verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["IGND"].add(("R902", "1"))
+
+
+# **Not a netlist fault at all, and it is the one that will actually happen.**
+# The converter's outputs are 250 mA each and the deferred controller and ADC
+# both land on VA+, one part at a time, with nothing in between to say when the
+# total crossed the datasheet. Planted by shrinking the rating rather than by
+# adding load, because adding load means adding parts and the fault this
+# defends against is the load arriving legitimately.
+@case("the converter's output rating is exceeded", verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    design.SUPPLY_IOUT_MA = 100.0
+
+
 # The board. Two checks, and the second is the one no other instrument in this
 # project or KiCad itself will make.
 @case("DRC reports a clearance violation", verify.check_board)
@@ -553,6 +600,31 @@ def main():
         nets = copy.deepcopy(clean_nets)
         mutate(nets)
         found = verify.compare(nets, design.NETS)
+        report(label, found)
+
+
+    # The isolation barrier's geometric half. **Planted by moving the declared
+    # region rather than by editing the routed board**, and the reason is worth
+    # stating because the alternative looks more honest and is not: a text
+    # substitution into a routed .kicad_pcb plants a different fault every time
+    # the router's output moves, so the case would drift from what its label
+    # says without anybody touching it. The declaration is the stable half.
+    #
+    # Both directions, because they are different faults. Moving the line west
+    # leaves the primary's own copper outside the region it is supposed to be
+    # confined to -- a part placed on the wrong side. Moving it east puts the
+    # digital pour and its tracks inside -- a plane across the barrier, which
+    # is the failure design.barrier_return() is arithmetic about.
+    import placement as _placement
+    original_x = _placement.ISOLATION_X
+    for label, moved in (
+            ("primary copper outside the isolated region", original_x - 20.0),
+            ("digital copper inside the isolated region", original_x + 30.0)):
+        _placement.ISOLATION_X = moved
+        try:
+            found = verify.check_isolation_gap(verify.PCB)
+        finally:
+            _placement.ISOLATION_X = original_x
         report(label, found)
 
     # The router's own invariant, which is not a verify.py check and so cannot

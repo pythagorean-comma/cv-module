@@ -171,6 +171,10 @@ def library_tables(directory):
                              if part.footprint})
     rows = [f'  (lib (name "{nick}")(type "KiCad")(uri '
             f'"${{KICAD10_FOOTPRINT_DIR}}/{nick}.pretty")(options "")(descr ""))'
+            if nick != NICK else
+            f'  (lib (name "{NICK}")(type "KiCad")(uri '
+            f'"${{KIPRJMOD}}/{NICK}.pretty")(options "")(descr '
+            f'"Footprints KiCad does not ship -- see gen_project.TMR6WI"))'
             for nick in footprint_libs]
     (directory / "fp-lib-table").write_text(
         "(fp_lib_table\n  (version 7)\n" + "\n".join(rows) + "\n)\n")
@@ -199,6 +203,149 @@ def symbol_library(path):
     path.write_text(dumps(library) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# The project footprint library
+# ---------------------------------------------------------------------------
+# **One footprint, and the argument for generating it is the argument the
+# symbol library already makes one paragraph up.** KiCad ships no land pattern
+# for the TMR 6WI. It ships two that look like one -- the TMR 4WI's and the
+# TMR 8WI's, both with exactly the right pad pattern, 1-2-3 then the 5.08 mm
+# gap where pin 4 is not, then 5-6-7-8 -- and both with a different body: the
+# TMR 4WI's is 9.3 mm deep with its pin row 2.575 mm from the front edge,
+# against this part's 9.1 and 3.5.
+#
+# Using one of those and calling it approximate is what placement.SIZE's own
+# comment is about: "a rounded number is approximate, a number on the wrong
+# axis is wrong", written after every multi-pin courtyard in that table turned
+# out to be transposed and to have survived three passes because every
+# consumer was transposed too. A silkscreen and a courtyard a millimetre out
+# in one direction is the same class of thing, and the only instrument that
+# would ever report it is gen_pcb.check_courtyards(), which compares this
+# footprint against placement.SIZE -- both of which would be wrong together.
+#
+# So it is written from the outline drawing on page 4 of the datasheet, with
+# every dimension a named constant carrying the number it came from.
+
+TMR6WI = {
+    "name": "TRACO_TMR-6-xxxxWI_Dual_THT",
+    # Datasheet page 4, Outline Dimensions, in millimetres.
+    "body": (21.8, 9.1),
+    # Distance from the left body edge to pin 1, then the gaps between pins.
+    # "2.0 / 2 x 2.54 / 5.08 / 3 x 2.54", which totals 21.8 with 2.02 left
+    # over at the other end -- the drawing is symmetric to within its own
+    # rounding and the pin string is what is dimensioned.
+    "pin1_inset": 2.0,
+    "pitch": 2.54,
+    # The pin row's distance from the near long edge: "3.5 (0.14)".
+    "pin_row_inset": 3.5,
+    # Pin numbers in order along the row. There is no 4: that position is the
+    # creepage gap between primary and secondary, which is why the design's
+    # isolation keep-out is placed off this footprint rather than guessed.
+    "pins": (1, 2, 3, None, 5, 6, 7, 8),
+    # Pin cross-section is 0.50 x 0.25 mm. The hole is KiCad's own figure for
+    # this family of Traco SIPs rather than a tighter one computed from the
+    # pin: these are wave-soldered parts and the two stock footprints use
+    # 1.0 mm and 1.1 mm.
+    "drill": 1.0,
+    "pad": 1.6,
+}
+
+# How far the courtyard stands off the body. KiCad's own Traco footprints use
+# 0.25 mm, which is what placement.SIZE has to be told.
+COURTYARD_CLEARANCE = 0.25
+
+
+def _tmr6wi():
+    """The TMR 6WI land pattern, as an s-expression, from its own drawing.
+
+    Anchored on pad 1 at the origin, which is the convention every
+    Converter_DCDC footprint in KiCad's library uses and therefore the one
+    placement.py's ANCHOR table is already written around.
+    """
+    spec = TMR6WI
+    length, depth = spec["body"]
+    left = -spec["pin1_inset"]
+    right = left + length
+    top = -spec["pin_row_inset"]
+    bottom = top + depth
+    clear = COURTYARD_CLEARANCE
+    silk = 0.11
+
+    out = [Sym("footprint"), spec["name"],
+           [Sym("version"), 20240108], [Sym("generator"), PROJECT],
+           [Sym("generator_version"), "10.0"],
+           [Sym("layer"), "F.Cu"],
+           [Sym("descr"),
+            "Traco TMR 6WI, isolated 6 W DC/DC, dual output, SIP-8 with the "
+            "pin 4 position omitted. Generated from the outline drawing on "
+            "page 4 of the datasheet of 7 November 2023 -- see "
+            "design.SUPPLY_DATASHEET"],
+           [Sym("tags"), "traco tmr6wi dcdc isolated dual sip8"],
+           [Sym("attr"), Sym("through_hole")]]
+
+    def text(kind, value, x, y, layer, hide=False):
+        item = [Sym("property"), kind, value,
+                [Sym("at"), x, y, 0], [Sym("layer"), layer],
+                [Sym("effects"), [Sym("font"), [Sym("size"), 1, 1],
+                                  [Sym("thickness"), 0.15]]]]
+        if hide:
+            item.insert(4, [Sym("hide"), Sym("yes")])
+        return item
+
+    out.append(text("Reference", "${REFERENCE}", (left + right) / 2,
+                    top - 1.2, "F.SilkS"))
+    out.append(text("Value", spec["name"], (left + right) / 2,
+                    bottom + 1.2, "F.Fab"))
+    out.append(text("Datasheet", "", 0, 0, "F.Fab", hide=True))
+    out.append(text("Description", "", 0, 0, "F.Fab", hide=True))
+
+    def line(x1, y1, x2, y2, layer, width):
+        return [Sym("fp_line"), [Sym("start"), x1, y1], [Sym("end"), x2, y2],
+                [Sym("stroke"), [Sym("width"), width], [Sym("type"),
+                                                        Sym("solid")]],
+                [Sym("layer"), layer]]
+
+    def rect(x1, y1, x2, y2, layer, width):
+        return [Sym("fp_rect"), [Sym("start"), x1, y1], [Sym("end"), x2, y2],
+                [Sym("stroke"), [Sym("width"), width], [Sym("type"),
+                                                        Sym("solid")]],
+                [Sym("fill"), Sym("no")], [Sym("layer"), layer]]
+
+    # The body on fabrication, the same body on silkscreen but broken either
+    # side of the pin row so that no silk lands on a pad, and the courtyard
+    # 0.25 mm outside it.
+    out.append(rect(left, top, right, bottom, "F.Fab", 0.1))
+    out.append(rect(left - clear, top - clear, right + clear, bottom + clear,
+                    "F.CrtYd", 0.05))
+    out.append(line(left, top, right, top, "F.SilkS", silk))
+    out.append(line(left, bottom, right, bottom, "F.SilkS", silk))
+    out.append(line(left, top, left, bottom, "F.SilkS", silk))
+    out.append(line(right, top, right, bottom, "F.SilkS", silk))
+    # Pin 1, marked on both layers a human reads.
+    out.append(line(left - 0.6, top - 0.6, left - 0.6, top - 0.6 + 1.0,
+                    "F.SilkS", silk))
+
+    for index, number in enumerate(spec["pins"]):
+        if number is None:
+            continue
+        x = index * spec["pitch"]
+        shape = Sym("rect") if number == 1 else Sym("circle")
+        out.append([Sym("pad"), str(number), Sym("thru_hole"), shape,
+                    [Sym("at"), x, 0.0],
+                    [Sym("size"), spec["pad"], spec["pad"]],
+                    [Sym("drill"), spec["drill"]],
+                    [Sym("layers"), "*.Cu", "*.Mask"],
+                    [Sym("remove_unused_layers"), Sym("no")]])
+    return out
+
+
+def footprint_library(directory):
+    """Write out/cv.pretty, the project's own footprints."""
+    directory.mkdir(exist_ok=True)
+    (directory / f"{TMR6WI['name']}.kicad_mod").write_text(
+        dumps(_tmr6wi()) + "\n")
+
+
 def main():
     OUT.mkdir(exist_ok=True)
     root_uuid = Schematic(PROJECT).uuid
@@ -206,8 +353,9 @@ def main():
         json.dumps(project_document(root_uuid), indent=2) + "\n")
     library_tables(OUT)
     symbol_library(OUT / f"{NICK}.kicad_sym")
+    footprint_library(OUT / f"{NICK}.pretty")
     print(f"out/{PROJECT}.kicad_pro, sym-lib-table, fp-lib-table, "
-          f"out/{NICK}.kicad_sym")
+          f"out/{NICK}.kicad_sym, out/{NICK}.pretty")
 
 
 if __name__ == "__main__":

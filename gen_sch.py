@@ -622,7 +622,9 @@ def shared_block(sch, y):
         sch.label(f"PWM{n}", px, py - 5.08)
         _drop(sch, rr, "2", "MDGND", dy=5.08)
 
-    for ref_name, x in (("J8", 330 * G), ("J9", 370 * G), ("J10", 410 * G),
+    # J8 is not in this loop any more: it is a two-way *primary* inlet now and
+    # is drawn with the converter it feeds. See supply_block().
+    for ref_name, x in (("J9", 370 * G), ("J10", 410 * G),
                         ("J11", 450 * G)):
         part = circuit.PARTS[ref_name]
         lib = ("Connector_Generic:Conn_01x03" if "1x03" in part.footprint
@@ -874,8 +876,18 @@ def shared_block(sch, y):
     # what a rail arriving on a connector looks like. VREF is driven by the
     # MAX6126's OUTF and VREFN by U8C's output -- both real drivers -- so a flag
     # there is a second driver on a driven net, and ERC said so twice.
-    for index, net in enumerate(("VA+", "VA-", "V5",
-                                 "MAGND", "MDGND", socket.AGND)):
+    # **Three came off this list and two went on, and the reason is that the
+    # supply is drawn.** A PWR_FLAG asserts "something drives this net" on a
+    # net whose pins are all passive; put one on a net that has a real driver
+    # and ERC reports two drivers, which it did for every rail the moment U15
+    # and U16 appeared. V5 is driven by the regulator's output pin and MDGND by
+    # the converter's Com, so both lose their flags. VA+ and VA- keep theirs,
+    # which looks inconsistent and is not: they sit on the far side of R804 and
+    # R805 from the pins that drive them, so the rail *net* still has nothing
+    # but passives on it. And the primary side gains two, because IGND and
+    # VIN_P feed power_in pins from a connector.
+    for index, net in enumerate(("VA+", "VA-", "IGND", "VIN_P",
+                                 "MAGND", socket.AGND)):
         fx = 640 * G + index * 16 * G
         flag = sch.place(f"#FLG{index + 1:02d}", "power:PWR_FLAG", "PWR_FLAG",
                          fx, y + 121.92)
@@ -890,6 +902,123 @@ def shared_block(sch, y):
 # ---------------------------------------------------------------------------
 # Does the drawing mean what design.py says?
 # ---------------------------------------------------------------------------
+
+# The supply's own band, below everything. Its x runs the width of the sheet
+# because the block is a chain -- inlet, protection, converter, rails -- and
+# drawing a chain as a row is what makes the isolation barrier visible as a
+# gap in the middle of it rather than as a note.
+SUPPLY_SHEET_Y = SHARED_Y + 240 * G
+
+
+def supply_block(sch, y):
+    """The inlet, the converter, the barrier and the two derived rails.
+
+    Drawn left to right in the order the current takes, with the barrier in
+    the middle: everything left of U15 is labelled IGND and everything right
+    of it MDGND, and the two never share a symbol. That is the one thing this
+    sheet can say about isolation -- copper is verify.check_isolation_gap()'s
+    job -- and it is worth the horizontal space, because a reader who cannot
+    see where the barrier is will put something across it.
+    """
+    # -- primary ----------------------------------------------------------
+    inlet = sch.place("J8", "Connector_Generic:Conn_01x02",
+                      circuit.PARTS["J8"].value, 40 * G, y,
+                      footprint=circuit.PARTS["J8"].footprint)
+    for pin, net in (("1", "VIN"), ("2", "IGND")):
+        px, py = inlet.pin(pin)
+        sch.wire((px, py), (px + 7.62, py))
+        sch.label(net, px + 7.62, py)
+
+    diode = sch.place("D804", "Device:D_Schottky",
+                      circuit.PARTS["D804"].value, 110 * G, y,
+                      footprint=circuit.PARTS["D804"].footprint)
+    for pin, net in ((str(circuit.DIODE_PINS["A"]), "VIN"),
+                     (str(circuit.DIODE_PINS["K"]), "VIN_P")):
+        px, py = diode.pin(pin)
+        sch.wire((px, py), (px, py - 7.62))
+        sch.label(net, px, py - 7.62)
+
+    for index, ref in enumerate(("C807", "C808", "C809")):
+        cap = _c(sch, ref, (140 + 24 * index) * G, y, angle=VERT)
+        px, py = cap.pin("1")
+        sch.wire((px, py - 5.08), (px, py))
+        sch.label("VIN_P", px, py - 5.08)
+        px, py = cap.pin("2")
+        sch.wire((px, py), (px, py + 5.08))
+        sch.label("IGND", px, py + 5.08)
+
+    # -- the converter, and the gap through the middle of it --------------
+    conv = sch.place(circuit.SUPPLY_REF, "cv:TMR6-2422WI", circuit.SUPPLY_PART,
+                     260 * G, y, footprint=circuit.PARTS[circuit.SUPPLY_REF].footprint)
+    for pin, net, side in (
+            (circuit.SUPPLY_PINS["+Vin"], "VIN_P", -1),
+            (circuit.SUPPLY_PINS["-Vin"], "IGND", -1),
+            (circuit.SUPPLY_PINS["Remote"], "IGND", -1),
+            (circuit.SUPPLY_PINS["+Vout"], "VA_RAW", 1),
+            (circuit.SUPPLY_PINS["Com"], "MDGND", 1),
+            (circuit.SUPPLY_PINS["-Vout"], "VN_RAW", 1)):
+        px, py = conv.pin(str(pin))
+        if net == "MDGND":
+            # Com sits 2.54 mm from -Vout in the same column, so a ground drop
+            # taken at the usual offset falls straight through that pin's own
+            # wire end. Out twice as far first, then down -- the same move
+            # _leave_down() makes for the SSI2164's GND and V- pair, and the
+            # same fault it was written for.
+            sch.wire((px, py), (px + side * 20.32, py),
+                     (px + side * 20.32, py + 7.62))
+            _gnd(sch, px + side * 20.32, py + 7.62, net)
+        else:
+            sch.wire((px, py), (px + side * 10.16, py))
+            sch.label(net, px + side * 10.16, py)
+
+    sch.text("The isolation barrier runs through U15: pins 1-3 are referenced "
+             "to IGND, which is the inlet's 0 V and the mixer's PGND through "
+             "the shared jack; pins 6-8 to MDGND. C810 is the only other part "
+             "that touches both. See design.barrier_return().",
+             200 * G, y - 30.48, size=2.0)
+
+    # The Y-capacitor, drawn between the two grounds rather than beside one of
+    # them, because that is what it is.
+    bridge = _c(sch, "C810", 330 * G, y + 45.72, angle=VERT)
+    px, py = bridge.pin("1")
+    sch.wire((px, py - 5.08), (px, py))
+    sch.label("IGND", px, py - 5.08)
+    _drop(sch, bridge, "2", "MDGND", dy=5.08)
+
+    # -- secondary: two rail filters and the 5 V regulator ----------------
+    for ref, source, rail, cap in (("R804", "VA_RAW", "VA+", "C811"),
+                                   ("R805", "VN_RAW", "VA-", "C812")):
+        res = _r(sch, ref, (400 + 60 * (ref == "R805")) * G, y, angle=VERT)
+        px, py = res.pin("1")
+        sch.wire((px, py - 5.08), (px, py))
+        sch.label(source, px, py - 5.08)
+        px, py = res.pin("2")
+        sch.wire((px, py), (px, py + 5.08))
+        sch.label(rail, px, py + 5.08)
+        shunt = _c(sch, cap, (420 + 60 * (ref == "R805")) * G, y, angle=VERT)
+        px, py = shunt.pin("1")
+        sch.wire((px, py - 5.08), (px, py))
+        sch.label(rail, px, py - 5.08)
+        _drop(sch, shunt, "2", "MDGND", dy=5.08)
+
+    reg = sch.place(circuit.V5_REF, "cv:NCP1117-5.0", circuit.V5_PART,
+                    530 * G, y, footprint=circuit.PARTS[circuit.V5_REF].footprint)
+    px, py = reg.pin(str(circuit.V5_PINS["VI"]))
+    sch.wire((px - 10.16, py), (px, py))
+    sch.label("VA_RAW", px - 10.16, py)
+    px, py = reg.pin(str(circuit.V5_PINS["VO"]))
+    sch.wire((px, py), (px + 10.16, py))
+    sch.label("V5", px + 10.16, py)
+    _drop(sch, reg, str(circuit.V5_PINS["GND"]), "MDGND", dy=7.62)
+
+    for ref, net in (("C813", "VA_RAW"), ("C814", "V5")):
+        cap = _c(sch, ref, (560 + 24 * (ref == "C814")) * G, y + 45.72,
+                 angle=VERT)
+        px, py = cap.pin("1")
+        sch.wire((px, py - 5.08), (px, py))
+        sch.label(net, px, py - 5.08)
+        _drop(sch, cap, "2", "MDGND", dy=5.08)
+
 
 def _between(point, a, b):
     """Is `point` strictly inside the segment a-b, collinear with it?
@@ -1179,6 +1308,7 @@ def build():
     for n in range(1, circuit.CHANNELS + 1):
         envelope_row(sch, n, ENV_Y0 + (n - 1) * ENV_PITCH)
     shared_block(sch, SHARED_Y)
+    supply_block(sch, SUPPLY_SHEET_Y)
     sch._undrawn_flags = no_connects(sch)
     sch.auto_junctions()
     return sch

@@ -8,4 +8,5 @@
   (lib (name "Relay_SMD")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/Relay_SMD.pretty")(options "")(descr ""))
   (lib (name "Resistor_SMD")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/Resistor_SMD.pretty")(options "")(descr ""))
   (lib (name "TestPoint")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/TestPoint.pretty")(options "")(descr ""))
+  (lib (name "cv")(type "KiCad")(uri "${KIPRJMOD}/cv.pretty")(options "")(descr "Footprints KiCad does not ship -- see gen_project.TMR6WI"))
 )

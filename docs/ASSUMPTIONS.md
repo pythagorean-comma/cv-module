@@ -30,6 +30,16 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **When wrong:** Two capacitors per channel. The corner scales as 1/C with the resistors fixed at the <=22k the noise budget wants, so 400 Hz is C1 = 36n / C2 = 15n and nothing else moves. Note the direction of the trade: faster is a worse anti-AM filter and a sharper click, and 00-current-state puts this block at 15-20 dB of the whole noise argument.
 
+### `dcdc_node_v` = 40.0 V pk-pk, flyback primary switching node
+
+**Range:** 24.0 .. 72.0
+
+**Question:** How large is the swing on the TMR 6WI's primary switching node? A flyback's drain sits at Vin plus the reflected output, so at a 12-18 V input the range below is 2x to 4x the input -- read off what the topology permits, not off the datasheet, which does not say.
+
+**Sets:** the common-mode current through the 50 pF barrier, and with it the size of the Y-capacitor
+
+**When wrong:** Linearly. barrier_return() scales with it, so the top of the range is 5 dB worse than the value and the bottom is 4 dB better -- and the *fraction* returned locally does not move at all, because it is set by two impedances. What would change is whether the residual at the bond is worth another part, and at every point in this range it is not.
+
 ### `env_opamp_iq` = 2.5 mA/amplifier, TL074 quiescent, maximum
 
 **Range:** 1.125 .. 2.8
@@ -39,6 +49,16 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 **Sets:** 8 amplifiers of the 40 on VA+/VA-, so about 8 mA on a rail supply_load() puts at 110 mA maximum
 
 **When wrong:** The bipolar rails move by at most 11 mA either way, which is inside any sensible margin on a DC-DC that has not been chosen. It is declared rather than resolved because a supply sized on an invented maximum is exactly what section 6 forbids, and because fitting the H grade -- which is read -- would settle it by choosing a part.
+
+### `inlet_loop_uh` = 0.75 uH, the loop the shared inlet closes
+
+**Range:** 0.3 .. 1.5
+
+**Question:** What is the inductance of the loop formed by the audio ground bond, the mixer's own AGND/PGND star, and the two inlet leads back to the shared barrel jack? It is a property of how the box is wired, not of either board.
+
+**Sets:** how much of the barrier's common-mode current prefers the audio bond to the Y-capacitor
+
+**When wrong:** It is the *denominator* of the split, so a smaller loop is a worse result: at 0.3 uH more of the barrier current takes the long way round. The whole declared range keeps the residual below the mixer's own noise floor, and the answer if it did not is a common-mode choke in the inlet pair -- which raises exactly this number and is the reason it is worth knowing.
 
 ### `logic_law_error` = 0.0023 fractional, '541 output-impedance asymmetry
 
@@ -103,7 +123,6 @@ Not assumptions so much as absences, listed because a section 5 check against a 
 
 - **controller** — RP2040 and its QSPI flash, crystal, USB and MIDI: shared block, and the scope statement puts shared blocks after one channel is complete.
 - **envelope ADC** — ADS131M08 or MCP3564, undecided in spec section 4.4 -- but its sample rate is decided now, at 2 kHz rather than the 1-2 kHz the spec offers, and the six ENV{n} nets exist and are driven. See envelope_sample_rate(); the ADC hangs off them, in the analogue section, so that only SPI crosses the domain boundary.
-- **supply** — isolated DC-DC at >=300 kHz per section 1.1; the topology is decided and the part is not.
 
 ### Pins waiting on a deferred block
 
@@ -343,7 +362,7 @@ None. All 48 were the twelve pad relays' coils, and they went with the pad — s
 
 ## Prices
 
-Of 41 BOM lines, **1 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 38 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
+Of 46 BOM lines, **2 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 42 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
 
 The totals in `docs/SHOPPING.md` are therefore a range, and the range is honest rather than decorative. They are also a floor: none of the deferred blocks is costed.
 

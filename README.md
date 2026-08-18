@@ -24,27 +24,29 @@ guessed is in [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
 |---|---|
 | one channel derived | ✅ every value, arithmetic inline |
 | the coarse pad | ✅ **struck** — 0.000 dB of system noise for 36 parts |
-| netlist | ✅ 225 parts, 144 nets, all pins resolved |
+| netlist | ✅ 238 parts, 149 nets, all pins resolved |
 | schematic | ✅ **0 merges, 0 breaks, 0 stranded pins** |
 | the verification loop | ✅ `verify.py` reads **KiCad's** netlist, compared by name |
 | ERC | ✅ **0 errors and 0 warnings** — `ERC_ALLOWED` is empty |
 | the envelope rectifier | ✅ derived, drawn and checked — τ from the transient, not from a target |
 | the fail-safe | ✅ drawn: de-energised **is** bypass, and the pump's own rise time is the power-up interlock |
-| section 5 constraints | ✅ checked mechanically, 56 planted faults caught — **and the faults themselves are now checked** |
+| section 5 constraints | ✅ checked mechanically, **63** planted faults caught — and the faults themselves are checked too |
 | deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
 | board | ✅ placed, poured and **fully routed** — 0 unconnected, 0 DRC violations |
 | the design rules | ✅ one copy in `rules.py`, and DRC is finally enforcing them |
 | the two `UNSPECIFIED` parts | ✅ **chosen** — Omron G6S-2 DC5 and Diodes DMG1012T. `UNSPECIFIED` is empty and no courtyard is reserved |
 | the Schottky clamp | ✅ **read, and it had failed** — the BAT54 missed by 5.5 dB. PMEG2010AEH fits with 1.5 dB |
-| the supply's requirement | ✅ derived from the netlist: **±12 V at 110 mA, +5 V at 93 mA, 3.10 W**. ❌ the DC-DC itself is not chosen |
+| the supply | ✅ **chosen, drawn, placed, routed and checked** — Traco TMR 6-2422WI, isolated, ±12 V at 250 mA, **580 kHz PWM**, on this board. The isolation barrier is copper `verify.py` measures |
+| the +5 V rail | ✅ NCP1117 — and **the package is the answer**: 0.77 W against the SOT-223's own 160 °C/W is 124 degrees of rise, so it is a DPAK |
 | documents to look at | ✅ [schematic](docs/cv-module-schematic.pdf), [layout](docs/cv-module-layout.pdf), [render](docs/cv-module-top.png). ❌ no gerbers, and that is a gate |
+| the inlet fuse | ❌ **derived and not fitted.** The converter's datasheet asks for 1.6 A slow blow and the assessment says yes — the inlet is shared with a fabricated board that has none. No part number was verified this session, and a plausible order code is worse than an absent part |
 
-Three shared blocks are deferred with reasons in `design.DEFERRED`: controller,
-envelope ADC and supply. There were six. The relay drive is not deferred but
+Two shared blocks are deferred with reasons in `design.DEFERRED`: the controller
+and the envelope ADC. The supply was the third. There were six. The relay drive is not deferred but
 deleted, along with the pad it drove; the envelope rectifier and the fail-safe
 are drawn. **`design.UNSPECIFIED` is empty**: the bypass relay and its MOSFET
-are chosen, all 225 parts have a footprint, and no courtyard is reserved.
+are chosen, all 238 parts have a footprint, and no courtyard is reserved.
 
 Choosing them also settled a bug that only existed while they were not. The
 dict is keyed by a part's *value*, and an unchosen part's value is `None` — so
@@ -134,7 +136,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | `design.py` | values, derivations, the netlist, and the borrowed-symbol patch |
 | `constraints.py` | does each constraint have a mechanism? One did not |
 | `delta.py` | this module's effect, via the mixer's own functions |
-| `gen_sch.py` / `gen_project.py` | the sheet, and the project KiCad needs to read it |
+| `gen_sch.py` / `gen_project.py` | the sheet, the project KiCad needs to read it, and **the project's own symbol and footprint libraries** — `out/cv.kicad_sym` and `out/cv.pretty`, the second holding the one land pattern KiCad does not ship |
 | `rules.py` | the fabrication rules, the routing pitch derived from them, and the fab class read first-hand |
 | `gen_plots.py` | the schematic, the layout and a render — the outputs you can look at without KiCad |
 | `placement.py` / `route.py` | the floorplan as coordinates, and a maze router with rip-up and retry. Neither imports KiCad |
@@ -408,6 +410,78 @@ Two smaller corrections fell out: `coil_budget()` costed the OPA1644 at 1.7 mA
 per amplifier, which matches no row of its table (1.8 typ, 2.3 max), and the
 TL074's maximum is the one figure in the supply arithmetic still unread — 8
 amplifiers of 40, declared as `MEASURED["env_opamp_iq"]` rather than invented.
+
+**And the requirement was still 25 % light, for a reason that is a mistake in
+method rather than in arithmetic.** 3.10 W is the sum of each rail's power at
+its own voltage, which is the right number for what the module dissipates and
+the wrong one for what a converter delivers: V5 is made linearly from VA+, so
+every milliamp of it leaves the converter at twelve volts and arrives at five.
+`supply_fit()` counts from the converter's pins outward instead and gets
+**3.87 W** — 213 mA on +Vout against 110 on −Vout. Summing rail powers is
+exactly the shortcut that looks complete: three rails, three products, one
+total, nothing visibly missing. What it omits is the topology between them, and
+the omission is invisible until somebody draws the topology.
+
+## The supply, and the question nobody knew was open
+
+**The converter is on this board, and where it went was undecided in two places
+at once.** `floorplan.ZONES` has carried a zone P — *"supply … the far corner
+from A1 and R, with its own local return"* — since the first pass, while
+`design.py` described J8 as a five-way **secondary** inlet fed from a converter
+somewhere else. Both are prose, both were consumed, and they cannot both be
+true.
+
+**Nothing would have caught it.** A check that every zone holds parts unless its
+block is deferred would have passed: zone P was empty and `"supply"` *was* in
+`design.DEFERRED`, so the two agreed perfectly while disagreeing about the only
+thing that mattered. This repo instruments values, nets and geometry, and a
+decision that exists only as two sentences in two files is outside all three.
+The general form is the third variant of the failure this project keeps finding:
+**a deferred block cannot be checked for where it lives, because nothing is
+drawn.** Deferral suspends every instrument at once.
+
+The part is a **Traco TMR 6-2422WI** — 9–36 V in, ±12 V at 250 mA, 6 W, SIP-8,
+1600 VDC, 50 pF of barrier and **580 kHz fixed-frequency PWM**, every figure read
+first-hand from the TMR 6WI datasheet of 7 November 2023. The obvious cheaper
+part, the plain TMR 6, is the same power in the same package for half the money
+and is disqualified by one line of its own datasheet: *"100 kHz min."* on an
+**RCC** topology, which is self-oscillating — its frequency moves with load, and
+100 kHz sits exactly on the second harmonic of the mixer's 45 kHz pump.
+
+Three results are worth carrying out of it.
+
+**The ≥300 kHz rule is a fundamental-only rule.** `supply_beat()` computes what
+`supply-decision.md` states: the pump's ripple has harmonics at every n × 45 kHz,
+and the fitted part's own 522–638 kHz band contains the 12th, 13th and 14th — so
+the nearest beat is **5 kHz** and no switching frequency, at any value, clears
+them all. The rule is kept, because 50 kHz would still be the worst possible
+choice, and it is not what makes this safe. What does is the **isolation** the
+same document already bought: this module shares no rail with the mixer, so the
+two ripples never meet at full size on one node. And the product is second order
+— two terms 56 dB down make one 117 dB down.
+
+**The barrier's own current is the load-bearing part, not the ripple.** 50 pF
+across a switching node is 2.6 mA at 580 kHz, and without a local return it
+takes the audio ground bond: 7.1 mV in series with every channel's return.
+`barrier_return()` sizes C810 against a stated criterion — the largest capacitor
+whose worst-case 100 Hz injection stays 6 dB under the mixer's own noise floor
+in a third-octave band — which is 610 nF, so the value is the 470 nF the board
+already buys. It returns 83 % locally and leaves 1.2 mV. **It does not finish
+the job and the function says so:** the remaining 19 dB is a common-mode choke
+in the inlet pair, which multiplies the loop impedance instead of dividing the
+capacitor's, and it is a pass of its own rather than a guess in this one.
+
+**The 5 V regulator's package is the answer.** 0.77 W — (12 − 5) × 93 mA plus
+the part's own 10 mA quiescent — against the NCP1117 SOT-223's published
+160 °C/W is 124 degrees of rise. The DPAK is the same die at 67 °C/W and 52
+degrees. A 100 mA regulator goes in a SOT-223 without anybody thinking about it,
+which is the whole reason the arithmetic is worth doing.
+
+The isolation barrier is **a place on the board**, not a set of net names: the
+primary lives west of `placement.ISOLATION_X` and south of `ISOLATION_Y` with no
+ground pour under it at all, `gen_pcb` pours the southern MDGND as an
+overlapping L to leave that corner empty, and `verify.check_isolation_gap()`
+measures the region against the saved board. C810 is the one declared bridge.
 
 **DRC had never once run against this project's own design rules.** The
 mixer's hard-won lesson is that `SaveBoard()` rewrites the project file with

@@ -239,6 +239,47 @@ reasoning inside a declaration, and nothing can.
 
 ---
 
+## The supply, and where the converter went
+
+**The DC-DC is on this board.** It was an open question that nobody had noticed
+was open: `floorplan.ZONES` has carried a zone P — "supply", far corner, its own
+local return — since the first pass, while `design.py` described J8 as a five-way
+*secondary* inlet fed from a converter somewhere else. Both are prose, both were
+consumed, and they cannot both be true.
+
+**Nothing would have caught it and that is the part to carry.** A check that
+every zone holds parts unless its block is deferred would have passed: zone P was
+empty and "supply" *was* in `design.DEFERRED`, so the two agreed perfectly while
+disagreeing about the only thing that mattered. This repo instruments values,
+nets and geometry; a decision that exists only as two sentences in two files is
+outside all three.
+
+The general form, and it is the third variant of the failure this project keeps
+finding: **a deferred block cannot be checked for where it lives, because nothing
+is drawn.** Deferral suspends every instrument at once. That is an argument for
+drawing blocks early and badly rather than late and well.
+
+Three things about the block that must survive compaction:
+
+* **The isolation barrier is a place, not a net name.** The primary side —
+  `IGND`, `VIN`, `VIN_P` — lives west of `placement.ISOLATION_X` and south of
+  `ISOLATION_Y`, with **no ground pour under it at all**. `gen_pcb.build()`
+  pours the southern MDGND as an overlapping *L* for that reason, and
+  `verify.check_isolation_gap()` measures the region rather than a clearance.
+  `C810` is the one declared bridge and it is in `design.ISOLATION_BRIDGE`.
+* **The `>=300 kHz` rule is a fundamental-only rule.** `design.supply_beat()`
+  shows the pump's 12th, 13th and 14th harmonics all fall inside the chosen
+  part's own 522–638 kHz band, so the nearest beat is **5 kHz** and no
+  switching frequency clears every harmonic. What makes it safe is the
+  isolation — this module shares no rail with the mixer — and the fact that the
+  product is second order. Do not re-derive the rule and stop there.
+* **Summing rail powers understates a linear rail.** `supply_requirement()`
+  says 3.10 W and the converter has to deliver 3.87, because V5 is made from
+  VA+ and leaves the converter at twelve volts. `supply_fit()` counts from the
+  converter's pins outward.
+
+---
+
 ## Toolchain
 
 **Follow `../summing-mixer`. Do not use SKiDL.**
@@ -367,7 +408,8 @@ cv-module/
     STYLE.md             the mixer's conventions, written after reading it
     ssi2164-control-port.md  the datasheet read first-hand — spec corrections
     element-revisit.md   SSI2164 vs THAT2180 vs THAT4301, and where it landed
-    supply-decision.md   isolated DC-DC at >=300 kHz, and why
+    supply-decision.md   isolated DC-DC at >=300 kHz, and why. Carries its own
+                         index of six numbers that moved once it was drawn
     FINDINGS.md          anything wrong in the mixer repo — noted, never fixed
     ASSUMPTIONS.md       everything guessed                      [generated]
     constraints.md       does each constraint have a mechanism?  [generated]
@@ -400,7 +442,9 @@ cv-module/
                          itself under KiCad's Python, then re-runs gen_project
   gen_netlist.py         -> out/cv-module.net
   gen_sch.py             -> out/cv-module.kicad_sch
-  gen_project.py         -> out/cv-module.kicad_pro, the lib tables, out/cv.kicad_sym
+  gen_project.py         -> out/cv-module.kicad_pro, the lib tables,
+                         out/cv.kicad_sym and out/cv.pretty -- the project's
+                         own symbols *and* its one own footprint
   gen_bom.py             -> out/cv-module-bom.csv, docs/SHOPPING.md
   gen_plots.py           -> docs/cv-module-{schematic,layout}.pdf, -top.png
   gen_assumptions.py     -> docs/ASSUMPTIONS.md

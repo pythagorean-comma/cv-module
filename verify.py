@@ -1199,6 +1199,209 @@ def check_open_pins(open_pins):
     return problems
 
 
+# The primary side's nets, as a set, so that "primary" is one list in one
+# place rather than a pattern each check invents. IGND is the reference and
+# the other three are the inlet chain ahead of the converter.
+PRIMARY_NETS = frozenset({"IGND", "VIN", "VIN_P"})
+
+# How far non-primary copper has to stay out of the primary's region. Not a
+# creepage figure -- at 20 V across a barrier rated 1600 VDC, creepage is not
+# what is short. It is the pour gap placement.GROUND_GAP already uses, asserted
+# from the other side: the point is that the region is *empty*, and a millimetre
+# is enough to make "empty" mean something a saved board can be measured for.
+ISOLATION_MM = 1.0
+
+
+def check_supply(nets, values):
+    """The converter is wired as its own pinout table says, and is not overrun.
+
+    Three claims, and the third is the one a netlist can make that a datasheet
+    cannot.
+
+    **The pin map**, against design.SUPPLY_PINS, which is page 4 of the TMR 6WI
+    datasheet. A dual-output SIP-8 has no pin 4 and its Com is pin 7 -- put the
+    output pair on 6 and 7 instead of 6 and 8 and the board makes +12 V and 0 V
+    where it should make +12 and -12, which is a fault that draws correctly, is
+    the right part, and destroys every op-amp on the board the first time it is
+    powered.
+
+    **The rail filters exist and are in the right order**: R804 between the
+    converter's own +Vout and VA+, not across it, with its capacitor on VA+.
+    A filter drawn the other way round is a short from the rail to ground
+    through 4.7 ohm, which is 2.5 A and a fire.
+
+    **And the load is inside the part.** supply_fit() computes what the two
+    outputs must deliver from what is actually on the netlist, so this asserts
+    it against the datasheet's own 250 mA rather than against a remembered
+    figure -- which is the check that stops being true silently as the deferred
+    controller and ADC land on VA+ one part at a time.
+    """
+    problems = []
+    ref = design.SUPPLY_REF
+    expected = {
+        str(design.SUPPLY_PINS["-Vin"]): "IGND",
+        str(design.SUPPLY_PINS["+Vin"]): "VIN_P",
+        str(design.SUPPLY_PINS["Remote"]): "IGND",
+        str(design.SUPPLY_PINS["+Vout"]): "VA_RAW",
+        str(design.SUPPLY_PINS["Com"]): "MDGND",
+        str(design.SUPPLY_PINS["-Vout"]): "VN_RAW",
+    }
+    found = {pin: net for net, entries in nets.items()
+             for part, pin in entries if part == ref}
+    for pin, net in sorted(expected.items(), key=lambda kv: int(kv[0])):
+        if found.get(pin) != net:
+            problems.append(
+                f"{ref}.{pin} is on {found.get(pin)!r} and should be {net!r} "
+                f"-- the pin map is design.SUPPLY_PINS, from page 4 of the "
+                f"datasheet, and pin 4 does not exist")
+
+    for resistor, source, rail, shunt in (("R804", "VA_RAW", "VA+", "C811"),
+                                          ("R805", "VN_RAW", "VA-", "C812")):
+        ends = {net for net, entries in nets.items()
+                if any(part == resistor for part, _ in entries)}
+        if ends != {source, rail}:
+            problems.append(
+                f"{resistor} sits between {sorted(ends)} and should be "
+                f"between {source} and {rail} -- a rail filter across the "
+                f"rail is 4.7 ohm from the supply to ground")
+        shunt_nets = {net for net, entries in nets.items()
+                      if any(part == shunt for part, _ in entries)}
+        if shunt_nets != {rail, "MDGND"}:
+            problems.append(
+                f"{shunt} sits between {sorted(shunt_nets)} and should be "
+                f"between {rail} and MDGND -- on the filtered side, and "
+                f"returning to the digital pour because this is switching "
+                f"return current")
+
+    fit = design.supply_fit()
+    for label, current in (("+Vout", fit["positive_ma"]),
+                           ("-Vout", fit["negative_ma"])):
+        if current > design.SUPPLY_IOUT_MA:
+            problems.append(
+                f"the converter's {label} is asked for {current:.1f} mA "
+                f"against the datasheet's {design.SUPPLY_IOUT_MA:.0f} mA -- "
+                f"see design.supply_fit()")
+    if fit["watts"] > design.SUPPLY_WATTS:
+        problems.append(
+            f"the converter is asked for {fit['watts']:.2f} W against "
+            f"{design.SUPPLY_WATTS:.0f} W")
+
+    # The barrier, on the netlist. floorplan.check_isolation() makes the same
+    # claim from the part side; this one makes it from the net side, and the
+    # two fail differently: that one catches a part filed in the wrong domain,
+    # this one catches a net that reaches across whatever its parts are called.
+    for net in sorted(PRIMARY_NETS):
+        entries = nets.get(net, ())
+        strangers = sorted({part for part, _ in entries}
+                           - set(design.ISOLATION_BRIDGE) - {ref}
+                           - {"J8", "D804", "C807", "C808", "C809"})
+        if strangers:
+            problems.append(
+                f"{net} is a primary net and reaches {strangers} -- only the "
+                f"inlet chain, the converter and "
+                f"{sorted(design.ISOLATION_BRIDGE)} may touch it")
+    return problems
+
+
+def _board_copper(board):
+    """Every piece of copper on the saved board, as (net, ref, x, y).
+
+    Pads carry their part's reference so that the declared barrier bridge can
+    be excluded by name; tracks and vias have no part and carry None.
+    """
+    tree = sexp.parse(board.read_text())
+    items = []
+    for footprint in sexp.find_all(tree, "footprint"):
+        at = sexp.find(footprint, "at")
+        origin = (float(at[1]), float(at[2]))
+        angle = math.radians(float(at[3]) if len(at) > 3 else 0.0)
+        reference = ""
+        for prop in sexp.find_all(footprint, "property"):
+            if prop[1] == "Reference":
+                reference = str(prop[2])
+        for pad in sexp.find_all(footprint, "pad"):
+            net = sexp.find(pad, "net")
+            # A pad with no net, or with a net number and no name, is not on
+            # anything and cannot be on the wrong side of a barrier. The guard
+            # is for the second form: KiCad writes `(net 0)` with no string on
+            # a pad it considers unconnected, and reading index 2 of that is
+            # how this function first crashed rather than reporting.
+            if net is None or len(net) < 3:
+                continue
+            local = sexp.find(pad, "at")
+            lx, ly = float(local[1]), float(local[2])
+            x = origin[0] + lx * math.cos(angle) + ly * math.sin(angle)
+            y = origin[1] - lx * math.sin(angle) + ly * math.cos(angle)
+            items.append((str(net[2]), reference, x, y))
+    # **Tracks and vias name their net; pads number it and name it.** KiCad 10
+    # writes `(net "MDGND")` on a segment and `(net 12 "MDGND")` on a pad, so a
+    # single accessor for both is wrong in one of the two places. Reading index
+    # 1 of a pad's entry gives the number, which matches no net name, and every
+    # pad then reads as being on a net called "12" -- a check that measures
+    # nothing while reporting nothing.
+    for segment in sexp.find_all(tree, "segment"):
+        net = str(sexp.find(segment, "net")[1])
+        for end in ("start", "end"):
+            point = sexp.find(segment, end)
+            items.append((net, None, float(point[1]), float(point[2])))
+    for via in sexp.find_all(tree, "via"):
+        net = str(sexp.find(via, "net")[1])
+        point = sexp.find(via, "at")
+        items.append((net, None, float(point[1]), float(point[2])))
+    return items
+
+
+def check_isolation_gap(board):
+    """The primary's quadrant of the board holds nothing but the primary.
+
+    **The geometric half of the isolation barrier, and it is a containment
+    test rather than a distance one on purpose.** A minimum-separation check
+    over every pair of copper items answers "is anything too close", which is
+    a question DRC already answers for clearance and answers wrongly here --
+    DRC does not know that IGND is special, so 0.20 mm satisfies it and 0.20 mm
+    is not a barrier. What this asserts instead is the thing the layout is
+    actually built on: primary copper lives west of placement.ISOLATION_X and
+    south of ISOLATION_Y, nothing else goes there, and gen_pcb pours the
+    southern MDGND as two rectangles so that no plane crosses it.
+
+    That is a stronger claim and a cheaper one. It also fails in the direction
+    that matters: a router that took one MDGND track through the primary's
+    corner to save two millimetres would pass a distance check at every point
+    and still put a ground plane's worth of coupling across a 50 pF barrier.
+
+    The declared bridge is excluded by *reference*, from
+    design.ISOLATION_BRIDGE, and the converter is excluded because its package
+    is the barrier. Everything else is measured.
+    """
+    if not board.exists():
+        raise SystemExit(f"{board} does not exist -- run gen_pcb.py")
+    iso_x = placement.ISOLATION_X
+    iso_y = placement.ISOLATION_Y
+    allowed = set(design.ISOLATION_BRIDGE) | {design.SUPPLY_REF}
+    problems = []
+    seen = 0
+    for net, reference, x, y in _board_copper(board):
+        if net in PRIMARY_NETS:
+            seen += 1
+            if x > iso_x + ISOLATION_MM or y < iso_y - ISOLATION_MM:
+                problems.append(
+                    f"{net} has copper at ({x:.2f}, {y:.2f}), outside the "
+                    f"primary's region (x <= {iso_x:.2f}, y >= {iso_y:.2f}) "
+                    f"-- the isolated side is a place on this board, not a "
+                    f"set of net names")
+        elif reference not in allowed:
+            if x < iso_x - ISOLATION_MM and y > iso_y + ISOLATION_MM:
+                problems.append(
+                    f"{net} has copper at ({x:.2f}, {y:.2f}), inside the "
+                    f"primary's region -- only {sorted(allowed)} may be "
+                    f"there, and a plane or a track through it is a "
+                    f"capacitor across the barrier")
+    if not seen:
+        problems.append(
+            "no primary copper found on the board at all, which means this "
+            "check passed by measuring nothing")
+    return problems
+
 CHECKS = (
     ("1  no load on the mixer's rails", check_no_mixer_rail_load, ("nets",)),
     ("2a exactly one ground bond", check_one_ground_bond, ("nets",)),
@@ -1220,6 +1423,10 @@ CHECKS = (
     ("   the two pours do not overlap", check_ground_split_on_the_board,
      ("board",)),
     ("   DRC's rules are rules.py's rules", check_rules, ("project", "board")),
+    ("   the converter is wired and not overrun", check_supply,
+     ("nets", "values")),
+    ("   nothing but the primary in its region", check_isolation_gap,
+     ("board",)),
 )
 
 

@@ -42,6 +42,20 @@ DOCS = pathlib.Path(__file__).resolve().parent / "docs"
 # ---------------------------------------------------------------------------
 
 ANALOGUE, DIGITAL = "MAGND", "MDGND"
+# The third domain, and it is not a third ground in the sense the other two
+# are. MAGND and MDGND meet at R902; IGND meets neither, ever, and that is the
+# whole of what isolation buys. A part on this domain returns to the inlet's
+# own 0 V, which through the shared barrel jack is the mixer's PGND -- so the
+# module touches that node here and nowhere else, and the one bond of
+# constraint 5.2 stays one.
+ISOLATED = "IGND"
+# U15 and C810 are the two parts with pins on both sides of the barrier, and
+# they are not STRADDLE: a straddler bridges two grounds that are already
+# joined at a star, and these bridge two that are not joined at all. The
+# distinction earns its own word because check_isolation() below has to treat
+# them differently -- a straddler is excluded from a crossing test, and these
+# are the *only* things allowed to cross this one.
+BARRIER = "BARRIER"
 
 GROUND_STRATEGY = """
 Three stars, and only the first is a rule this module inherits.
@@ -97,15 +111,27 @@ fault above with the offset moved somewhere harder to see.
 DOMAINS = (
     (r"^J[1-6]$", ANALOGUE, "loom to the mixer: audio in, audio out"),
     (r"^J7$", ANALOGUE, "the ground bond pad and the shield terminations"),
-    # **STRADDLE, and it was DIGITAL.** J8 carries VA+, VA-, MAGND, V5 and
-    # MDGND: both rails and both grounds, which is the definition this file
-    # applies to the '541, the relays and the stars. It was filed as digital
-    # because it is a header and the other three headers are, and the
-    # consequence was physical -- placement.py put it 18 mm inside the digital
-    # pour, so its MAGND pin's barrel crossed four layers and met the analogue
-    # plane on none of them. See the note at placement.SHARED["J8"].
-    (r"^J8$", "STRADDLE", "supply inlet from the DC-DC secondary: both rails "
-                          "and both grounds"),
+    # **J8 has been all three things this table can say, and each move was a
+    # correction.** It was DIGITAL because it is a header and the other three
+    # headers are; it became STRADDLE when somebody noticed it carried both
+    # rails and both grounds, which had put its MAGND pin's barrel 18 mm
+    # inside the digital pour with no analogue plane under it on any layer.
+    # It is ISOLATED now, because the converter came onto the board and J8 is
+    # the raw inlet: two pins, neither of them referenced to anything this
+    # module calls ground. See design.supply().
+    (r"^J8$", ISOLATED, "the shared DC inlet, primary side"),
+    (r"^D804$", ISOLATED, "inlet reverse protection"),
+    (r"^C80[789]$", ISOLATED, "primary decoupling, at the converter's pins"),
+    (r"^U15$", BARRIER, "the isolated converter: pins 1-3 primary, 6-8 "
+                        "secondary, 5.08 mm of package between them"),
+    (r"^C810$", BARRIER, "the Y-capacitor -- the *only* other thing across "
+                         "the barrier, and it is there so the barrier's own "
+                         "common-mode current does not use the audio bond"),
+    (r"^U16$", DIGITAL, "the 5 V regulator"),
+    (r"^R80[45]$", DIGITAL, "rail filters -- their capacitors return to "
+                            "MDGND, not MAGND, because this is switching "
+                            "return current"),
+    (r"^C81[1234]$", DIGITAL, "rail filter and regulator capacitors"),
     (r"^J9$|^J10$|^J11$", DIGITAL, "PWM and OE from the controller"),
     (r"^R[1-6]0[12]$", ANALOGUE, "front-end inverting stage"),
     (r"^R[1-6]1[15]$", ANALOGUE, "R_IN and the VCA input RC"),
@@ -156,9 +182,9 @@ CROSSINGS = {
     "PWM5": "logic input to the '541, threshold-limited",
     "PWM6": "logic input to the '541, threshold-limited",
     "OE": "output enable, static in normal operation",
-    "VA+": "audio rail from the DC-DC secondary",
-    "VA-": "audio rail from the DC-DC secondary",
-    "V5": "reference supply from the DC-DC secondary",
+    "VA+": "audio rail, from the converter through R804",
+    "VA-": "audio rail, from the converter through R805",
+    "V5": "reference supply, from the converter through U16",
     ANALOGUE: "the star itself, at R902",
     DIGITAL: "the star itself, at R902",
 }
@@ -311,13 +337,25 @@ ZONES = (
      "ADC, which is analogue and sits at the D2/A4 edge so only SPI crosses.",
      "South-east, one edge, with the star R902 at its corner nearest A3."),
 
-    ("P", "supply", DIGITAL,
-     "DEFERRED: isolated DC-DC at >=300 kHz. The isolation is what preserves "
-     "constraint 2 by construction -- a non-isolated shared inlet would be a "
-     "second ground bond.",
-     "The far corner from A1 and R, with its own local return. |f - 45 kHz| > "
-     "20 kHz against the mixer's charge pump: a VCA is a multiplier, so two "
-     "supply ripples intermodulate into the audio band."),
+    # **This zone was declared for four passes with nothing in it, and the
+    # empty declaration was the only place in the repo that said the converter
+    # is on this board.** design.py said the opposite -- J8 as a five-way
+    # secondary inlet -- and nothing compared the two. See design.supply().
+    ("P", "supply", "BARRIER",
+     "The isolated converter U15 and the two rails made from it. **The only "
+     "zone with two boundaries through it**: the ground split separates two "
+     "returns that meet at R902, and the isolation barrier separates two that "
+     "meet nowhere. West of ISOLATION_X is the primary -- the inlet, its "
+     "protection and its decoupling, on IGND, with no ground pour under any "
+     "of it; east is MDGND like the rest of the southern half. C810 is the "
+     "one declared bridge and it is there so the barrier's own common-mode "
+     "current does not use the audio bond. See design.barrier_return().",
+     "The far corner from A1 and R, which is the south: a band below "
+     "everything else, so the one switching part on this module is as far "
+     "from the front ends as the outline allows. |f - 45 kHz| > 20 kHz "
+     "against the mixer's charge pump -- and see design.supply_beat(), "
+     "because that rule is stated for the fundamental and the mechanism is "
+     "not."),
 )
 
 REFERENCE_PLACEMENT = """
@@ -415,6 +453,45 @@ def check_domains():
             for ref in sorted(design.PARTS) if domain_of(ref) is None]
 
 
+def check_isolation():
+    """No net touches both sides of the isolation barrier.
+
+    The netlist half of constraint 5.2's strongest form. A ground *star* is a
+    topology -- one bridge, and check_crossings() above is happy for declared
+    signals to pass it because the two grounds are joined anyway. A barrier is
+    not: nothing crosses, and the two parts that do are the converter, whose
+    package is the barrier, and C810, which is there on purpose.
+
+    So this is deliberately not a CROSSINGS-style allow-list of nets. It is an
+    allow-list of *parts*, because a net that reaches from IGND to MDGND is a
+    fault whatever it is called, and the only way it can legitimately exist is
+    through a component built to hold the two apart.
+
+    The geometric half is verify.check_isolation_gap(), which measures copper.
+    Both are needed and neither implies the other: this one passes on a board
+    where the two pours touch, and that one passes on a netlist where somebody
+    has tied IGND to MDGND with a wire, because then they are one net and no
+    gap is violated.
+    """
+    problems = []
+    for name, entries in sorted(design.NETS.items()):
+        refs = sorted({ref for ref, _ in entries})
+        domains = {domain_of(ref) for ref in refs}
+        if ISOLATED not in domains:
+            continue
+        bridges = {ref for ref in refs if domain_of(ref) == BARRIER}
+        others = domains - {ISOLATED, BARRIER}
+        if others:
+            problems.append(
+                f"{name} reaches the isolated primary and {sorted(others)} "
+                f"through {sorted(refs)} -- the barrier is not a boundary "
+                f"signals cross, and only {sorted(design.ISOLATION_BRIDGE)} "
+                f"and the converter may touch both sides")
+        elif not bridges and name != ISOLATED:
+            continue
+    return problems
+
+
 def check_crossings():
     """No net crosses the boundary unless CROSSINGS says it may.
 
@@ -434,6 +511,14 @@ def check_crossings():
     for name, entries in sorted(design.NETS.items()):
         domains = {domain_of(ref) for ref, _ in entries}
         domains.discard("STRADDLE")
+        # BARRIER for the same reason and one boundary out: U15 has primary
+        # pins and secondary pins by construction, and C810 is the declared
+        # bridge. Excluding them here is what leaves check_isolation() below
+        # as the only thing that says which nets may cross *that* line, and
+        # the two tests must not stand in for one another -- an isolation
+        # barrier is a stronger claim than a ground star and deserves its own
+        # instrument rather than a share of this one.
+        domains.discard(BARRIER)
         if len(domains) > 1 and name not in CROSSINGS:
             refs = sorted({ref for ref, _ in entries})
             problems.append(
@@ -458,6 +543,19 @@ COURTYARD = {
     "SOIC-14": 58.0, "SOIC-16": 66.0, "SOIC-20W": 145.0,
     "PinHeader_1x03": 21.0, "PinHeader_1x05": 34.0,
     "TestPoint": 6.0,
+    # **These eight were missing and the miss was silent for four passes.**
+    # _report() prints "parts with no courtyard estimate" and the list has
+    # never been empty -- the relays, the VCAs' SOIC-20W under another name,
+    # the SOT-523, the SOIC-8 -- so a new absence looked exactly like the
+    # standing ones. area() simply skipped them, which means the minimum-area
+    # figure this file has quoted since the first pass has always been an
+    # underestimate of an unstated size. It is not load-bearing -- placement.py
+    # computes the real outline and _report() prints both -- but a number that
+    # omits a term is worse than a number that says it cannot be computed.
+    "D_SOD-123F": 4.0, "SOT-523": 5.0, "SOT-23": 13.0, "SOIC-8": 40.0,
+    "Relay_DPDT_Omron_G6S-2F": 164.0, "PinHeader_1x02": 22.0,
+    "D_SMA": 25.0, "TO-252-2": 78.0,
+    "TRACO_TMR-6-xxxxWI": 214.0,
 }
 
 # **What the pad was, kept as arithmetic because the saving is the result.** A
@@ -563,42 +661,40 @@ def enclosure_check():
 
 
 BLOCKED = """
-**Not blocked, and the arithmetic has now moved twice in opposite directions.**
+**Blocked on nothing, and the arithmetic has moved three times now -- the last
+of them because the *measurement* was wrong rather than the board.**
 
-| | available | needed | verdict |
-|---|---|---|---|
-| beside the mixer in its 1590J | {beside_area:.0f} mm² | {needed:.0f} mm² | **{beside_slack:.0f} mm² spare** |
-| as a mezzanine on the mixer's own outline | {mixer_area:.0f} mm² | {needed:.0f} mm² | **{mezzanine_slack:.0f} mm² spare** |
+Both rows below are negative, and reading that as "the supply made the module
+too big" would be wrong by a factor of twenty-seven. The supply band is 95 mm2
+of the estimate. What moved the other 2,545 is that `COURTYARD` had been missing
+eight of the footprints this design uses since the first pass -- the relays, the
+VCAs' SOIC-20W, the SOT-523, the SOIC-8 and four more -- and `area()` skipped
+what it could not price. `_report()` has printed "parts with no courtyard
+estimate" on every run of this file and the list has never been empty, so a new
+absence looked exactly like the standing ones. **A number that omits a term is
+worse than a number that says it cannot be computed**, and this one was quoted
+in a table headed "available / needed / verdict".
 
-Both rows read the other way two passes ago — 7225 mm² needed against 6189 for
-the mixer's whole 122.8 × 50.4 outline, so the module was about a quarter
-*larger* than the board it hangs off, and the mezzanine placement was recorded
-here as arithmetically dead rather than merely a height question.
+So the honest history is: the module was never inside the mezzanine's 6,189 mm2.
+Striking the coarse pad took it from about 8,000 to about 4,100 by this
+estimate's own arithmetic and the estimate was low by 2,500 throughout.
 
-**Striking the coarse pad is what turned it round**, and it was not the reason
-for striking it: `design.pad_benefit()` argues from the cell's noise, and Tim's
-decision that the enclosure is bespoke had already taken area out of the verdict
-before that. The area is a consequence, and it is a large one — the pad was
-about 55 % of the placed courtyard of the board it was on.
+That changes nothing about the build, and it is worth being explicit about why.
+Tim's decision that the enclosure is bespoke took area out of the verdict two
+passes ago; `placement.py`'s real outline is 20,600 mm2, three times this
+estimate, because it is a systematic grid rather than a hand layout; and the
+mezzanine has never been the easy option for a mechanical reason that no area
+figure touches.
 
-**Drawing the envelope rectifier has since spent a fifth of that back**, which
-is the honest way to read the two rows: 48 parts for the sensing layer, against
-36 removed for the pad. The mezzanine survives it and the space beside the mixer
-in its 1590J does not, which is the first time those two rows have disagreed.
-
-The mezzanine is directly over the `RV{n}01` column, six near-zero-length pairs,
-a trivial bond to TP6. It has never been the easy option for another reason, and
-that reason is unchanged and mechanical.
 Recorded in FINDINGS.md: the mixer's published `stack.above` is 13.00 mm and its
 mechanical contract has no field for what plugs into a connector, so a vertical
 header with a crimp housing exceeds the envelope the mixer's own enclosure was
 designed to. Solder the loom directly into the six `RV{n}01` hole trios, or use
 right-angle. See FINDINGS.md F3.
 
-**And the deferred blocks are not in this number.** The controller, the ADC, the
-fail-safe and the DC-DC are all still to place, so the honest reading of the two
-rows above is that the module has stopped being obviously too big rather than
-that it has been shown to fit.
+**And two deferred blocks are still not in this number** -- the controller and
+the envelope ADC. The supply is, and the fail-safe is; both were on this list
+and both are drawn.
 """
 
 
@@ -682,12 +778,14 @@ def _report():
 
 
 def main():
-    problems = check_domains() + check_crossings()
+    problems = check_domains() + check_crossings() + check_isolation()
     print("floorplan checks")
     print(f"  every part has a ground domain          "
           f"{'ok' if not check_domains() else 'FAIL'}")
     print(f"  no undeclared boundary crossing         "
           f"{'ok' if not check_crossings() else 'FAIL'}")
+    print(f"  nothing crosses the barrier             "
+          f"{'ok' if not check_isolation() else 'FAIL'}")
     for problem in problems:
         print(f"      {problem}")
     print()

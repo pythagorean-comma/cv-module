@@ -100,6 +100,49 @@ PRICES = {
         "the A grade at a different one. ADR4525C/D is the second source "
         "spec section 4.2 names and is not priced here at all."),
 
+    # The supply, and it is the largest single line on this BOM by a factor of
+    # two -- more than the reference, more than eight OPA1644. Worth seeing as
+    # a number rather than as a part: an isolated 6 W converter with a stated
+    # switching frequency costs what a whole channel of this module costs, and
+    # the alternative that would halve it is the plain TMR 6, whose RCC
+    # topology puts its fundamental on the mixer's own pump harmonic. See
+    # design.supply_beat().
+    design.SUPPLY_PART: read(
+        18.16, "GBP", 1, "https://www.tme.eu/gb/details/tmr6-2422wi/"
+        "dc-dc-converters/traco-power/tmr-6-2422wi/",
+        "page fetched: \u00a318.16 at 1+, \u00a316.89 at 5+, \u00a316.77 at "
+        "10+, net of VAT, 87 in stock. The same page states the switching "
+        "frequency as 580 kHz and the body as 21.8 x 11.2 x 9.1 mm, which "
+        "agrees with the datasheet read for design.SUPPLY_KHZ_TYP. The "
+        "datasheet itself is at " + design.SUPPLY_DATASHEET + " -- fetched "
+        "and read to the end. tracopower.com's own copy of the same document "
+        "refuses an automated fetch, and a link nobody could follow is the "
+        "thing STYLE.md rule 10 is about."),
+
+    design.V5_PART: band(
+        0.35, 0.90, "GBP", 10,
+        "NCP1117DT50G, DPAK. **The DT suffix and not ST**, which is the whole "
+        "of v5_regulator(): the SOT-223 part is the same die, the same price "
+        "and 160 C/W against 0.77 W."),
+
+    design.INLET_DIODE: band(
+        0.20, 0.60, "GBP", 10,
+        "B340A-13-F, SMA. The mixer's own reverse-protection part, chosen "
+        "there for a forward drop that falls as the diode is run below its "
+        "rating -- see design.INLET_DIODE."),
+
+    design.RAIL_FILTER_R: band(
+        0.01, 0.03, "GBP", 100,
+        "0805 thick film. Two of them, and they are the rail filter: "
+        "rail_filter() is why this is a resistor and not an inductor."),
+
+    "10u/50V X7R": band(
+        0.30, 0.80, "GBP", 25,
+        "1210 X7R at 50 V, which is 4x derating on the +/-12 V rails and 2.5x "
+        "on the 20 V primary. A 25 V part would be cheaper and would have "
+        "lost most of its capacitance at the top of the inlet range -- the "
+        "same argument the mixer makes at its own VIN_P."),
+
     design.LOGIC: band(
         0.40, 0.90, "GBP", 10,
         "SN74AHC541DWR, SOIC-20W. An ordinary logic part from any of the four "

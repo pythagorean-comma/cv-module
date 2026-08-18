@@ -302,6 +302,17 @@ SUPPLY_RAIL = MIXER_DESIGN.SUPPLY_RAIL                 # design.SUPPLY_RAIL
 VREG_VOLTS = MIXER_DESIGN.VREG_VOLTS                   # design.VREG_VOLTS
 PUMP_FREQUENCY = MIXER_DESIGN.PUMP_FREQUENCY           # design.PUMP_FREQUENCY
 
+# The shared DC inlet, and it is an interface rather than a rail. The module's
+# converter hangs off the *same barrel jack* as the mixer's own J8, so what the
+# brick is asked for is a system-level fact that both boards depend on and only
+# one of them records. Both strings, because SUPPLY_RANGE carries a current
+# figure -- "25mA" -- which design.inlet_budget() is about to make wrong for
+# the box as a whole, and SUPPLY_INTENT carries the polarity, which the mixer's
+# own J8 comment records as having been written backwards for the whole life of
+# that design.
+SUPPLY_RANGE = MIXER_DESIGN.SUPPLY_RANGE               # design.SUPPLY_RANGE
+SUPPLY_INTENT = MIXER_DESIGN.SUPPLY_INTENT             # design.SUPPLY_INTENT
+
 CHANNEL_POT = MIXER_DESIGN.CHANNEL_POT                 # design.CHANNEL_POT
 CHANNEL_POT_OHMS = MIXER_DESIGN.CHANNEL_POT_OHMS       # design.CHANNEL_POT_OHMS
 CHANNEL_POT_FP = MIXER_DESIGN.CHANNEL_POT_FP           # design.CHANNEL_POT_FP

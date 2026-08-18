@@ -16,7 +16,7 @@
 				)
 				(comment
 					(number 3)
-					(value "deferred blocks: controller, envelope ADC, supply")
+					(value "deferred blocks: controller, envelope ADC")
 				)
 			)
 		)
@@ -591,6 +591,70 @@
 			(property "InBOM" yes)
 		)
 		(comp
+			(ref "C807")
+			(value "10u/50V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM32ER71H106KA12L")
+			(property "Description" "Primary bulk, at the inlet end")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C808")
+			(value "10u/50V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM32ER71H106KA12L")
+			(property "Description" "Primary bulk, at the converter's pin")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C809")
+			(value "100n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM216R71H104KA01D")
+			(property "Description" "Primary HF, at the converter's pin")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C810")
+			(value "470n/50V X7R")
+			(footprint "Capacitor_SMD:C_0805_2012Metric")
+			(property "MPN" "GRM21BR71H474KA88L")
+			(property "Description" "Y-capacitor across the isolation barrier -- the local return for the 50 pF of common-mode current, so it does not take the audio bond")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C811")
+			(value "10u/50V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM32ER71H106KA12L")
+			(property "Description" "VA+ rail filter")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C812")
+			(value "10u/50V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM32ER71H106KA12L")
+			(property "Description" "VA- rail filter")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C813")
+			(value "10u/50V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM32ER71H106KA12L")
+			(property "Description" "NCP1117 input capacitor, 10 uF -- the datasheet's own test condition")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "C814")
+			(value "10u/16V X7R")
+			(footprint "Capacitor_SMD:C_1210_3225Metric")
+			(property "MPN" "GRM21BR61C106KE15L")
+			(property "Description" "NCP1117 output capacitor, 10 uF")
+			(property "InBOM" yes)
+		)
+		(comp
 			(ref "D151")
 			(value "1N4148W")
 			(footprint "Diode_SMD:D_SOD-123")
@@ -711,6 +775,14 @@
 			(property "InBOM" yes)
 		)
 		(comp
+			(ref "D804")
+			(value "B340A")
+			(footprint "Diode_SMD:D_SMA")
+			(property "MPN" "B340A-13-F")
+			(property "Description" "Inlet reverse-polarity protection: anode VINF, cathode VIN_P")
+			(property "InBOM" yes)
+		)
+		(comp
 			(ref "D813")
 			(value "BAT54")
 			(footprint "Diode_SMD:D_SOD-123")
@@ -808,9 +880,9 @@
 		(comp
 			(ref "J8")
 			(value "PWR")
-			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical")
-			(property "MPN" "61300511121")
-			(property "Description" "From the isolated DC-DC (DEFERRED): 1=VA+, 2=VA-, 3=MAGND, 4=V5, 5=MDGND")
+			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical")
+			(property "MPN" "61300211121")
+			(property "Description" "Shared DC inlet (12-18V DC centre-negative, 25mA), in parallel with the mixer's own J8 at the barrel jack: 1=sleeve (+), 2=centre pin (0 V). Primary side -- see IGND")
 			(property "InBOM" yes)
 		)
 		(comp
@@ -1646,6 +1718,22 @@
 			(property "InBOM" yes)
 		)
 		(comp
+			(ref "R804")
+			(value "4R7 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-074R7L")
+			(property "Description" "VA+ rail filter -- see rail_filter(), a resistor and not an inductor because the LC would ring at Q ~ 100 inside the audio band")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "R805")
+			(value "4R7 1%")
+			(footprint "Resistor_SMD:R_0805_2012Metric")
+			(property "MPN" "RC0805FR-074R7L")
+			(property "Description" "VA- rail filter -- the same pole on the other rail")
+			(property "InBOM" yes)
+		)
+		(comp
 			(ref "R811")
 			(value "100k 1%")
 			(footprint "Resistor_SMD:R_0805_2012Metric")
@@ -1755,6 +1843,22 @@
 			(footprint "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm")
 			(property "MPN" "TL074CDR")
 			(property "Description" "Quad JFET, envelope half-wave stages")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U15")
+			(value "TMR6-2422WI")
+			(footprint "cv:TRACO_TMR-6-xxxxWI_Dual_THT")
+			(property "MPN" "TMR 6-2422WI")
+			(property "Description" "Isolated DC-DC, 9-36 V in, +/-12 V at 250 mA, 580 kHz PWM flyback, 1600 VDC")
+			(property "InBOM" yes)
+		)
+		(comp
+			(ref "U16")
+			(value "NCP1117-5.0")
+			(footprint "Package_TO_SOT_SMD:TO-252-2")
+			(property "MPN" "NCP1117DT50G")
+			(property "Description" "+5 V for the relay coils and the reference. DPAK and not SOT-223: 0.77 W against that package's own 160 C/W -- see v5_regulator()")
 			(property "InBOM" yes)
 		)
 		(comp
@@ -3021,6 +3125,38 @@
 		)
 		(net
 			(code 66)
+			(name "IGND")
+			(node
+				(ref "C807")
+				(pin "2")
+			)
+			(node
+				(ref "C808")
+				(pin "2")
+			)
+			(node
+				(ref "C809")
+				(pin "2")
+			)
+			(node
+				(ref "C810")
+				(pin "1")
+			)
+			(node
+				(ref "J8")
+				(pin "2")
+			)
+			(node
+				(ref "U15")
+				(pin "1")
+			)
+			(node
+				(ref "U15")
+				(pin "3")
+			)
+		)
+		(net
+			(code 67)
 			(name "IIN1")
 			(node
 				(ref "R111")
@@ -3036,7 +3172,7 @@
 			)
 		)
 		(net
-			(code 67)
+			(code 68)
 			(name "IIN2")
 			(node
 				(ref "R211")
@@ -3052,7 +3188,7 @@
 			)
 		)
 		(net
-			(code 68)
+			(code 69)
 			(name "IIN3")
 			(node
 				(ref "R311")
@@ -3068,7 +3204,7 @@
 			)
 		)
 		(net
-			(code 69)
+			(code 70)
 			(name "IIN4")
 			(node
 				(ref "R411")
@@ -3084,7 +3220,7 @@
 			)
 		)
 		(net
-			(code 70)
+			(code 71)
 			(name "IIN5")
 			(node
 				(ref "R511")
@@ -3100,7 +3236,7 @@
 			)
 		)
 		(net
-			(code 71)
+			(code 72)
 			(name "IIN6")
 			(node
 				(ref "R611")
@@ -3116,7 +3252,7 @@
 			)
 		)
 		(net
-			(code 72)
+			(code 73)
 			(name "IOUT1")
 			(node
 				(ref "C121")
@@ -3140,7 +3276,7 @@
 			)
 		)
 		(net
-			(code 73)
+			(code 74)
 			(name "IOUT2")
 			(node
 				(ref "C221")
@@ -3164,7 +3300,7 @@
 			)
 		)
 		(net
-			(code 74)
+			(code 75)
 			(name "IOUT3")
 			(node
 				(ref "C321")
@@ -3188,7 +3324,7 @@
 			)
 		)
 		(net
-			(code 75)
+			(code 76)
 			(name "IOUT4")
 			(node
 				(ref "C421")
@@ -3212,7 +3348,7 @@
 			)
 		)
 		(net
-			(code 76)
+			(code 77)
 			(name "IOUT5")
 			(node
 				(ref "C521")
@@ -3236,7 +3372,7 @@
 			)
 		)
 		(net
-			(code 77)
+			(code 78)
 			(name "IOUT6")
 			(node
 				(ref "C621")
@@ -3260,7 +3396,7 @@
 			)
 		)
 		(net
-			(code 78)
+			(code 79)
 			(name "IVOUT1")
 			(node
 				(ref "C121")
@@ -3284,7 +3420,7 @@
 			)
 		)
 		(net
-			(code 79)
+			(code 80)
 			(name "IVOUT2")
 			(node
 				(ref "C221")
@@ -3308,7 +3444,7 @@
 			)
 		)
 		(net
-			(code 80)
+			(code 81)
 			(name "IVOUT3")
 			(node
 				(ref "C321")
@@ -3332,7 +3468,7 @@
 			)
 		)
 		(net
-			(code 81)
+			(code 82)
 			(name "IVOUT4")
 			(node
 				(ref "C421")
@@ -3356,7 +3492,7 @@
 			)
 		)
 		(net
-			(code 82)
+			(code 83)
 			(name "IVOUT5")
 			(node
 				(ref "C521")
@@ -3380,7 +3516,7 @@
 			)
 		)
 		(net
-			(code 83)
+			(code 84)
 			(name "IVOUT6")
 			(node
 				(ref "C621")
@@ -3404,7 +3540,7 @@
 			)
 		)
 		(net
-			(code 84)
+			(code 85)
 			(name "LOGO1")
 			(node
 				(ref "R141")
@@ -3416,7 +3552,7 @@
 			)
 		)
 		(net
-			(code 85)
+			(code 86)
 			(name "LOGO2")
 			(node
 				(ref "R241")
@@ -3428,7 +3564,7 @@
 			)
 		)
 		(net
-			(code 86)
+			(code 87)
 			(name "LOGO3")
 			(node
 				(ref "R341")
@@ -3440,7 +3576,7 @@
 			)
 		)
 		(net
-			(code 87)
+			(code 88)
 			(name "LOGO4")
 			(node
 				(ref "R441")
@@ -3452,7 +3588,7 @@
 			)
 		)
 		(net
-			(code 88)
+			(code 89)
 			(name "LOGO5")
 			(node
 				(ref "R541")
@@ -3464,7 +3600,7 @@
 			)
 		)
 		(net
-			(code 89)
+			(code 90)
 			(name "LOGO6")
 			(node
 				(ref "R641")
@@ -3476,7 +3612,7 @@
 			)
 		)
 		(net
-			(code 90)
+			(code 91)
 			(name "MAGND")
 			(node
 				(ref "C102")
@@ -3637,10 +3773,6 @@
 			(node
 				(ref "D803")
 				(pin "1")
-			)
-			(node
-				(ref "J8")
-				(pin "3")
 			)
 			(node
 				(ref "R901")
@@ -3856,10 +3988,30 @@
 			)
 		)
 		(net
-			(code 91)
+			(code 92)
 			(name "MDGND")
 			(node
 				(ref "C806")
+				(pin "2")
+			)
+			(node
+				(ref "C810")
+				(pin "2")
+			)
+			(node
+				(ref "C811")
+				(pin "2")
+			)
+			(node
+				(ref "C812")
+				(pin "2")
+			)
+			(node
+				(ref "C813")
+				(pin "2")
+			)
+			(node
+				(ref "C814")
 				(pin "2")
 			)
 			(node
@@ -3881,10 +4033,6 @@
 			(node
 				(ref "J11")
 				(pin "4")
-			)
-			(node
-				(ref "J8")
-				(pin "5")
 			)
 			(node
 				(ref "J9")
@@ -3934,9 +4082,17 @@
 				(ref "R902")
 				(pin "2")
 			)
+			(node
+				(ref "U15")
+				(pin "7")
+			)
+			(node
+				(ref "U16")
+				(pin "1")
+			)
 		)
 		(net
-			(code 92)
+			(code 93)
 			(name "OE")
 			(node
 				(ref "J11")
@@ -3952,7 +4108,7 @@
 			)
 		)
 		(net
-			(code 93)
+			(code 94)
 			(name "PIN1")
 			(node
 				(ref "J1")
@@ -3968,7 +4124,7 @@
 			)
 		)
 		(net
-			(code 94)
+			(code 95)
 			(name "PIN2")
 			(node
 				(ref "J2")
@@ -3984,7 +4140,7 @@
 			)
 		)
 		(net
-			(code 95)
+			(code 96)
 			(name "PIN3")
 			(node
 				(ref "J3")
@@ -4000,7 +4156,7 @@
 			)
 		)
 		(net
-			(code 96)
+			(code 97)
 			(name "PIN4")
 			(node
 				(ref "J4")
@@ -4016,7 +4172,7 @@
 			)
 		)
 		(net
-			(code 97)
+			(code 98)
 			(name "PIN5")
 			(node
 				(ref "J5")
@@ -4032,7 +4188,7 @@
 			)
 		)
 		(net
-			(code 98)
+			(code 99)
 			(name "PIN6")
 			(node
 				(ref "J6")
@@ -4048,7 +4204,7 @@
 			)
 		)
 		(net
-			(code 99)
+			(code 100)
 			(name "PWM1")
 			(node
 				(ref "J9")
@@ -4064,7 +4220,7 @@
 			)
 		)
 		(net
-			(code 100)
+			(code 101)
 			(name "PWM2")
 			(node
 				(ref "J9")
@@ -4080,7 +4236,7 @@
 			)
 		)
 		(net
-			(code 101)
+			(code 102)
 			(name "PWM3")
 			(node
 				(ref "J10")
@@ -4096,7 +4252,7 @@
 			)
 		)
 		(net
-			(code 102)
+			(code 103)
 			(name "PWM4")
 			(node
 				(ref "J10")
@@ -4112,7 +4268,7 @@
 			)
 		)
 		(net
-			(code 103)
+			(code 104)
 			(name "PWM5")
 			(node
 				(ref "J10")
@@ -4128,7 +4284,7 @@
 			)
 		)
 		(net
-			(code 104)
+			(code 105)
 			(name "PWM6")
 			(node
 				(ref "J11")
@@ -4144,7 +4300,7 @@
 			)
 		)
 		(net
-			(code 105)
+			(code 106)
 			(name "RCJ1")
 			(node
 				(ref "C102")
@@ -4156,7 +4312,7 @@
 			)
 		)
 		(net
-			(code 106)
+			(code 107)
 			(name "RCJ2")
 			(node
 				(ref "C202")
@@ -4168,7 +4324,7 @@
 			)
 		)
 		(net
-			(code 107)
+			(code 108)
 			(name "RCJ3")
 			(node
 				(ref "C302")
@@ -4180,7 +4336,7 @@
 			)
 		)
 		(net
-			(code 108)
+			(code 109)
 			(name "RCJ4")
 			(node
 				(ref "C402")
@@ -4192,7 +4348,7 @@
 			)
 		)
 		(net
-			(code 109)
+			(code 110)
 			(name "RCJ5")
 			(node
 				(ref "C502")
@@ -4204,7 +4360,7 @@
 			)
 		)
 		(net
-			(code 110)
+			(code 111)
 			(name "RCJ6")
 			(node
 				(ref "C602")
@@ -4216,7 +4372,7 @@
 			)
 		)
 		(net
-			(code 111)
+			(code 112)
 			(name "RINV")
 			(node
 				(ref "R801")
@@ -4232,7 +4388,7 @@
 			)
 		)
 		(net
-			(code 112)
+			(code 113)
 			(name "SIN1")
 			(node
 				(ref "J1")
@@ -4244,7 +4400,7 @@
 			)
 		)
 		(net
-			(code 113)
+			(code 114)
 			(name "SIN2")
 			(node
 				(ref "J2")
@@ -4256,7 +4412,7 @@
 			)
 		)
 		(net
-			(code 114)
+			(code 115)
 			(name "SIN3")
 			(node
 				(ref "J3")
@@ -4268,7 +4424,7 @@
 			)
 		)
 		(net
-			(code 115)
+			(code 116)
 			(name "SIN4")
 			(node
 				(ref "J4")
@@ -4280,7 +4436,7 @@
 			)
 		)
 		(net
-			(code 116)
+			(code 117)
 			(name "SIN5")
 			(node
 				(ref "J5")
@@ -4292,7 +4448,7 @@
 			)
 		)
 		(net
-			(code 117)
+			(code 118)
 			(name "SIN6")
 			(node
 				(ref "J6")
@@ -4304,7 +4460,7 @@
 			)
 		)
 		(net
-			(code 118)
+			(code 119)
 			(name "SPARE0")
 			(node
 				(ref "U8")
@@ -4316,7 +4472,7 @@
 			)
 		)
 		(net
-			(code 119)
+			(code 120)
 			(name "SPARE1")
 			(node
 				(ref "U14")
@@ -4328,7 +4484,7 @@
 			)
 		)
 		(net
-			(code 120)
+			(code 121)
 			(name "SPARE2")
 			(node
 				(ref "U14")
@@ -4340,7 +4496,7 @@
 			)
 		)
 		(net
-			(code 121)
+			(code 122)
 			(name "SRV1")
 			(node
 				(ref "C131")
@@ -4356,7 +4512,7 @@
 			)
 		)
 		(net
-			(code 122)
+			(code 123)
 			(name "SRV2")
 			(node
 				(ref "C231")
@@ -4372,7 +4528,7 @@
 			)
 		)
 		(net
-			(code 123)
+			(code 124)
 			(name "SRV3")
 			(node
 				(ref "C331")
@@ -4388,7 +4544,7 @@
 			)
 		)
 		(net
-			(code 124)
+			(code 125)
 			(name "SRV4")
 			(node
 				(ref "C431")
@@ -4404,7 +4560,7 @@
 			)
 		)
 		(net
-			(code 125)
+			(code 126)
 			(name "SRV5")
 			(node
 				(ref "C531")
@@ -4420,7 +4576,7 @@
 			)
 		)
 		(net
-			(code 126)
+			(code 127)
 			(name "SRV6")
 			(node
 				(ref "C631")
@@ -4436,7 +4592,7 @@
 			)
 		)
 		(net
-			(code 127)
+			(code 128)
 			(name "SVN1")
 			(node
 				(ref "C131")
@@ -4452,7 +4608,7 @@
 			)
 		)
 		(net
-			(code 128)
+			(code 129)
 			(name "SVN2")
 			(node
 				(ref "C231")
@@ -4468,7 +4624,7 @@
 			)
 		)
 		(net
-			(code 129)
+			(code 130)
 			(name "SVN3")
 			(node
 				(ref "C331")
@@ -4484,7 +4640,7 @@
 			)
 		)
 		(net
-			(code 130)
+			(code 131)
 			(name "SVN4")
 			(node
 				(ref "C431")
@@ -4500,7 +4656,7 @@
 			)
 		)
 		(net
-			(code 131)
+			(code 132)
 			(name "SVN5")
 			(node
 				(ref "C531")
@@ -4516,7 +4672,7 @@
 			)
 		)
 		(net
-			(code 132)
+			(code 133)
 			(name "SVN6")
 			(node
 				(ref "C631")
@@ -4532,8 +4688,12 @@
 			)
 		)
 		(net
-			(code 133)
+			(code 134)
 			(name "V5")
+			(node
+				(ref "C814")
+				(pin "1")
+			)
 			(node
 				(ref "D813")
 				(pin "1")
@@ -4545,10 +4705,6 @@
 			(node
 				(ref "D833")
 				(pin "1")
-			)
-			(node
-				(ref "J8")
-				(pin "4")
 			)
 			(node
 				(ref "K801")
@@ -4566,9 +4722,13 @@
 				(ref "U12")
 				(pin "2")
 			)
+			(node
+				(ref "U16")
+				(pin "2")
+			)
 		)
 		(net
-			(code 134)
+			(code 135)
 			(name "VA+")
 			(node
 				(ref "C701")
@@ -4619,8 +4779,12 @@
 				(pin "1")
 			)
 			(node
-				(ref "J8")
+				(ref "C811")
 				(pin "1")
+			)
+			(node
+				(ref "R804")
+				(pin "2")
 			)
 			(node
 				(ref "U1")
@@ -4672,7 +4836,7 @@
 			)
 		)
 		(net
-			(code 135)
+			(code 136)
 			(name "VA-")
 			(node
 				(ref "C702")
@@ -4723,7 +4887,11 @@
 				(pin "1")
 			)
 			(node
-				(ref "J8")
+				(ref "C812")
+				(pin "1")
+			)
+			(node
+				(ref "R805")
 				(pin "2")
 			)
 			(node
@@ -4776,7 +4944,27 @@
 			)
 		)
 		(net
-			(code 136)
+			(code 137)
+			(name "VA_RAW")
+			(node
+				(ref "C813")
+				(pin "1")
+			)
+			(node
+				(ref "R804")
+				(pin "1")
+			)
+			(node
+				(ref "U15")
+				(pin "6")
+			)
+			(node
+				(ref "U16")
+				(pin "3")
+			)
+		)
+		(net
+			(code 138)
 			(name "VC1")
 			(node
 				(ref "C142")
@@ -4796,7 +4984,7 @@
 			)
 		)
 		(net
-			(code 137)
+			(code 139)
 			(name "VC2")
 			(node
 				(ref "C242")
@@ -4816,7 +5004,7 @@
 			)
 		)
 		(net
-			(code 138)
+			(code 140)
 			(name "VC3")
 			(node
 				(ref "C342")
@@ -4836,7 +5024,7 @@
 			)
 		)
 		(net
-			(code 139)
+			(code 141)
 			(name "VC4")
 			(node
 				(ref "C442")
@@ -4856,7 +5044,7 @@
 			)
 		)
 		(net
-			(code 140)
+			(code 142)
 			(name "VC5")
 			(node
 				(ref "C542")
@@ -4876,7 +5064,7 @@
 			)
 		)
 		(net
-			(code 141)
+			(code 143)
 			(name "VC6")
 			(node
 				(ref "C642")
@@ -4896,7 +5084,43 @@
 			)
 		)
 		(net
-			(code 142)
+			(code 144)
+			(name "VIN")
+			(node
+				(ref "D804")
+				(pin "2")
+			)
+			(node
+				(ref "J8")
+				(pin "1")
+			)
+		)
+		(net
+			(code 145)
+			(name "VIN_P")
+			(node
+				(ref "C807")
+				(pin "1")
+			)
+			(node
+				(ref "C808")
+				(pin "1")
+			)
+			(node
+				(ref "C809")
+				(pin "1")
+			)
+			(node
+				(ref "D804")
+				(pin "1")
+			)
+			(node
+				(ref "U15")
+				(pin "2")
+			)
+		)
+		(net
+			(code 146)
 			(name "VNR")
 			(node
 				(ref "C801")
@@ -4908,7 +5132,19 @@
 			)
 		)
 		(net
-			(code 143)
+			(code 147)
+			(name "VN_RAW")
+			(node
+				(ref "R805")
+				(pin "1")
+			)
+			(node
+				(ref "U15")
+				(pin "8")
+			)
+		)
+		(net
+			(code 148)
 			(name "VREF")
 			(node
 				(ref "C802")
@@ -4936,7 +5172,7 @@
 			)
 		)
 		(net
-			(code 144)
+			(code 149)
 			(name "VREFN")
 			(node
 				(ref "D803")

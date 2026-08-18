@@ -95,6 +95,13 @@ SIZE = {
     "SOT-23": (3.86, 3.40), "SOT-523": (2.30, 2.10),
     "Relay_DPDT_Omron_G6S-2F": (10.70, 15.30),
     "SOIC-8": (7.40, 5.40), "SOIC-14": (7.40, 9.16), "SOIC-16": (7.40, 10.40),
+    # The supply's four. The first is this repo's own footprint rather than
+    # KiCad's -- gen_project.footprint_library() writes it from the datasheet
+    # drawing -- and gen_pcb.check_courtyards() is still what holds this row
+    # against it, which matters *more* for a generated footprint and not less:
+    # two files this repo controls can be wrong together.
+    "TRACO_TMR-6-xxxxWI": (22.30, 9.60),
+    "TO-252-2": (11.10, 7.00), "Fuse_1206": (4.56, 2.26), "D_SMA": (7.00, 3.50),
     "SOIC-20W": (11.86, 13.30),
     "PinHeader_1x02": (3.54, 6.09), "PinHeader_1x05": (3.54, 13.70),
     "TestPoint": (3.00, 3.00),
@@ -106,6 +113,11 @@ SIZE = {
 # is two thirds of its length. courtyard() centred every part on its position
 # and so drew the headers 5 mm north of where they are.
 ANCHOR = {"PinHeader_1x02": (0.0, 1.275), "PinHeader_1x05": (0.0, 5.08),
+          # Anchored on pad 1, the convention every Converter_DCDC footprint
+          # in KiCad uses and therefore the one this one is written to.
+          "TRACO_TMR-6-xxxxWI": (8.90, 1.05),
+          # The DPAK's tab is pad 2 and the anchor is not the body's middle.
+          "TO-252-2": (-0.84, 0.0),
           # The G6S-2F's courtyard is not quite centred on its anchor.
           "Relay_DPDT_Omron_G6S-2F": (0.0, -0.05)}
 
@@ -181,6 +193,71 @@ SHARED_Y = CV_ROW_0 + design.CHANNELS * ROW_PITCH + 10.0
 SPLIT_Y = SHARED_Y + 30.0
 GROUND_GAP = 2.0
 
+# Zone P, and it is the only block on this board with **two** boundaries
+# through it. The ground split at SPLIT_Y separates two returns that meet at
+# R902; the isolation barrier separates two returns that meet nowhere, and the
+# second is a stronger statement than the first.
+#
+# So the band is arranged around a vertical line instead of a horizontal one.
+# U15 lies along the band with its pins running west to east, primary end
+# first, and ISOLATION_X falls in the 5.08 mm gap the package leaves where
+# pin 4 is not -- the part's own creepage distance, used as the board's.
+# Everything west of that line is referenced to IGND and has **no ground pour
+# under it at all**; everything east of it is MDGND like the rest of the
+# southern half. gen_pcb.build() pours the southern MDGND as two rectangles
+# for exactly this reason, and verify.check_isolation() measures the gap in
+# copper rather than trusting the placement.
+#
+# South of everything else, which is floorplan.py's "far corner from A1 and R"
+# read literally: A1 is the north-west column and R crosses the middle, so the
+# far corner is the south, and the band costs the board 18 mm of length it has
+# plenty of. The switching part of this module is now as far from the front
+# ends as the outline allows.
+SUPPLY_Y = SPLIT_Y + 39.56             # 197.0, the band's own row
+SUPPLY_U15_X = 32.0                    # pad 1, and the pins run east from it
+# Between pin 3 and pin 5, which are 5.08 mm apart because pin 4 does not
+# exist. Computed rather than typed so that moving the package moves the line.
+ISOLATION_X = SUPPLY_U15_X + 3 * 2.54
+# The band's northern edge. Nothing referenced to IGND sits north of this, and
+# the MDGND pour stops here on the primary's side of ISOLATION_X.
+ISOLATION_Y = SUPPLY_Y - 7.0
+# The one part that is *meant* to cross the barrier. Declared here as well as
+# in design.py because the geometric check and the netlist check are different
+# claims, and this repo has been caught before by one instrument covering for
+# another.
+ISOLATION_BRIDGE = ("C810",)
+# How far east of the line a ground stitch has to be pushed to find copper.
+# **Not the same number as GROUND_GAP / 2 and that is why it exists.** The pour
+# starts one gap east of the line; a via placed exactly there is half its own
+# diameter from the fill's edge, and the fill also keeps its clearance from the
+# primary tracks running north-south beside it, so what looks like 0.6 mm of
+# margin is a via sitting on an island. C810's own stitch was the one that
+# found it: DRC reported a 1.6 mm track connected to nothing, which is the
+# whole visible symptom of a via that landed 0.6 mm inside a boundary it needed
+# to be 3 mm inside.
+ISOLATION_STITCH_MM = 3.0
+
+SUPPLY = {
+    # -- primary, west of ISOLATION_X, no pour beneath ---------------------
+    "J8": (6.0, SUPPLY_Y - 3.0, 0),
+    "D804": (17.0, SUPPLY_Y, 90),
+    "C807": (21.5, SUPPLY_Y, 90),
+    "C808": (25.5, SUPPLY_Y, 90),
+    "C809": (28.5, SUPPLY_Y, 90),
+    "U15": (SUPPLY_U15_X, SUPPLY_Y, 0),
+    # On the line, and the only thing that is. Offset east by half a pad so
+    # that its MDGND end lands inside the pour and its IGND end does not.
+    "C810": (ISOLATION_X + 0.6, ISOLATION_Y + 1.5, 0),
+    # -- secondary, east of the package ------------------------------------
+    "R804": (56.0, SUPPLY_Y, 90),
+    "C811": (60.0, SUPPLY_Y, 90),
+    "R805": (64.0, SUPPLY_Y, 90),
+    "C812": (68.0, SUPPLY_Y, 90),
+    "C813": (73.0, SUPPLY_Y, 90),
+    "U16": (82.0, SUPPLY_Y, 0),
+    "C814": (91.0, SUPPLY_Y, 90),
+}
+
 SHARED = {
     # Zone R, the reference and its inverter.
     "U12": (14.0, SHARED_Y, 90),
@@ -226,48 +303,19 @@ SHARED = {
     "D823": (70.0, SPLIT_Y + 10.0, 90),
     "D833": (74.0, SPLIT_Y + 10.0, 90),
 
-    # **J8 is a straddler and was filed as a connector**, and that is the whole
-    # of this correction. The block above states the rule -- parts that
-    # genuinely span both domains go on the line -- and then lists four of
-    # them; the supply inlet satisfies the condition and was never tested
-    # against it, because it was grouped with J9 to J11 by being a header
-    # rather than by what it carries. It carries VA+, VA-, MAGND, V5 and
-    # MDGND: both rails, both grounds, one part.
+    # **J8 was here, and it moved twice for opposite reasons.** It was filed
+    # with J9-J11 as a connector, was found to be a straddler carrying both
+    # rails and both grounds, and was moved onto the ground split so that each
+    # of its five pins landed in its own pour. It is a two-way *primary* inlet
+    # now -- see design.supply() -- so it straddles nothing, and it lives in
+    # SUPPLY above with the rest of the isolated side.
     #
-    # What that cost is one connection, and it is worth naming the exact
-    # mechanism because nothing else on this board can go wrong this way.
-    # stitch_grounds() gives every SMD ground pad a via into its own pour and
-    # skips through-hole pads, on the correct reasoning that a barrel already
-    # crosses every layer. It does -- but it reaches the plane that is *under
-    # it*, and pin 3 is MAGND sitting 18 mm inside the MDGND pour, so the
-    # barrel crossed four layers and met the wrong ground on two of them and
-    # nothing on the other two. **A through-hole pad is already stitched only
-    # if it is in its own pour**, which is _in_pour()'s rule arriving one part
-    # class late. DRC had been reporting it for as long as the board has
-    # existed, inside a count of 67 that nobody could read item by item, which
-    # is the argument for UNROUTED_ITEMS reaching zero rather than getting
-    # smaller.
-    #
-    # Moving the part is the fix rather than stitching it across, and the
-    # reason is CROSSING_RULE, not convenience: a stitch from here would put
-    # the whole board's analogue return current on 19 mm of F.Cu running the
-    # length of the digital zone. MAGND is declared to cross the boundary at
-    # R902, and that declaration is about where the current goes.
-    #
-    # The header runs north-south at rotation 0 with pin 1 at the anchor, so
-    # placing the anchor 7.62 mm north of the line puts VA+, VA- and MAGND in
-    # the analogue pour, MDGND in the digital one, and V5 alone in the 2 mm
-    # gap between them -- which is free, because V5 is routed rather than
-    # poured.
-    #
-    # East, and floorplan.py had already said so: zone P is "the far corner
-    # from A1 and R, with its own local return". A1 is the west column and R
-    # is the reference across the middle, so the far corner is south-east, and
-    # x = 91 is the strip east of K803 with nothing else in it. It also puts
-    # the power loom on the opposite edge from the six audio looms at J1-J6,
-    # which is worth more than the tidiness of having all four headers in a
-    # row was.
-    "J8": (91.0, SPLIT_Y - 7.62, 0),
+    # The mechanism that correction turned on is worth keeping even though the
+    # part it applied to is gone, because the next through-hole part in the
+    # wrong pour will hit it: stitch_grounds() skips through-hole pads on the
+    # correct reasoning that a barrel already crosses every layer, and a
+    # barrel reaches the plane that is *under* it. A through-hole pad is
+    # already stitched only if it is in its own pour.
 
     # Zone D2, the signal connectors, on the south edge where a loom can reach
     # them.
@@ -286,7 +334,14 @@ PULLDOWN_Y = SPLIT_Y + 18.0
 # which after a 90-degree rotation is *west* of it, and west of the VCAs is the
 # stability capacitor 7 mm away. Six DRC violations, all of them one text field
 # on two pads.
-REFERENCE_MOVES = {"U9": (8.0, 0.0), "U10": (8.0, 0.0)}
+# **U15's is not the same kind of collision and it is worth the distinction.**
+# The VCAs' reference lands on a neighbour because a 90-degree rotation puts
+# KiCad's above-the-body text to the west. U15 is not rotated: its reference is
+# where the footprint puts it, above its own body, and what is there is C810 --
+# which has to be there, because it is the one part that sits on the isolation
+# line. So this move is the barrier's cost in silkscreen, and moving the
+# capacitor instead would be moving the thing that is placed for a reason.
+REFERENCE_MOVES = {"U9": (8.0, 0.0), "U10": (8.0, 0.0), "U15": (0.0, -4.0)}
 
 # **Empty, and that is the whole of choosing the last two parts.** This held a
 # 14 x 9 mm envelope for each of the three bypass relays, because
@@ -363,6 +418,9 @@ def position(ref):
 
     if ref in SHARED:
         return SHARED[ref]
+
+    if ref in SUPPLY:
+        return SUPPLY[ref]
 
     found = re.match(r"^R81([1-6])$", ref)
     if found:

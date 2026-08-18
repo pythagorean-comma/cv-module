@@ -124,6 +124,12 @@ from toolchain.kisch import _uuid as symbol_uuid                 # noqa: E402
 
 FOOTPRINT_DIR = kicad.FOOTPRINT_DIR
 PROJECT = "cv-module"
+# The project's own footprint library, written by gen_project.py, holding the
+# one land pattern KiCad does not ship. Resolved here rather than by copying
+# the file into KiCad's installation, which is the same argument gen_project
+# makes for `${KIPRJMOD}` in fp-lib-table: a build that writes into the
+# toolchain is a build that cannot run on another machine.
+PROJECT_LIBS = {"cv": HERE / "out" / "cv.pretty"}
 
 
 def point(x, y):
@@ -151,12 +157,15 @@ class Board:
     def place(self, ref, x, y, rotation):
         part = circuit.PARTS[ref]
         library, name = part.footprint.split(":", 1)
-        footprint = pcbnew.FootprintLoad(
-            str(FOOTPRINT_DIR / f"{library}.pretty"), name)
+        directory = PROJECT_LIBS.get(library,
+                                     FOOTPRINT_DIR / f"{library}.pretty")
+        footprint = pcbnew.FootprintLoad(str(directory), name)
         if footprint is None:
             raise SystemExit(
-                f"could not load footprint {part.footprint} for {ref} -- "
-                f"check the name against KiCad's own library")
+                f"could not load footprint {part.footprint} for {ref} from "
+                f"{directory} -- check the name against KiCad's own library, "
+                f"or against gen_project.footprint_library() if the nickname "
+                f"is a project one")
         self.board.Add(footprint)
         footprint.SetFPIDAsString(part.footprint)
         # The same UUID gen_sch.py derived for this symbol, so the two files
@@ -239,11 +248,21 @@ class Board:
             shape.SetWidth(pcbnew.FromMM(0.1))
             self.board.Add(shape)
 
-    def zone(self, net, layer, rectangle):
+    def zone(self, net, layer, rectangle, priority=0):
+        """One poured rectangle.
+
+        `priority` exists for the L the southern MDGND is poured as. **Two
+        zones of one net that overlap at the same priority are a DRC error**
+        -- `zones_intersect`, "intersecting zones must have distinct
+        priorities" -- and KiCad is right to insist: with equal priority the
+        filler has no rule for which one owns the shared copper. Same net or
+        not, the overlap has to be ordered.
+        """
         left, top, right, bottom = rectangle
         item = pcbnew.ZONE(self.board)
         item.SetLayer(layer)
         item.SetNet(self.net(net))
+        item.SetAssignedPriority(priority)
         item.SetLocalClearance(pcbnew.FromMM(CLEARANCE_MM))
         item.SetMinThickness(pcbnew.FromMM(0.2))
         outline = item.Outline()
@@ -418,6 +437,13 @@ class Board:
             return (x, placement.SPLIT_Y - edge)
         if net == "MDGND" and y < placement.SPLIT_Y + edge:
             return (x, placement.SPLIT_Y + edge)
+        # And the second MDGND rectangle, which is the supply band east of the
+        # isolation line. A stitch anywhere in the primary's quadrant would
+        # land on no plane at all -- the same fault J8's own note records, one
+        # boundary later.
+        if (net == "MDGND" and y > placement.ISOLATION_Y - edge
+                and x < placement.ISOLATION_X + placement.ISOLATION_STITCH_MM):
+            return (placement.ISOLATION_X + placement.ISOLATION_STITCH_MM, y)
         return spot
 
     def fill(self):
@@ -521,11 +547,41 @@ def build():
     inset = 0.5
     split = placement.SPLIT_Y
     half = placement.GROUND_GAP / 2
+    # **MDGND is two rectangles and not one, and the second one is the
+    # isolation barrier expressed as an absence.** The supply's primary side
+    # is referenced to IGND -- the inlet's own 0 V, which through the shared
+    # barrel jack is the mixer's PGND -- and a ground plane running under it
+    # would be a plate capacitor across the barrier at exactly the frequency
+    # design.barrier_return() is trying to keep out of the audio bond. So the
+    # southern pour stops at placement.ISOLATION_Y across the primary's half
+    # of the board and resumes east of placement.ISOLATION_X.
+    #
+    # There is no third zone for IGND. A pour would be the obvious thing and
+    # it is wrong here for the same reason: it is 300 mm2 of copper facing the
+    # MDGND plane on the layer above, which is the coupling the gap exists to
+    # remove. Seven pins of primary is a routed net.
+    iso_x = placement.ISOLATION_X
+    iso_y = placement.ISOLATION_Y
     for layer in (pcbnew.In1_Cu, pcbnew.In2_Cu):
         board.zone("MAGND", layer,
                    (left + inset, top + inset, right - inset, split - half))
         board.zone("MDGND", layer,
-                   (left + inset, split + half, right - inset, bottom - inset))
+                   (left + inset, split + half, right - inset, iso_y - half))
+        # **The second rectangle starts at the split and not at the isolation
+        # line, and the difference is one unconnected item.** Drawn as two
+        # abutting-but-not-touching rectangles -- north part down to iso_y,
+        # south part from iso_y -- MDGND becomes two *islands* with a 2 mm gap
+        # between them, and KiCad is right to call that a missing connection:
+        # a plane in two pieces is two planes. Overlapping them into an L
+        # instead costs nothing, because the overlap is copper on the same net,
+        # and it leaves exactly the corner that has to be empty empty.
+        #
+        # It cost a build to find, and what found it was DRC's unconnected
+        # count rather than anything here -- which is the argument for
+        # verify.UNROUTED_ITEMS being zero rather than small.
+        board.zone("MDGND", layer,
+                   (iso_x + half, split + half, right - inset, bottom - inset),
+                   priority=1)
 
     stitched, stitch_copper = board.stitch_grounds()
 

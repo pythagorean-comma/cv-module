@@ -154,6 +154,45 @@ MEASURED = {
                    "of the mixer's own 15.9 Hz, which is what its "
                    "DC_BLOCK_VALUE comment warns against."),
 
+    # The two the supply's isolation barrier turns on, and neither is on any
+    # datasheet. Traco states the barrier's capacitance and its switching
+    # frequency; what it cannot state is how hard the primary drives that
+    # capacitance, because that is inside the potting.
+    "dcdc_node_v": Assumption(
+        value=40.0, units=" V pk-pk, flyback primary switching node",
+        low=24.0, high=72.0,
+        question="How large is the swing on the TMR 6WI's primary switching "
+                 "node? A flyback's drain sits at Vin plus the reflected "
+                 "output, so at a 12-18 V input the range below is 2x to 4x "
+                 "the input -- read off what the topology permits, not off "
+                 "the datasheet, which does not say.",
+        sets="the common-mode current through the 50 pF barrier, and with it "
+             "the size of the Y-capacitor",
+        when_wrong="Linearly. barrier_return() scales with it, so the top of "
+                   "the range is 5 dB worse than the value and the bottom is "
+                   "4 dB better -- and the *fraction* returned locally does "
+                   "not move at all, because it is set by two impedances. "
+                   "What would change is whether the residual at the bond is "
+                   "worth another part, and at every point in this range it "
+                   "is not."),
+
+    "inlet_loop_uh": Assumption(
+        value=0.75, units=" uH, the loop the shared inlet closes",
+        low=0.3, high=1.5,
+        question="What is the inductance of the loop formed by the audio "
+                 "ground bond, the mixer's own AGND/PGND star, and the two "
+                 "inlet leads back to the shared barrel jack? It is a "
+                 "property of how the box is wired, not of either board.",
+        sets="how much of the barrier's common-mode current prefers the "
+             "audio bond to the Y-capacitor",
+        when_wrong="It is the *denominator* of the split, so a smaller loop "
+                   "is a worse result: at 0.3 uH more of the barrier current "
+                   "takes the long way round. The whole declared range keeps "
+                   "the residual below the mixer's own noise floor, and the "
+                   "answer if it did not is a common-mode choke in the inlet "
+                   "pair -- which raises exactly this number and is the "
+                   "reason it is worth knowing."),
+
     "logic_law_error": Assumption(
         value=0.23e-2, units=" fractional, '541 output-impedance asymmetry",
         low=0.05e-2, high=1.0e-2,
@@ -2073,6 +2112,556 @@ def supply_requirement():
     }
 
 
+# ---------------------------------------------------------------------------
+# The supply, and the first thing it decides is not a part
+# ---------------------------------------------------------------------------
+# **Two artefacts of this repo disagreed about where the converter goes, and
+# nothing checked which.** `floorplan.ZONES` has carried a zone P since the
+# first pass -- "supply", DIGITAL domain, "the far corner from A1 and R, with
+# its own local return", and a placement rule about |f - 45 kHz| that is a rule
+# about *this board's* copper. `design.py` meanwhile described J8 as "from the
+# isolated DC-DC (DEFERRED): 1=VA+, 2=VA-, 3=MAGND, 4=V5, 5=MDGND", which is a
+# five-way *secondary* inlet and puts the converter on some other board.
+#
+# Both were written down, both were consumed -- placement.py implements the
+# zone list, gen_sch.py draws the header -- and the two claims cannot both be
+# true. Nothing in the repo compares a zone's declared contents against the
+# parts that exist, because until now every zone except P and D2 had some.
+# `floorplan.check_zone_occupancy()` is the instrument that would have said so
+# and it is new here.
+#
+# **The converter comes onto this board**, and zone P is the older and the
+# derived claim of the two:
+#
+#   * spec section 0 says "One board." An off-board converter is an undeclared
+#     second PCB in a project whose scope statement is one;
+#   * the isolation barrier is what makes constraint 5.2 true *by
+#     construction* -- supply-decision.md's own decisive argument. Off-board,
+#     the barrier is somebody's wiring and the guarantee is discipline again,
+#     which is the thing that document rejects the non-isolated option for. On
+#     this board the barrier is copper, and copper is what verify.py can read;
+#   * there is room. The board is 19,046 mm2 with 1,654 mm2 of placed
+#     courtyard, and zone P's corner is empty.
+#
+# So J8 stops being a five-way secondary inlet and becomes a two-way *primary*
+# one: the raw brick, in parallel with the mixer's own J8 at the shared barrel
+# jack. Every net it used to carry is generated here now.
+
+# The shared inlet, read off the mixer at the pinned commit rather than
+# assumed: SUPPLY_RANGE is "12-18V DC centre-negative, 25mA" and SUPPLY_INTENT
+# is "2.1mm barrel, centre negative (Boss standard)". **The positive terminal
+# is the sleeve** -- the mixer's own J8 comment records that the instruction
+# beside it said "centre pin" for the whole life of that design and was
+# backwards, which is worth copying correctly rather than re-deriving.
+#
+# 18 V is the top of the accepted range and the mixer's own note says an 18 V
+# brick "measures about 20 V unloaded", which is the number a part is chosen
+# against.
+INLET_VOLTS = (12.0, 18.0)
+INLET_UNLOADED_MAX = 20.0
+
+# Traco TMR 6-2422WI. Datasheet TMR 6WI Series, 6 Watt, revision 7 November
+# 2023, read first-hand -- all four pages. Every figure below is from it.
+#
+#     Models          TMR 6-2422WI: 9-36 VDC in (24 VDC nom.),
+#                     +12 VDC 250 mA / -12 VDC 250 mA, efficiency 87 % typ.
+#     Switching       "522 - 638 kHz (PWM) / 580 kHz typ. (PWM)"
+#     Topology        "Flyback Converter"
+#     Isolation       1'600 VDC test, 1'000 Mohm, "Isolation Capacitance
+#                     - Input to Output, 100 kHz, 1 V: 50 pF max."
+#     Cross reg.      "5 % max." at 25 % / 100 % asymmetric load
+#     Ripple/noise    "12 / -12 Vout models: 75 / 75 mVp-p max." (20 MHz BW)
+#     Capacitive load "12 / -12 Vout models: 330 / 330 uF max."
+#     Minimum load    "Not required"
+#     Start-up        30 ms typ.
+#     Transient       250 us typ. at a 25 % load step
+#     Input filter    "Internal Capacitor"
+#     Input fuse      "24 Vin models: 1'600 mA (slow blow)"
+#     Package         SIP8, 21.8 x 9.1 x 11.2 mm, 4.8 g
+#
+# **Why this part and not the obvious cheaper one.** The plain TMR 6 -- same
+# power, same package, same outputs, half the price -- is "100 kHz min." on an
+# **RCC** topology, which is self-oscillating: its frequency moves with load
+# and input voltage. Two things are wrong with that here and the second is the
+# one nobody would think of. 100 kHz clears the |f - 45 kHz| > 20 kHz rule, and
+# it is also exactly twice the mixer's pump, so the converter's fundamental
+# sits on the pump's second harmonic and beats with it at **DC**. And a
+# frequency that wanders cannot be designed against at all: supply_beat()
+# below only has an answer because 522-638 kHz is a stated band.
+SUPPLY_PART = "TMR6-2422WI"
+SUPPLY_MPN = "TMR 6-2422WI"
+SUPPLY_VIN = (9.0, 36.0)
+SUPPLY_VOUT = 12.0
+SUPPLY_IOUT_MA = 250.0
+SUPPLY_WATTS = 6.0
+SUPPLY_EFFICIENCY = 0.87
+SUPPLY_KHZ = (522.0, 638.0)
+SUPPLY_KHZ_TYP = 580.0
+SUPPLY_RIPPLE_VPP = 75e-3
+SUPPLY_CLOAD_MAX_F = 330e-6
+SUPPLY_ISO_PF = 50e-12
+SUPPLY_CROSS_REG = 0.05
+SUPPLY_FUSE_A = 1.6
+SUPPLY_DATASHEET = ("https://cdn-reichelt.de/documents/datenblatt/C700/"
+                    "TMR6-2411WI_DB.pdf")
+
+# Dual-output pinout, datasheet page 4. **There is no pin 4** -- the package is
+# a SIP-8 with the fourth position omitted, which is the creepage gap between
+# primary and secondary, and it is the reason the footprint has to be right:
+# 5.08 mm between pin 3 and pin 5 where every other gap is 2.54.
+SUPPLY_PINS = {"-Vin": 1, "+Vin": 2, "Remote": 3, "NC": 5,
+               "+Vout": 6, "Com": 7, "-Vout": 8}
+SUPPLY_REF = "U15"
+# The one part allowed to sit across the barrier that is not the converter.
+# Declared here and again in placement.ISOLATION_BRIDGE, because the netlist
+# claim and the copper claim are different claims: floorplan.check_isolation()
+# reads this one and verify.check_isolation_gap() reads the other.
+ISOLATION_BRIDGE = ("C810",)
+
+# ON Semiconductor NCP1117, publication NCP1117/D revision 25, June 2013, read
+# first-hand. The 5.0 V fixed part:
+#
+#     Vin max              20 V
+#     Vout                 4.950-5.050 V at 10 mA / 25 C;
+#                          4.900-5.100 V over Vin 6.5-12 V, 0-800 mA, over T
+#     Dropout at 100 mA    0.95 V typ, 1.10 V max
+#     Quiescent current    6.0 mA typ, 10 mA max (5.0 V, Vin = 15 V)
+#     Minimum load         "No Minimum Load Requirement for Fixed Voltage
+#                          Output Devices"
+#     Ripple rejection     57 dB min, 61 dB typ at 120 Hz
+#     Output noise         0.003 %Vout, 10 Hz-10 kHz -- 150 uV rms
+#     SOT-223 (318H)       R_thJA 160 C/W at minimum pad, R_thJC 15
+#     DPAK (369C)          R_thJA  67 C/W at minimum pad, R_thJC 6.0
+#     Tj max               150 C
+#
+# **The package is chosen by v5_regulator()'s arithmetic and not by habit**,
+# and it is the one place on this board where the obvious choice is wrong: a
+# SOT-223 is what a 100 mA regulator goes in, and 160 C/W against 0.77 W is
+# 124 degrees of rise. The DPAK is the same die with a tab.
+V5_PART = "NCP1117-5.0"
+V5_MPN = "NCP1117DT50G"
+V5_VOLTS = 5.0
+V5_VIN_MAX = 20.0
+V5_DROPOUT_V = 1.10                    # maximum, at Iout = 100 mA
+V5_IQ_MA = (6.0, 10.0)
+V5_TJ_MAX = 150.0
+V5_THETA_JA = {"SOT-223": 160.0, "DPAK": 67.0}
+V5_PINS = {"GND": 1, "VO": 2, "VI": 3}
+V5_REF = "U16"
+
+# What the board is expected to sit in. Not a measurement and not a guess with
+# consequences -- it is the number the junction-temperature arithmetic is
+# quoted at, and it is stated here so that changing it changes every answer at
+# once. A closed aluminium box on a pedalboard, indoors.
+AMBIENT_C = 40.0
+
+# The rail filter. R is a resistor and not an inductor, and that is derived:
+# an LC of the same corner has Q = R_load * sqrt(C/L), which for this load is
+# about 59 -- a 35 dB peak at 15.9 kHz, inside the audio band, on the rail
+# every channel shares. rail_filter() carries both.
+RAIL_FILTER_R = "4R7 1%"
+RAIL_FILTER_R_OHMS = 4.7
+RAIL_FILTER_C = "10u/50V X7R"
+RAIL_FILTER_C_FARADS = 10e-6
+
+# The Y-capacitor across the isolation barrier, and it is the one part of this
+# block that is load-bearing. barrier_return() is the argument and the value
+# comes out of it.
+BARRIER_C = "470n/50V X7R"
+BARRIER_C_FARADS = 470e-9
+
+# The primary side's own decoupling. 50 V parts on a rail that reaches 20 V,
+# because a class-2 ceramic at 80 % of its rating has lost most of its
+# capacitance -- the mixer makes the same argument at its own VIN_P and reaches
+# 35 V there because its brick is the only thing on that node.
+PRIMARY_BULK_C = "10u/50V X7R"
+PRIMARY_BULK_C_FARADS = 10e-6
+PRIMARY_HF_C = "100n/50V X7R"
+
+# Reverse-polarity protection, and it is the mixer's own part for the mixer's
+# own reason: a 3 A / 40 V Schottky run at a fraction of its rating has a
+# forward drop far below what a correctly-sized small part would give. The
+# mixer draws 25 mA through one and gets about 0.2 V; this draws 371 mA and
+# gets about 0.35 V, which is what inlet_budget() spends.
+INLET_DIODE = "B340A"
+INLET_DIODE_VF = 0.35
+
+
+def supply_fit():
+    """The converter's two outputs against what the board actually draws.
+
+    **supply_requirement() states 3.10 W and the converter has to deliver
+    3.87 W, and the 25 % is a mistake in method rather than in arithmetic.**
+    That function sums each rail's power at its own voltage -- 12 V x 110 mA
+    twice, 5 V x 93 mA once -- which is right for "what does the module
+    dissipate" and wrong for "what must the converter deliver", because V5 is
+    not one of the converter's outputs. It is made linearly from VA+, so every
+    milliamp of it leaves the converter at *twelve* volts and arrives at five.
+
+    Summing rail powers is exactly the shortcut that looks complete: three
+    rails, three products, one total, nothing obviously missing. What it omits
+    is the topology between them, and the omission is invisible until somebody
+    draws the topology. It is the same shape as the assumption whose "if it is
+    wrong" clause cancelled itself -- an answer that cannot be checked by
+    looking harder at the thing that produced it.
+
+    So this walks the other way: from the converter's pins outward.
+    """
+    load = supply_load()
+    v5_ma = load["V5"]["max_ma"] + V5_IQ_MA[1]
+    positive = load["VA+"]["max_ma"] + v5_ma
+    negative = load["VA-"]["max_ma"]
+    watts = SUPPLY_VOUT * (positive + negative) * 1e-3
+    return {
+        "positive_ma": positive,
+        "negative_ma": negative,
+        "limit_ma": SUPPLY_IOUT_MA,
+        "positive_headroom_ma": SUPPLY_IOUT_MA - positive,
+        "negative_headroom_ma": SUPPLY_IOUT_MA - negative,
+        "watts": watts,
+        "watts_limit": SUPPLY_WATTS,
+        "watts_headroom": SUPPLY_WATTS - watts,
+        "rail_power_sum": supply_requirement()["watts_max"],
+        # The imbalance the datasheet's cross-regulation figure is quoted
+        # against: "5 % max." for 25 % / 100 % asymmetric load. This is milder
+        # than that test, which is what makes 5 % an upper bound here rather
+        # than a number to be interpolated.
+        "asymmetry": (positive / SUPPLY_IOUT_MA, negative / SUPPLY_IOUT_MA),
+        "cross_reg_volts": SUPPLY_VOUT * SUPPLY_CROSS_REG,
+        "deferred_headroom_ma": SUPPLY_IOUT_MA - positive,
+    }
+
+
+def supply_beat(f_khz=None):
+    """What the >= 300 kHz rule is worth, and it is not what it says.
+
+    Spec section 1.1 and supply-decision.md give one rule --
+    |f_module - 45 kHz| > 20 kHz, target >= 300 kHz -- with a mechanism that is
+    real: a VCA is a multiplier, so two ripple components on its control port
+    do not add, they intermodulate, and the difference frequency lands in the
+    audio band.
+
+    **The rule is a fundamental-only rule and the mechanism is not.** The
+    mixer's pump is a switched-capacitor inverter, so its ripple is a sawtooth
+    with harmonics at every n x 45 kHz, and a converter at f beats with the
+    n-th of them at |f - n x 45|. Over this part's own stated band, 522 to
+    638 kHz, n runs from 12 to 14 and the beat passes through zero: there is
+    no switching frequency, at any value, that clears every harmonic. A rule
+    that can be satisfied by choosing a number, when the thing it defends
+    against cannot be, is a rule that stops measuring the moment it is obeyed.
+
+    So what makes this safe is not the frequency. Two things, and the first is
+    the one the same document already bought and did not notice it had:
+
+      * **isolation.** This module shares no rail with the mixer, so the pump's
+        ripple reaches it only down the audio path, as signal, through the
+        mixer's own rail filter and its op-amps. The one place two supply
+        ripples could meet at full size is a shared rail, and there is not
+        one. The ground bond carries the *other* direction and
+        barrier_return() is where that is priced;
+      * **order.** The product at |f1 - f2| is second order in both
+        amplitudes. In the SSI2164's control law a rail ripple of amplitude a1
+        and a second of a2 give a difference-frequency gain modulation of
+        a1 x a2 / 2, so two terms at -56 dB each make one at -117 dB.
+
+    That second line is also the honest answer to "why one converter and not
+    two", which is the question this block was expected to turn on. **It does
+    not turn on it.** Two independent TMR 6WI would beat somewhere in 0 to
+    116 kHz -- unbounded below, so for some pair of units it is in the audio
+    band with certainty -- and it would still be 117 dB down. What decides one
+    converter is that a second one is a second isolation barrier, a second
+    Y-capacitor network and a second 18-pound part, against 0.77 W of heat in
+    a regulator. See v5_regulator().
+    """
+    f_khz = f_khz or SUPPLY_KHZ_TYP
+    pump_khz = socket.PUMP_FREQUENCY / 1e3
+    orders = []
+    for n in range(1, 21):
+        orders.append((abs(f_khz - n * pump_khz), n))
+    beat_khz, order = min(orders)
+    # The whole stated band, not the typical: the part is not trimmed and two
+    # units are not the same frequency.
+    reachable = [n for n in range(1, 21)
+                 if SUPPLY_KHZ[0] <= n * pump_khz <= SUPPLY_KHZ[1]]
+    return {
+        "f_khz": f_khz,
+        "pump_khz": pump_khz,
+        "rule_khz": SUPPLY_MIN_KHZ,
+        "fundamental_beat_khz": abs(f_khz - pump_khz),
+        "rule_holds": abs(f_khz - pump_khz) > 20.0,
+        "worst_beat_khz": beat_khz,
+        "worst_order": order,
+        "in_audio_band": beat_khz * 1e3 < BANDWIDTH,
+        "harmonics_inside_band": reachable,
+        # Two units of one part, each anywhere in its own stated band.
+        "two_unit_beat_khz": (0.0, SUPPLY_KHZ[1] - SUPPLY_KHZ[0]),
+    }
+
+
+def ripple_am(volts):
+    """Gain modulation the SSI2164 makes of a ripple on its control port.
+
+    Deliberately pessimistic in the one place a figure is missing: it assumes
+    the ripple reaches V_C **undiminished**, which is a power-supply rejection
+    of 0 dB. The OPA1644's PSRR at half a megahertz was not read this session
+    and inventing it is what section 6 forbids, so the arithmetic is done at
+    the value that cannot be optimistic. Every real amplifier does better.
+
+    Returns the modulation as a fraction and in dB relative to the signal.
+    """
+    decibels = abs(volts) / abs(control_constant())
+    fraction = 10 ** (decibels / 20.0) - 1.0
+    return {"volts": volts, "db_of_gain": decibels, "fraction": fraction,
+            "am_db": 20 * math.log10(fraction) if fraction > 0 else -math.inf}
+
+
+def rail_filter(r_ohms=None, c_farads=None, f_khz=None):
+    """What is left of the converter's 75 mVp-p by the time a channel sees it.
+
+    One pole per rail, R then C, and **the R is the derivation**. The obvious
+    part is an inductor -- same corner, no drop, no dissipation -- and it is
+    wrong here for a reason that is arithmetic rather than taste. An LC loaded
+    by a current sink has
+
+        Q = R_load x sqrt(C / L)
+
+    and at equal corners sqrt(L/C) is exactly this resistor's own value, so
+    the comparison needs no second set of numbers: 12 V / 110 mA = 109 ohm
+    against 4.7 gives Q = 23, which is a 27 dB peak at 3.4 kHz -- inside the
+    audio band, on the one rail all six channels share. Damping it costs a
+    resistor and a capacitor, which is more parts than starting with the
+    resistor. The RC has no resonance to damp, and its cost is 0.52 V of rail
+    and 56 mW in an 0805 rated 125.
+
+    The DC drop is spent where it is worth least: the LDO is fed from the
+    converter's pin, ahead of this resistor, so the 93 mA of relay coil never
+    flows through it. That is worth stating because it is the whole reason the
+    resistor can be this big -- with the coils downstream of it the drop would
+    be 0.47 V and would step by 0.2 V every time the module went into circuit.
+    """
+    r_ohms = r_ohms or RAIL_FILTER_R_OHMS
+    c_farads = c_farads or RAIL_FILTER_C_FARADS
+    # The bottom of the stated band, because that is the least attenuated.
+    f_hz = (f_khz or SUPPLY_KHZ[0]) * 1e3
+    corner = 1.0 / (2 * math.pi * r_ohms * c_farads)
+    attenuation = math.sqrt(1 + (f_hz / corner) ** 2)
+    residual = SUPPLY_RIPPLE_VPP / attenuation
+    current = supply_load()["VA+"]["max_ma"] * 1e-3
+    # The LC of the same corner, which is the comparison: equal corners means
+    # sqrt(L/C) = R, so the characteristic impedance the damping is measured
+    # against is this resistor's own value and Q falls straight out of the
+    # load impedance divided by it.
+    inductor_h = r_ohms * r_ohms * c_farads
+    inductor_q = (SUPPLY_VOUT / current) / r_ohms
+    return {
+        "r_ohms": r_ohms,
+        "c_farads": c_farads,
+        "corner_hz": corner,
+        "attenuation_db": 20 * math.log10(attenuation),
+        "residual_vpp": residual,
+        "am": ripple_am(residual / 2.0),
+        "drop_v": r_ohms * current,
+        "watts": current * current * r_ohms,
+        "rail_v": SUPPLY_VOUT - r_ohms * current,
+        # What the same corner would cost as an LC, which is the comparison
+        # the docstring makes and the reason there is no inductor here.
+        "lc_q": inductor_q,
+        "lc_h": inductor_h,
+        "lc_peak_db": 20 * math.log10(inductor_q),
+        "cload_limit_f": SUPPLY_CLOAD_MAX_F,
+        "cload_used_f": 2 * c_farads,
+    }
+
+
+def barrier_return(c_y=None, node_vpp=None, loop_uh=None):
+    """Where the isolation barrier's own current goes, and it is load-bearing.
+
+    The one part of this block that constraint 5.2 can be lost to, and it is
+    not a DC bond. The converter's barrier is 50 pF (datasheet, input to
+    output, 100 kHz, 1 V) and the primary's switching node swings across it at
+    580 kHz, so a common-mode current flows from primary to secondary and has
+    to get back. Two paths, in parallel:
+
+      1. the Y-capacitor, primary ground to MDGND, at the module -- a loop of
+         millimetres;
+      2. out through the secondary ground, across R902, across R901, along the
+         bond wire into the mixer's AGND, through the mixer's own AGND/PGND
+         star, back down the shared inlet lead to the barrel jack and into the
+         primary. **That path runs through the audio ground bond**, which is
+         the one conductor this whole design is arranged around.
+
+    Without (1) all of it takes (2), and this computes what that is worth:
+    milliamps at 580 kHz across a bond whose impedance at that frequency is
+    the loom's inductance, in series with every channel's signal return.
+
+    **The value is a trade and not a maximum**, which is why it is computed
+    rather than picked. A larger Y-capacitor takes more of the barrier current
+    locally and also lowers the impedance of the low-frequency loop that the
+    isolation exists to open -- so the same part that fixes the 580 kHz
+    problem re-creates a hum loop if it is made big enough. Both directions
+    are below, and 100 nF is where the residual at 580 kHz and the injection
+    at 100 Hz are both small: the second is helped by the fact that the bond's
+    impedance at 100 Hz is its resistance, milliohms, and not the fraction of
+    an ohm it presents at half a megahertz.
+
+    Two figures here are assumptions with ranges, and both are declared in
+    MEASURED because neither is on any datasheet: the switching node's
+    amplitude, and the inductance of the loop the shared inlet closes.
+    """
+    c_y = c_y if c_y is not None else BARRIER_C_FARADS
+    node_vpp = node_vpp or MEASURED["dcdc_node_v"].value
+    loop_uh = loop_uh or MEASURED["inlet_loop_uh"].value
+    omega = 2 * math.pi * SUPPLY_KHZ_TYP * 1e3
+    # Fundamental of the switching node, treated as a sine of the stated
+    # peak-to-peak. A real flyback edge has more high-frequency content and
+    # less of it reaches the audio band, so this is the term that matters.
+    drive_rms = node_vpp / (2 * math.sqrt(2))
+    source_z = 1.0 / (omega * SUPPLY_ISO_PF)
+    z_y = 1.0 / (omega * c_y) if c_y else math.inf
+    z_loop = omega * loop_uh * 1e-6 + BOND_R_OHMS
+    total = drive_rms / source_z
+    through_loop = total * z_y / (z_y + z_loop)
+    # At 100 Hz the same loop is resistive: the bond is 0R plus wire, and the
+    # Y-capacitor is what limits the current.
+    hum_omega = 2 * math.pi * 100.0
+    hum_z = 1.0 / (hum_omega * c_y) if c_y else math.inf
+    hum_current = LOOP_EMF_V / hum_z
+    # The comparison a 100 Hz tone deserves is the noise in its own critical
+    # band, not the whole 20 kHz: a third octave at 100 Hz is 23.1 Hz wide.
+    third_octave = 100.0 * (2 ** (1 / 6.0) - 2 ** (-1 / 6.0))
+    floor = MEASURED["noise_floor"].value * math.sqrt(third_octave / BANDWIDTH)
+    return {
+        "c_y": c_y,
+        "node_vpp": node_vpp,
+        "loop_uh": loop_uh,
+        "barrier_ma": total * 1e3,
+        "local_fraction": 1.0 - through_loop / total,
+        "through_bond_ma": through_loop * 1e3,
+        "bond_v": through_loop * z_loop,
+        "bond_v_unfitted": total * z_loop,
+        "improvement_db": 20 * math.log10(total / through_loop),
+        "hum_current_a": hum_current,
+        "hum_v": hum_current * BOND_R_OHMS,
+        "hum_floor_v": floor,
+        "hum_margin_db": 20 * math.log10(
+            floor / (hum_current * BOND_R_OHMS)),
+        "noise_floor_v": MEASURED["noise_floor"].value,
+        "z_y": z_y,
+        "z_loop": z_loop,
+    }
+
+
+def v5_regulator():
+    """The 5 V rail, and the package is the answer rather than the part.
+
+    V5 carries three relay coils and the reference -- 93.3 mA maximum, of
+    which 92.7 is coil -- and it is made linearly from VA+ because the
+    converter has two outputs and this is the third rail. What that costs is
+
+        (12 - 5) x 93.3 mA  +  12 x 10 mA  =  0.77 W
+
+    with the second term the regulator's own quiescent current, which is
+    6 mA typical and 10 maximum and is not small against the first.
+
+    **0.77 W is what chooses the package, and the obvious choice fails it.** A
+    100 mA regulator goes in a SOT-223 without anybody thinking about it; the
+    NCP1117's own table gives that package 160 C/W to ambient at a minimum
+    pad, which is 124 degrees of rise. The DPAK is 67 C/W and the same die.
+    Both figures are the datasheet's own and both are at a minimum pad, which
+    is the honest one to design to: a number that depends on how much copper
+    somebody poured is a number the fabricator can change.
+
+    The other reading worth carrying: the 5.0 V line of the electrical table
+    is characterised over **Vin = 6.5 to 12 V**, and this runs it at exactly
+    12. The absolute maximum is 20 V and note 3 restricts only currents above
+    1 A, so it is inside its rating and at the top of its characterisation --
+    a distinction worth writing down rather than discovering as a tolerance.
+    """
+    load = supply_load()["V5"]
+    current = load["max_ma"] * 1e-3
+    watts = (SUPPLY_VOUT - V5_VOLTS) * current + SUPPLY_VOUT * V5_IQ_MA[1] * 1e-3
+    rises = {name: watts * theta for name, theta in V5_THETA_JA.items()}
+    return {
+        "current_ma": load["max_ma"],
+        "coil_ma": load["max_ma"] - VREF_SUPPLY_MA[1],
+        "watts": watts,
+        "rises": rises,
+        "junction": {name: AMBIENT_C + rise for name, rise in rises.items()},
+        "tj_max": V5_TJ_MAX,
+        "fits": {name: AMBIENT_C + rise < V5_TJ_MAX
+                 for name, rise in rises.items()},
+        "package": "DPAK",
+        "headroom_v": SUPPLY_VOUT - V5_VOLTS - V5_DROPOUT_V,
+        "vin_characterised_to": 12.0,
+        "vin_max": V5_VIN_MAX,
+    }
+
+
+def inlet_budget():
+    """What the shared brick has to supply now, which is not what it did.
+
+    The mixer's own SUPPLY_RANGE reads "12-18V DC centre-negative, **25mA**".
+    This module adds the converter's input current, and at the bottom of the
+    accepted range that is fifteen times the figure on the board it plugs in
+    beside. Recorded rather than acted on: the mixer is fabricated and nothing
+    here touches it, but the *brick* is a system-level part and somebody
+    ordering one from that string would order the wrong thing.
+    """
+    fit = supply_fit()
+    watts_in = fit["watts"] / SUPPLY_EFFICIENCY
+    low, high = INLET_VOLTS
+    module_ma = {volts: watts_in / (volts - INLET_DIODE_VF) * 1e3
+                 for volts in (low, high)}
+    return {
+        "watts_out": fit["watts"],
+        "watts_in": watts_in,
+        "module_ma": module_ma,
+        "worst_ma": max(module_ma.values()),
+        "mixer_ma": 25.0,
+        "total_ma": max(module_ma.values()) + 25.0,
+        "mixer_range": socket.SUPPLY_RANGE,
+        "fuse_a": SUPPLY_FUSE_A,
+        "diode_watts": max(module_ma.values()) * 1e-3 * INLET_DIODE_VF,
+    }
+
+
+def input_filter(lead_nh=None):
+    """Why there is no series inductor on the primary, stated as a number.
+
+    A pi filter is what a converter datasheet's application note draws, and
+    the reason to want one here is specific rather than compliance: the inlet
+    is *shared*, so this converter's input ripple current has a conductor
+    straight to the mixer's own inlet, where its LM317's rejection at half a
+    megahertz is nothing to speak of.
+
+    What the arithmetic says is that the local ceramics and the lead already
+    do it. The ripple current divides between the capacitance at the module's
+    own pins and the series inductance of the lead to the jack, and even at
+    the shortest lead this design could plausibly be built with, the lead is
+    the larger impedance by more than an order of magnitude.
+
+    **And the thing it would arrive at is not audible.** 580 kHz on the
+    mixer's rails is 580 kHz: the mixer contains no multiplier, its op-amps
+    are linear, and the one part in this system whose gain is a product is on
+    *this* board, behind the isolation. That is the same argument
+    supply_beat() reaches from the other end, and it is why this is good
+    practice rather than load-bearing -- so it is done with the parts the
+    converter needs anyway, and no inductor is fitted.
+    """
+    lead_nh = lead_nh or MEASURED["inlet_loop_uh"].value * 1e3 / 3.0
+    omega = 2 * math.pi * SUPPLY_KHZ_TYP * 1e3
+    z_local = 1.0 / (omega * 2 * PRIMARY_BULK_C_FARADS)
+    z_lead = omega * lead_nh * 1e-9
+    share = z_local / (z_local + z_lead)
+    return {
+        "z_local": z_local,
+        "z_lead": z_lead,
+        "lead_nh": lead_nh,
+        "share": share,
+        "rejection_db": -20 * math.log10(share),
+        "load_bearing": False,
+    }
+
 def bypass_state():
     """What the mixer sees with the module out of circuit, and it is not new.
 
@@ -2506,6 +3095,21 @@ LIBS = {
     "cv:SSI2164": ("cv", "Audio", "SSI2164", None),
     "cv:74AHC541": ("cv", "74xx", "74AHC541", None),
     "cv:MAX6126": ("cv", "Reference_Voltage", "ADR4525", "MAX6126"),
+    # The converter, borrowed from its own four-watt sibling: the TMR 4WI's
+    # symbol *is* the TMR 6WI's, because both are the dual-output SIP-8 whose
+    # pin map page 4 of the datasheet gives -- 1 -Vin, 2 +Vin, 3 Remote, 5 NC,
+    # 6 +Vout, 7 Com, 8 -Vout -- and KiCad has no symbol for the six. Nothing
+    # is renumbered; only the name and the properties change, which is the
+    # same borrowing OPA1644 makes of TL074 and for the same reason.
+    #
+    # **The footprint is not borrowed and that is the difference**, because a
+    # symbol carries a pin map and a footprint carries a body. See SUPPLY_FP.
+    "cv:TMR6-2422WI": ("cv", "Converter_DCDC_Isolated", "TMR4-2422WI",
+                       "TMR6-2422WI"),
+    # And the regulator from AP1117-50, which is the same 1117 pin map -- 1
+    # Adjust/Ground, 2 Output and the tab, 3 Input -- at the same 5.0 V.
+    "cv:NCP1117-5.0": ("cv", "Regulator_Linear", "AP1117-50", "NCP1117-5.0"),
+    "Device:D_Schottky": ("Device", "Device", "D_Schottky", None),
     "power:GNDA": ("power", "power", "GNDA", None),
     "power:GNDD": ("power", "power", "GNDD", None),
     "power:PWR_FLAG": ("power", "power", "PWR_FLAG", None),
@@ -2671,6 +3275,25 @@ SOD123F_FP = "Diode_SMD:D_SOD-123F"
 SOT523_FP = "Package_TO_SOT_SMD:SOT-523"
 RELAY_FP = "Relay_SMD:Relay_DPDT_Omron_G6S-2F"
 SOT23_FP = "Package_TO_SOT_SMD:SOT-23"
+# The supply's own three, and the first of them is this repo's first footprint.
+#
+# **KiCad has no TMR 6WI land pattern and the two it has that look like one are
+# not it.** Converter_DCDC_TRACO_TMR4-xxxxWI_THT and ..._TMR8-xxxxWI_THT carry
+# exactly the right pad pattern -- 1, 2, 3, then a 5.08 mm gap where pin 4 is
+# not, then 5, 6, 7, 8 -- and different bodies: the TMR 4WI's is 9.3 mm deep
+# with the pin row 2.575 from its front edge, against this part's 9.1 and 3.5.
+# A millimetre in the wrong direction on a silkscreen is the sort of thing the
+# word "approximate" used to cover in placement.SIZE, and that comment is there
+# because it covered a set of transposed courtyards for three passes.
+#
+# So it is generated, from the outline drawing on page 4 of the datasheet, by
+# gen_project.footprint_library() -- next to the *symbol* library that is
+# already generated for exactly the same reason, and under the same nickname.
+SUPPLY_FP = "cv:TRACO_TMR-6-xxxxWI_Dual_THT"
+# DPAK, and see v5_regulator(): 0.77 W against the SOT-223's own 160 C/W is
+# what puts it here.
+DPAK_FP = "Package_TO_SOT_SMD:TO-252-2"
+SMA_FP = "Diode_SMD:D_SMA"
 LOOM_FP = socket.CHANNEL_POT_FP          # the mixer's own 1x03, mirrored
 PAD_FP = "TestPoint:TestPoint_Pad_D2.0mm"
 
@@ -2712,6 +3335,17 @@ ORDER_CODES = {
     # 8-pin SO, A grade, 2.5 V. The "+" suffix is the lead-free marker in
     # Maxim's scheme and is part of the order code, not decoration.
     VREF_PART:        "MAX6126AASA25+",
+    # The supply. Note the space in Traco's own part number -- "TMR 6-2422WI"
+    # is how it is printed on the datasheet, the model page and every
+    # distributor, and an order code is a string to be copied rather than
+    # tidied.
+    SUPPLY_PART:      SUPPLY_MPN,
+    # DT is the DPAK suffix and ST is the SOT-223 one. The letter is the whole
+    # of v5_regulator()'s conclusion, so it is worth seeing here.
+    V5_PART:          V5_MPN,
+    INLET_DIODE:      "B340A-13-F",
+    RAIL_FILTER_R:    "RC0805FR-074R7L",
+    "10u/50V X7R":    "GRM32ER71H106KA12L",
 }
 
 # Parts and blocks this pass does not place, each with the reason. Declared so
@@ -2750,6 +3384,12 @@ NO_CONNECT = tuple(
     # ends. Found by ERC, which is the one instrument that looks at pins rather
     # than at nets and is why it is worth running on a partial sheet.
     (LOGIC_REF, str(LOGIC_Y[n])) for n in (7, 8)
+) + (
+    # The converter's pin 5, which its own pinout table calls NC on both the
+    # single and the dual models. Flagged rather than left open, for the same
+    # reason the '541's two unused outputs are: an open pin the sheet has not
+    # been asked about is indistinguishable from a forgotten wire.
+    (SUPPLY_REF, str(SUPPLY_PINS["NC"])),
 ) + tuple(
     # MODE open is Class AB -- SSI2164 page 3, and it is a decision, not an
     # omission. The spare cell's control pin may float: page 5, "Control pins
@@ -2830,8 +3470,14 @@ DEFERRED = {
     # not chosen is the relay and the MOSFET, and both are in UNSPECIFIED with
     # the property that filters them rather than a guess -- which is a
     # different state from deferred and check_pin_numbers() keeps them apart.
-    "supply": "isolated DC-DC at >=300 kHz per section 1.1; the topology is "
-              "decided and the part is not.",
+    # **"supply" was here and it is drawn.** Its reason read "the topology is
+    # decided and the part is not", which was true and hid a second question
+    # nobody had noticed was open: *where* the converter goes. floorplan.py
+    # had a zone P on this board and design.py had J8 taking a secondary from
+    # somewhere else, and a block being deferred is what let both survive --
+    # a deferred block is not drawn, so nothing forces its two descriptions to
+    # agree. See supply(), and the note above SUPPLY_PART for why no check
+    # would have found it.
 }
 
 
@@ -3087,6 +3733,26 @@ for _n in range(1, CHANNELS + 1):
     # two selector nodes between its relays. Six nets a channel, thirty-six in
     # all, gone with it.
 
+# The supply's primary side, and **these five are the only nets on this board
+# whose potentials are not referenced to module ground.** They are referenced
+# to IGND, which is the inlet's own 0 V and, through the shared barrel jack,
+# the mixer's own PGND -- a node this module touches nowhere else and must
+# not. That is what the isolation barrier is, stated as data: a net's DC value
+# is only meaningful against a reference, and here there are two references.
+# verify.check_isolation() is what holds the two apart on the netlist, and
+# gen_pcb's own keep-out holds them apart in copper.
+#
+# The ranges are the accepted brick at its extremes: 12 V at the bottom, and
+# 20 V for an 18 V brick measured unloaded, which is the mixer's own note.
+NET_DC["IGND"] = 0.0
+NET_DC["VIN"] = (0.0, INLET_UNLOADED_MAX)
+NET_DC["VIN_P"] = (0.0, INLET_UNLOADED_MAX - INLET_DIODE_VF)
+# The converter's own output pins, ahead of the rail filter and of the 5 V
+# regulator. Named RAW because that is what they are: 75 mVp-p of 580 kHz on
+# them is a datasheet maximum, and VA+/VA- are what is left after rail_filter().
+NET_DC["VA_RAW"] = MODULE_RAIL
+NET_DC["VN_RAW"] = -MODULE_RAIL
+
 # The reference inverter's virtual earth, held at MAGND by feedback.
 NET_DC["RINV"] = 0.0
 # The fail-safe. FSDRV is the MCU's 10 kHz; FSAC is the pump's own node, which
@@ -3156,6 +3822,24 @@ LOOM = {
 # Its coordinates are not in fab/mechanical-summing-mixer.json (test pads are
 # not tall parts) and have to be read off the board before the loom is made.
 # See ASSUMPTIONS.md.
+# What the bond is, electrically, as opposed to what it means. R901 is a 0R
+# 0805 -- about 20 mohm of its own -- and the conductor to the mixer's TP6 is a
+# wire of the order of 150 mm. At 100 Hz that whole path is its resistance and
+# nothing else, which is the fact that makes barrier_return()'s low-frequency
+# half come out small; at half a megahertz it is the inductance, and that is
+# the half that has to be defended.
+BOND_R_OHMS = 0.04
+
+# The electromotive force the inlet loop is assumed to enclose, and it is
+# supply-decision.md's own worst case reused rather than re-derived: "a
+# 200 x 20 mm loop 50 mm from 1 A of switched current picks up ~160 mV". That
+# figure was the argument for *rejecting* a mains transformer inside the
+# enclosure, so with the transformer gone there is no 1 A at 50 Hz in the box
+# and the real number is far below it. It is used at its rejected-case value
+# on purpose: a Y-capacitor sized against the worst loop anybody costed is one
+# that cannot be wrong in the direction that hums.
+LOOP_EMF_V = 0.160
+
 BOND_TO = "TP6"
 GROUND_STAR = "R901"          # MAGND <-> AGND, the one bridge
 DOMAIN_STAR = "R902"          # MAGND <-> MDGND, inside the module
@@ -3606,13 +4290,6 @@ def shared(design):
     # real interfaces, and declaring them is what lets check() insist every net
     # has two ends while the controller and the supply are still DEFERRED. When
     # those blocks land they replace these headers rather than joining them.
-    design.add(Part("J8", "PWR", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
-                    description="From the isolated DC-DC (DEFERRED): "
-                                "1=VA+, 2=VA-, 3=MAGND, 4=V5, 5=MDGND"))
-    for pin, net in ((1, "VA+"), (2, "VA-"), (3, "MAGND"),
-                     (4, "V5"), (5, "MDGND")):
-        design.connect(net, ("J8", pin))
-
     design.add(Part("J9", "CTRL", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
                     description="From the RP2040 (DEFERRED): 6 x PWM, OE, and "
                                 "MDGND between every pair -- the same "
@@ -3655,9 +4332,170 @@ def shared(design):
     design.connect(socket.AGND, ("J7", 1))
 
 
+def supply(design):
+    """The isolated converter, its inlet, its barrier and the 5 V rail.
+
+    Left to right, and the middle of it is a line rather than a part:
+
+        J8 --- F801 --- D804 --+-- C807 C808 C809 --+-- U15 +-- R804 -- VA+
+        the shared             |                    |   |   |
+        barrel jack          IGND ------------------+   |   +-- R805 -- VA-
+                               |                        |   |
+                               +------ C810 ------------+   +-- U16 --- V5
+                                    across the barrier
+
+    Everything left of C810 is referenced to IGND, which is the inlet's 0 V
+    and therefore the mixer's own PGND through the shared jack. Everything
+    right of it is referenced to MDGND. The two meet at one capacitor and at
+    50 pF of transformer, and at nothing else -- that is constraint 5.2 held
+    by construction rather than by discipline, which is supply-decision.md's
+    own decisive argument for isolating in the first place.
+
+    Four things here are derived rather than chosen, each in its own function:
+    the converter against the load (supply_fit()), the resistor rather than an
+    inductor in the rail filter (rail_filter()), the Y-capacitor (barrier_
+    return()), and the regulator's *package* (v5_regulator()).
+
+    **What the rails actually are, as opposed to what RAILS says.** The
+    converter is +/-1 % on set accuracy with 5 % of cross regulation on output
+    2, and the rail filter drops another 0.24 V, so VA+ and VA- sit inside
+    about 11.5 to 12.4 V rather than at 12.000. RAILS keeps 12.0 and every
+    consumer of it is conservative at that value in the direction that
+    matters: clamp_gain() uses it as the amplifier's saturation voltage, where
+    a *larger* rail is the worse fault, and NET_DC uses it to pick voltage
+    ratings, where the same is true. It is worth writing down that the two
+    disagree and why, because the next number derived from MODULE_RAIL may not
+    be conservative at all.
+    """
+    # -- the primary, and it is one net at a time on purpose ---------------
+    #
+    # The polarity comment is copied from the mixer's own J8 rather than
+    # re-derived, because the mixer's records that the instruction beside it
+    # read "centre pin" for the whole life of that design and was backwards.
+    # On a Boss-standard centre-negative barrel the *sleeve* is positive.
+    design.add(Part("J8", "PWR", socket.CONN_FP[2], mpn=socket.CONN_MPN[2],
+                    description=f"Shared DC inlet ({socket.SUPPLY_RANGE}), in "
+                                f"parallel with the mixer's own J8 at the "
+                                f"barrel jack: 1=sleeve (+), 2=centre pin "
+                                f"(0 V). Primary side -- see IGND"))
+    design.connect("VIN", ("J8", 1))
+    design.connect("IGND", ("J8", 2))
+
+    # **There is no fuse here and the datasheet asks for one, so this is the
+    # place to say why.** Its own line reads "Recommended Input Fuse, 24 Vin
+    # models: 1'600 mA (slow blow)", followed by "the need of an external fuse
+    # has to be assessed in the final application". The assessment is that one
+    # is wanted: the inlet is shared with a *fabricated* board that has no fuse
+    # of its own, so a converter failing short is limited by the brick alone
+    # and takes the mixer with it. inlet_budget() gives the working current as
+    # 382 mA, so a 1.5 A slow-blow -- below the datasheet's figure and four
+    # times the load -- is the part.
+    #
+    # It is not fitted because **no part number was verified this session.**
+    # The obvious families do not hold: Littelfuse's 453 Nano2 is ultra-fast
+    # rather than Slo-Blo, its 154 series is a 2410 body and not the 1206 this
+    # was drawn around, and KiCad ships a land pattern for neither of the parts
+    # that would fit. Section 6 of the spec forbids inventing a value, and an
+    # order code is a value: a plausible MPN in ORDER_CODES is worse than an
+    # absent part, because check_orderable() would pass it and somebody would
+    # buy it. The requirement is derived and recorded; the part is a purchase.
+
+    # Reverse protection. Series rather than shunt, and the mixer's part for
+    # the mixer's reason -- see INLET_DIODE. No TVS: the module's own input is
+    # rated 36 V continuous and 50 V for a second, against a 20 V worst-case
+    # brick, so the only overvoltage a TVS would catch is a 24 V supply
+    # plugged in by mistake, which the converter survives and the mixer's
+    # LM317 already handles. A clamp that never conducts is a leakage path and
+    # a part.
+    design.add(Part("D804", INLET_DIODE, SMA_FP,
+                    description="Inlet reverse-polarity protection: anode "
+                                "VINF, cathode VIN_P"))
+    design.connect("VIN", ("D804", DIODE_PINS["A"]))
+    design.connect("VIN_P", ("D804", DIODE_PINS["K"]))
+
+    # Two bulk and one HF, all on the protected side and all 50 V -- see
+    # PRIMARY_BULK_C. input_filter() is why there is no inductor between them.
+    for ref, value, note in (
+            ("C807", PRIMARY_BULK_C, "Primary bulk, at the inlet end"),
+            ("C808", PRIMARY_BULK_C, "Primary bulk, at the converter's pin"),
+            ("C809", PRIMARY_HF_C, "Primary HF, at the converter's pin")):
+        _capacitor(design, ref, value, "VIN_P", "IGND", description=note,
+                   footprint=C_FILM_FP if value is PRIMARY_BULK_C else C_FP)
+
+    design.add(Part(SUPPLY_REF, SUPPLY_PART, SUPPLY_FP, mpn=SUPPLY_MPN,
+                    description="Isolated DC-DC, 9-36 V in, +/-12 V at "
+                                "250 mA, 580 kHz PWM flyback, 1600 VDC"))
+    design.connect("VIN_P", (SUPPLY_REF, SUPPLY_PINS["+Vin"]))
+    design.connect("IGND", (SUPPLY_REF, SUPPLY_PINS["-Vin"]))
+    # Remote is an *input* referred to -Vin, and its own table reads "On: 0 to
+    # 0.5 VDC or open circuit". Open would work and is not what is drawn: a
+    # pin that is on because nobody connected it is a pin that changes meaning
+    # the first time somebody adds a pull-up. Tied to -Vin it is on by
+    # assertion and draws nothing, because the 0.5 to 3.5 mA the datasheet
+    # quotes is the current when it is driven *off*.
+    design.connect("IGND", (SUPPLY_REF, SUPPLY_PINS["Remote"]))
+
+    # -- the barrier -------------------------------------------------------
+    #
+    # The one part in this block that is load-bearing, and the one whose value
+    # is a trade rather than a maximum. barrier_return() is the whole of it.
+    # It is the envelope detector's own 470 nF, which is worth saying because
+    # it is the reason there is no new BOM line: the value barrier_return()
+    # arrives at is one the board already buys a reel of.
+    _capacitor(design, "C810", BARRIER_C, "IGND", "MDGND",
+               description="Y-capacitor across the isolation barrier -- the "
+                           "local return for the 50 pF of common-mode "
+                           "current, so it does not take the audio bond")
+
+    # -- the secondary -----------------------------------------------------
+    design.connect("VA_RAW", (SUPPLY_REF, SUPPLY_PINS["+Vout"]))
+    design.connect("MDGND", (SUPPLY_REF, SUPPLY_PINS["Com"]))
+    design.connect("VN_RAW", (SUPPLY_REF, SUPPLY_PINS["-Vout"]))
+
+    # One pole per rail. The capacitors return to MDGND and not to MAGND, and
+    # that is the floorplan's rule rather than a preference: this is switching
+    # return current and it belongs in the pour that the star lets it be in.
+    # Sending it to MAGND would run every milliamp of it through R902.
+    _resistor(design, "R804", RAIL_FILTER_R, "VA_RAW", "VA+",
+              description="VA+ rail filter -- see rail_filter(), a resistor "
+                          "and not an inductor because the LC would ring at "
+                          "Q ~ 100 inside the audio band")
+    _capacitor(design, "C811", RAIL_FILTER_C, "VA+", "MDGND",
+               footprint=C_FILM_FP, description="VA+ rail filter")
+    _resistor(design, "R805", RAIL_FILTER_R, "VN_RAW", "VA-",
+              description="VA- rail filter -- the same pole on the other rail")
+    _capacitor(design, "C812", RAIL_FILTER_C, "VA-", "MDGND",
+               footprint=C_FILM_FP, description="VA- rail filter")
+
+    # The 5 V rail, and its input is taken from VA_RAW rather than from VA+.
+    # That is worth being explicit about because it looks like a shortcut and
+    # is the opposite: the relay coils are 93 mA that step every time the
+    # module goes into or out of circuit, and taking them from ahead of R804
+    # keeps that step out of the rail the six audio channels share. It costs
+    # nothing -- the same copper, one node earlier.
+    design.add(Part(V5_REF, V5_PART, DPAK_FP, mpn=V5_MPN,
+                    description="+5 V for the relay coils and the reference. "
+                                "DPAK and not SOT-223: 0.77 W against that "
+                                "package's own 160 C/W -- see v5_regulator()"))
+    design.connect("VA_RAW", (V5_REF, V5_PINS["VI"]))
+    design.connect("V5", (V5_REF, V5_PINS["VO"]))
+    design.connect("MDGND", (V5_REF, V5_PINS["GND"]))
+    # Both required by the datasheet rather than added for luck: its
+    # electrical table is specified at Cin = Cout = 10 uF and Figure 1 draws
+    # both.
+    _capacitor(design, "C813", PRIMARY_BULK_C, "VA_RAW", "MDGND",
+               footprint=C_FILM_FP,
+               description="NCP1117 input capacitor, 10 uF -- the datasheet's "
+                           "own test condition")
+    _capacitor(design, "C814", "10u/16V X7R", "V5", "MDGND",
+               footprint=C_FILM_FP,
+               description="NCP1117 output capacitor, 10 uF")
+
+
 def build():
     design = Design()
     shared(design)
+    supply(design)
     fail_safe(design)
     for n in range(1, CHANNELS + 1):
         channel(design, n)
@@ -4039,7 +4877,7 @@ def _report():
     print()
 
     supply = supply_requirement()
-    print("the supply -- what the deferred DC-DC has to deliver")
+    print("the supply -- what the rails have to deliver")
     for name, rail in supply["load"].items():
         print(f"  {name:<4} {rail['volts']:>+6.1f} V   "
               f"typ {rail['typ_ma']:>5.1f} mA   max {rail['max_ma']:>5.1f} mA   "
@@ -4049,6 +4887,46 @@ def _report():
     print(f"  supply-decision.md estimated {supply['doc_estimate_ma']:.0f} mA "
           f"per bipolar rail and the board draws "
           f"{supply['load']['VA+']['max_ma']:.0f}: see supply_requirement()")
+    print()
+
+    fit = supply_fit()
+    beat = supply_beat()
+    rails = rail_filter()
+    barrier = barrier_return()
+    regulator = v5_regulator()
+    inlet = inlet_budget()
+    print(f"the converter -- {SUPPLY_MPN}, isolated, "
+          f"{SUPPLY_KHZ[0]:.0f}-{SUPPLY_KHZ[1]:.0f} kHz PWM flyback")
+    print(f"  +Vout                {fit['positive_ma']:>7.1f} mA of "
+          f"{fit['limit_ma']:.0f}   (board, plus V5 made linearly from it)")
+    print(f"  -Vout                {fit['negative_ma']:>7.1f} mA of "
+          f"{fit['limit_ma']:.0f}")
+    print(f"  delivered            {fit['watts']:>7.2f} W of "
+          f"{fit['watts_limit']:.0f}, against "
+          f"{fit['rail_power_sum']:.2f} W if the rail powers are summed -- "
+          f"see supply_fit()")
+    print(f"  the >= {SUPPLY_MIN_KHZ:.0f} kHz rule holds at the fundamental "
+          f"({beat['fundamental_beat_khz']:.0f} kHz away) and the nearest "
+          f"beat is {beat['worst_beat_khz']:.0f} kHz, against the pump's "
+          f"{beat['worst_order']}th")
+    print(f"  rail filter          {rails['attenuation_db']:>7.1f} dB at "
+          f"{SUPPLY_KHZ[0]:.0f} kHz: {SUPPLY_RIPPLE_VPP * 1e3:.0f} mVpp "
+          f"becomes {rails['residual_vpp'] * 1e6:.0f} uVpp, "
+          f"{rails['am']['am_db']:.1f} dB of AM at PSRR = 0 dB")
+    print(f"  the LC of that corner would ring at Q = {rails['lc_q']:.0f}, "
+          f"which is {rails['lc_peak_db']:.0f} dB at "
+          f"{rails['corner_hz'] / 1e3:.1f} kHz -- hence a resistor")
+    print(f"  barrier              {barrier['barrier_ma'] * 1e3:>7.0f} uA "
+          f"through {SUPPLY_ISO_PF * 1e12:.0f} pF; "
+          f"{barrier['local_fraction'] * 100:.0f} % returns locally, "
+          f"{barrier['bond_v'] * 1e3:.2f} mV left across the bond against "
+          f"{barrier['bond_v_unfitted'] * 1e3:.1f} unfitted")
+    print(f"  V5 regulator         {regulator['watts']:>7.2f} W: "
+          + ", ".join(f"{name} {rise:.0f} C rise"
+                      for name, rise in sorted(regulator['rises'].items()))
+          + f" against Tj {regulator['tj_max']:.0f} at {AMBIENT_C:.0f} ambient")
+    print(f"  the brick            {inlet['total_ma']:>7.0f} mA now, and the "
+          f"mixer's own string says \"{inlet['mixer_range']}\"")
     print()
 
     print("assumptions still open here")
