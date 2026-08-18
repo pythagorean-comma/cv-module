@@ -228,6 +228,75 @@ def escape_corridor(track=TRACK_MM, clearance=CLEARANCE_MM,
     }
 
 
+# The ADC's package, and it is the one on this board with no corridor at all.
+# TSSOP-20 at 0.65 mm pitch on 0.40 x 1.475 mm pads, read off KiCad's own
+# footprint: the copper-free gap between two pins is 0.25 mm, and
+# escape_corridor() wants 3 x clearance + 2 x track. At the fitted class that
+# is 1.10 mm and at the finest class this board could be ordered at -- 1 oz,
+# 0.09/0.09 -- it is 0.45. **Neither fits, and the window is negative at both**
+# (-0.40 mm and -0.02 mm), so there is not even a legal track *centre* between
+# two pins, let alone a grid cell that reliably lands on one.
+#
+# That is a stronger statement than the SOIC's and it is not a problem: a
+# 20-pin part whose pins all escape outward needs no corridor. What it needs
+# is room outside the package, which is placement.SUPPLY's note at U17 and
+# cost three unrouted nets to learn.
+TSSOP_PIN_PITCH_MM = 0.65
+TSSOP_PAD_WIDTH_MM = 0.40
+
+def pad_reach(pin_pitch=TSSOP_PIN_PITCH_MM, pad_width=TSSOP_PAD_WIDTH_MM,
+              grid=None, clearance=CLEARANCE_MM):
+    """Can a routing cell exist *inside* a pad? One line further out than
+    escape_corridor(), and the answer for a TSSOP is no.
+
+    escape_corridor() asks whether a track can pass *between* two pins. This
+    asks whether a track can *start* on one. A uniform grid reaches a pad only
+    if some cell centre falls inside it, and a pad narrower than the grid pitch
+    holds a cell at some phases and not at others:
+
+        holds a cell always  <=>  pad_width > grid
+
+    and the pad cannot be made as wide as one likes, because two adjacent pads
+    are two nets:
+
+        pad_width <= pin_pitch - clearance
+
+    Put together, **a package is reachable at every phase only if
+    pin_pitch > grid + clearance**. At the fitted 0.5 mm grid and 0.2 mm
+    clearance that is 0.70 mm. A SOIC's 1.27 clears it by 0.57; a TSSOP's 0.65
+    misses it by 0.05, and there is nothing to be done about the 0.05 on this
+    router: a wider pad breaks clearance and a finer grid breaks the copper
+    weight (see escape_corridor()).
+
+    **Nor can the stub reach out to the nearest cell.** That cell is between
+    0.20 and 0.25 mm from the pad centre, so a track of TRACK_MM laid to it
+    reaches within 0.075 mm of the neighbouring pad against a 0.2 mm rule.
+    The excursion is not small, it is illegal.
+
+    So what is left is choosing *which* pads lose. `phases` is how many of the
+    pad rows hold a cell at the best and worst phase, and for a package whose
+    pin pitch and grid share a common divisor the pattern repeats -- for 0.65
+    against 0.5 the offsets are all ten multiples of 0.05, and two rows always
+    land outside. design.ENV_ADC_CHANNEL spends that on the ADC's two grounded
+    channels; gen_pcb.check_fine_pitch_access() is what holds it.
+    """
+    grid = route_pitch() if grid is None else grid
+    widest = pin_pitch - clearance
+    return {
+        "pin_pitch_mm": pin_pitch,
+        "pad_width_mm": pad_width,
+        "grid_mm": grid,
+        "widest_pad_mm": widest,
+        "needed_pitch_mm": grid + clearance,
+        "reachable_at_every_phase": pin_pitch > grid + clearance,
+        "short_by_mm": max(0.0, grid + clearance - pin_pitch),
+        # What a stub to the nearest cell would leave, against the clearance.
+        "stub_to_neighbour_mm": (pin_pitch - pad_width / 2 - grid / 2
+                                 - TRACK_MM / 2),
+        "clearance_mm": clearance,
+    }
+
+
 # The classes this board could be ordered at, read off the capabilities page
 # above. The name is the copper weight it is available with, because that is
 # the axis JLCPCB's page actually constrains.
@@ -354,6 +423,21 @@ def _report():
           f"orthogonally ({'blocks' if ring['orthogonal_blocks'] else 'clears'})"
           f" and {ring['diagonal_mm']:.3f} mm diagonally "
           f"({'blocks' if ring['diagonal_blocks'] else 'clears'})")
+    tssop = escape_corridor(pin_pitch=TSSOP_PIN_PITCH_MM,
+                            pad_width=TSSOP_PAD_WIDTH_MM)
+    finest = escape_corridor(track=FAB_CLASSES[-1][1],
+                             clearance=FAB_CLASSES[-1][2],
+                             pin_pitch=TSSOP_PIN_PITCH_MM,
+                             pad_width=TSSOP_PAD_WIDTH_MM)
+    print(f"  a TSSOP leaves {tssop['gap_mm']:.2f} mm and its window is "
+          f"{tssop['window_mm']:+.2f} mm -- {finest['window_mm']:+.2f} at the "
+          f"finest class -- so no track centre exists between two of its pins "
+          f"and every pin escapes outward")
+    reach = pad_reach()
+    print(f"  and no cell inside one either: a pad holds a cell at every "
+          f"phase only above {reach['needed_pitch_mm']:.2f} mm of pitch, and "
+          f"a TSSOP is {reach['short_by_mm'] * 1e3:.0f} um under it -- "
+          f"see rules.pad_reach() and design.ENV_ADC_CHANNEL")
     print(f"  a SOIC leaves {escape_corridor()['gap_mm']:.2f} mm between pads:")
     for row in class_table():
         print(f"      {row['class']:<13} {row['track_mm']:.2f}/"

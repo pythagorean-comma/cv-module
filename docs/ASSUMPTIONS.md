@@ -14,7 +14,7 @@ The discipline is the mixer's. Its `Assumption` class says it plainly: **the ran
 
 **The pad relay was the second and it is not an assumption any more.** It was the largest unchosen part in the design — 52 % of the placed courtyard, about two thirds of the BOM — and rather than being chosen it has been deleted, along with the pad it switched. `design.pad_benefit()` prices the pad against the control port that replaces it and the answer is 0.000 dB of system noise at every noise floor in the declared range. Nothing here is waiting on a relay.
 
-**Two entries that *were* on this list are settled rather than open.** Constraint 2's "six separate returns" has been struck, with the arithmetic, in [Readings of the spec](#readings-of-the-spec). And the 20.1 µF that used to sit on VREF — twice the MAX6126's capacitive-load stability ceiling, because two 10 µF reservoirs were fitted — is resolved by deleting C804: its justification was shielding the reference's loop from an 8 kHz load step, and at 8 kHz a 10 µF could only supply 1.4 % of that step. VREF now carries 10.1 µF, which is the datasheet's own recommended 10 µF ∥ 0.1 µF, and `verify.check_reference_load()` holds the range against KiCad's netlist. See `design.reference_load()`.
+**Two entries that *were* on this list are settled rather than open.** Constraint 2's "six separate returns" has been struck, with the arithmetic, in [Readings of the spec](#readings-of-the-spec). And the 20.2 µF that used to sit on VREF — twice the MAX6126's capacitive-load stability ceiling, because two 10 µF reservoirs were fitted — is resolved by deleting C804: its justification was shielding the reference's loop from an 8 kHz load step, and at 8 kHz a 10 µF could only supply 1.4 % of that step. VREF now carries 10.2 µF, which is the datasheet's own recommended 10 µF ∥ 0.1 µF, and `verify.check_reference_load()` holds the range against KiCad's netlist. See `design.reference_load()`.
 
 ## Numbers with declared ranges
 
@@ -56,9 +56,9 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **Question:** What is the inductance of the loop formed by the audio ground bond, the mixer's own AGND/PGND star, and the two inlet leads back to the shared barrel jack? It is a property of how the box is wired, not of either board.
 
-**Sets:** how much of the barrier's common-mode current prefers the audio bond to the Y-capacitor
+**Sets:** the impedance of the bond the barrier's residual current is developed across
 
-**When wrong:** It is the *denominator* of the split, so a smaller loop is a worse result: at 0.3 uH more of the barrier current takes the long way round. The whole declared range keeps the residual below the mixer's own noise floor, and the answer if it did not is a common-mode choke in the inlet pair -- which raises exactly this number and is the reason it is worth knowing.
+**When wrong:** **Re-read after L801 was fitted, and it is a different assumption now.** It used to be the *denominator of a split* -- barrier_return() divided the barrier current between C810 and this loop, so a smaller loop was a worse result and the whole declared range mattered. The choke puts 3.6 kohm in that denominator, so the split is set by the part and not by the box: 0.3 and 1.5 uH give the same 99.98 % local return to four figures. What is left is a straight scale on the residual, because the bond voltage is this impedance times a current that no longer depends on it -- a factor of 5 across the range, on 1.1 uV that is 42 dB under the mixer's own noise floor. Every point in the range is inaudible and so is every point outside it. The old clause named a choke as the answer if the number went the wrong way; the choke is fitted, so the question this assumption asks has stopped being load-bearing and is kept because it is still unmeasured.
 
 ### `logic_law_error` = 0.0023 fractional, '541 output-impedance asymmetry
 
@@ -122,7 +122,6 @@ None. The one entry was the pad relay — a part the spec asks for by function, 
 Not assumptions so much as absences, listed because a section 5 check against a partial board proves less than it appears to.
 
 - **controller** — RP2040 and its QSPI flash, crystal, USB and MIDI: shared block, and the scope statement puts shared blocks after one channel is complete.
-- **envelope ADC** — ADS131M08 or MCP3564, undecided in spec section 4.4 -- but its sample rate is decided now, at 2 kHz rather than the 1-2 kHz the spec offers, and the six ENV{n} nets exist and are driven. See envelope_sample_rate(); the ADC hangs off them, in the analogue section, so that only SPI crosses the domain boundary.
 
 ### Pins waiting on a deferred block
 
@@ -362,7 +361,7 @@ None. All 48 were the twelve pad relays' coils, and they went with the pad — s
 
 ## Prices
 
-Of 46 BOM lines, **2 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 42 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
+Of 51 BOM lines, **5 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 44 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
 
 The totals in `docs/SHOPPING.md` are therefore a range, and the range is honest rather than decorative. They are also a floor: none of the deferred blocks is costed.
 

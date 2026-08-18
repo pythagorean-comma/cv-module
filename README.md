@@ -24,29 +24,33 @@ guessed is in [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
 |---|---|
 | one channel derived | ✅ every value, arithmetic inline |
 | the coarse pad | ✅ **struck** — 0.000 dB of system noise for 36 parts |
-| netlist | ✅ 238 parts, 149 nets, all pins resolved |
+| netlist | ✅ 266 parts, 164 nets, all pins resolved |
 | schematic | ✅ **0 merges, 0 breaks, 0 stranded pins** |
 | the verification loop | ✅ `verify.py` reads **KiCad's** netlist, compared by name |
 | ERC | ✅ **0 errors and 0 warnings** — `ERC_ALLOWED` is empty |
 | the envelope rectifier | ✅ derived, drawn and checked — τ from the transient, not from a target |
 | the fail-safe | ✅ drawn: de-energised **is** bypass, and the pump's own rise time is the power-up interlock |
-| section 5 constraints | ✅ checked mechanically, **63** planted faults caught — and the faults themselves are checked too |
+| section 5 constraints | ✅ checked mechanically, **71** planted faults caught — and the faults themselves are checked too |
 | deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
-| board | ✅ placed, poured and **fully routed** — 0 unconnected, 0 DRC violations |
+| board | ⚠️ placed, poured and routed, **0 DRC violations** — and **8 unconnected items at the ADC, named**. A 0.65 mm pin pitch does not fit a 0.5 mm routing grid: `rules.pad_reach()` |
 | the design rules | ✅ one copy in `rules.py`, and DRC is finally enforcing them |
 | the two `UNSPECIFIED` parts | ✅ **chosen** — Omron G6S-2 DC5 and Diodes DMG1012T. `UNSPECIFIED` is empty and no courtyard is reserved |
 | the Schottky clamp | ✅ **read, and it had failed** — the BAT54 missed by 5.5 dB. PMEG2010AEH fits with 1.5 dB |
 | the supply | ✅ **chosen, drawn, placed, routed and checked** — Traco TMR 6-2422WI, isolated, ±12 V at 250 mA, **580 kHz PWM**, on this board. The isolation barrier is copper `verify.py` measures |
 | the +5 V rail | ✅ NCP1117 — and **the package is the answer**: 0.77 W against the SOT-223's own 160 °C/W is 124 degrees of rise, so it is a DPAK |
 | documents to look at | ✅ [schematic](docs/cv-module-schematic.pdf), [layout](docs/cv-module-layout.pdf), [render](docs/cv-module-top.png). ❌ no gerbers, and that is a gate |
+| the inlet choke | ✅ **fitted, and it is the second half of `barrier_return()`** — a WE-SL2 744222, 2 × 1 mH at 800 mA. The 580 kHz residual at the audio bond goes from 1.24 mV to **1.14 µV**: 42 dB *under* the mixer's own noise floor, where it was 18.7 dB over |
+| the envelope ADC | ✅ **chosen, drawn, placed, routed and checked** — MCP3564. The ADS131M08 lost on full scale: its reference input stops at 1.3 V, so 1.20 V of full scale against a 1.233 V signal |
+| the 3.3 V rail | ✅ **real now, and it had been declared for four passes with no net** — `RAILS` said `V3V3` and `supply-decision.md` said there is no such rail. `check_rails_are_drawn()` is the instrument |
 | the inlet fuse | ❌ **derived and not fitted.** The converter's datasheet asks for 1.6 A slow blow and the assessment says yes — the inlet is shared with a fabricated board that has none. No part number was verified this session, and a plausible order code is worse than an absent part |
 
-Two shared blocks are deferred with reasons in `design.DEFERRED`: the controller
-and the envelope ADC. The supply was the third. There were six. The relay drive is not deferred but
+**One shared block is deferred** with its reason in `design.DEFERRED`: the
+controller. The envelope ADC was the second and the supply the third. There
+were six. The relay drive is not deferred but
 deleted, along with the pad it drove; the envelope rectifier and the fail-safe
 are drawn. **`design.UNSPECIFIED` is empty**: the bypass relay and its MOSFET
-are chosen, all 238 parts have a footprint, and no courtyard is reserved.
+are chosen, all 266 parts have a footprint, and no courtyard is reserved.
 
 Choosing them also settled a bug that only existed while they were not. The
 dict is keyed by a part's *value*, and an unchosen part's value is `None` — so
@@ -149,6 +153,152 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 
 ## The results worth knowing
 
+**The barrier's return current is a divider, and this pass fitted the other
+side of it.** `C810` was already at the largest value the low-frequency side of
+its own trade allows — 470 nF against a 610 nF ceiling — and it left 1.24 mV of
+580 kHz across the audio ground bond, which is ultrasonic, inaudible, and
+**18.7 dB above the mixer's own noise floor as a number**. That is enough to
+make any measurement of that noise floor wrong. The remaining 19 dB was never
+available from a capacitor: the split is `Z_Y` against `Z_loop`, and a
+capacitor can only divide the first.
+
+A **Würth WE-SL2 744222** — 2 × 1 mH at 800 mA, 207 mΩ per winding, every
+figure read off its own datasheet — multiplies the second instead. 3.6 kΩ at
+580 kHz against a 2.8 Ω loop takes the residual to **1.14 µV, 42 dB under the
+noise floor**, and 36 dB under it at the choke's own ±50 % tolerance. It costs
+161 mV of DC drop at 389 mA, on a converter that has 2.5 V of input headroom
+spare.
+
+**Where it goes is as load-bearing as what it is.** `L801` sits immediately at
+`J8`, ahead of `D804` and the three primary decoupling capacitors. Put it after
+them and those capacitors common the inlet pair in front of it, so the
+common-mode current never sees the winding: the same part, the same four wires,
+0 dB, and a schematic no reader could tell apart. `verify.check_supply()`
+asserts both that and the winding pairing — 1-4 and 2-3, not 1-2 and 4-3, which
+is the difference between 3.6 kΩ across the common-mode path and 1 mH in series
+with the supply current.
+
+**And fitting it broke the function that measures it, in the direction that
+hides the result.** `barrier_return()` returned `through_loop * z_loop` as the
+voltage at the bond, which is right — pessimistically right — for as long as
+every ohm in the loop *is* bond. With the choke in it, that expression reports
+**1.5 mV, worse than the 1.24 mV it reports unfitted**: the current falls by
+1300 and the impedance it is multiplied by rises by 1300. It was never a wrong
+formula; it was a formula that was correct because two different quantities
+happened to be the same number, with nothing recording that they were
+different. The only warning was that the answer got worse when the part got
+better.
+
+**The envelope ADC is chosen, and one number chose it.** Spec §4.4 named
+"ADS131M08 or MCP3564" and left it. Both were read first-hand, and the decision
+is not channel count, price, or the simultaneous-versus-multiplexed question
+that looks like the interesting one:
+
+| | ADS131M08 | MCP3564 |
+|---|---|---|
+| external reference input | **1.1 / 1.25 / 1.3 V** | **0.6 V to AVDD** |
+| full scale at unity gain | 1.20 V | 2.50 V |
+| against `socket.clipping_peak()` = 1.233 V | **−0.24 dB** | +6.14 dB |
+
+The ADS131M08's full scale is **below the level it exists to measure**, its
+minimum gain is 1, and its reference cannot be raised to fix it — the top of
+the range buys 1.248 V and 0.1 dB. The MCP3564 takes the board's own 2.5 V
+reference, which also makes `floorplan.CROSSING_RULE`'s already-written *"the
+ADC's own reference is VREF"* true rather than aspirational. That sentence was
+written before either datasheet was opened, and exactly one of the two
+candidates could honour it.
+
+**What the multiplexer costs is a clock, and that is the honest debit.**
+`envelope_adc_clock()` shows the MCP3564's SCAN mode is not pipelined across
+channels — the decimation filter resets between them — so six channels at 2 kHz
+need `MCLK ≥ 4 × 6 × TCONV × 2000`. Its internal RC oscillator is specified as
+**3.3 to 6.6 MHz**, a factor of two, and the design has to hold at the bottom:
+even at the coarsest useful setting that is 1432 Hz per channel, and
+`envelope_sample_rate()` has already shown what happens below 2 kHz. So MCLK is
+external, from the deferred controller, and it is a sixth signal across the
+domain boundary where §4.4 promised four.
+
+**The ADC's inputs are divided, not clamped, and the difference is a failure
+mode.** `ENV{n}` is a ±12 V node and the part's absolute input rating is
+AVDD + 0.1 = 3.4 V. A series resistor limits the ESD current without stopping
+it, and the current has to go somewhere: into a 3.3 V rail whose regulator
+cannot sink. Six channels clipping together would push more current *into* that
+rail than the ADC draws out of it. So each channel gets 22k/4k99, which puts
+the largest voltage stage B can produce — 11.65 V — at 2.15 V, inside full
+scale rather than merely inside the rating. **No input can reach a voltage that
+needs protecting.** It gives up 20.8 dB of converter range above the loudest
+level the system has, and `envelope_adc_clock()` buys that back in OSR for no
+parts.
+
+**Its reference decoupling is a refusal, and the refused thing is the fault
+this repo already deleted once.** DS20006181C asks for 0.1 µF and 10 µF at
+REFIN+ and calls them "not mandatory for correct ADC operation". The MAX6126 is
+qualified for **one** bulk capacitor and already has it, so a 10 µF there is
+the second reservoir `C804` was deleted to remove — arriving from a different
+direction, with a datasheet sentence recommending it. `reference_load()`'s own
+assertion is what stopped the build: *"a capacitor added to VREF cannot be left
+out of the total by being left out of this dict."*
+
+**The 3.3 V rail existed in `RAILS` for four passes with no net.**
+`design.RAILS` said `"V3V3": 3.3`; `supply-decision.md`'s correction index said
+*"there is no 3V3 rail on the board"*. Both were consumed — `NET_DC` is built
+from `RAILS` — and neither could fail, because **a rail with no net is
+invisible to every check that walks nets**, which is all of them. That is zone
+P one artefact along: a declaration nothing is obliged to use cannot be wrong.
+`Design.check_rails_are_drawn()` is the instrument, and the rail is real now —
+an MCP1700 off V5, chosen because its 6.0 V input limit makes V5 the only rail
+it can hang off and its 4 µA of quiescent current is what an NCP1117 would have
+spent 10 mA on.
+
+**Six places in this repo said something about the ADC and four of them
+disagreed**, which is the thing the last pass said to look for first. Which
+domain it is in (`CROSSING_RULE` said analogue, `ZONES` put it in the digital
+zone D2); whether the board has a 3.3 V rail; how many signals cross; and
+whether "only SPI" was four things or six. None of it was catchable, for the
+same reason each time: the block was not drawn, and deferral suspends every
+instrument at once.
+
+**A 0.65 mm pin pitch does not fit a 0.5 mm routing grid, and finding that out
+cost three wrong diagnoses and a bug in the router.** This is the longest thread
+of the pass and every step of it looked like the last one.
+
+The symptom was unrouted nets at the ADC. It read first as congestion, then as
+too little room, then as the wrong rotation — three placements, and the count
+went 4, 3, 2. Two real findings came out of those:
+
+| | |
+|---|---|
+| **`rules.escape_corridor()`** at 0.65 mm pitch on 0.40 mm pads gives a window of **−0.40 mm** at the fitted class and −0.02 at the finest. Not a fine-grid problem, a *negative* one: no legal track centre exists between two of its pins, so every pin escapes outward |
+| **`rules.pad_reach()`**, one line further out: a pad holds a grid cell at every phase only if it is **wider than the grid pitch**, and it can be at most `pin_pitch − clearance` wide. So a package is reachable at every placement only above `grid + clearance` = **0.70 mm**. A SOIC clears it by 0.57; a TSSOP misses by 0.05, and no placement fixes that. What a placement *can* choose is which pin rows lose, so `design.ENV_ADC_CHANNEL` gives them to the two grounded channels and the six strings take CH0–CH3, CH5 and CH6 |
+
+**And then DRC found what none of it had.** Eight clearance violations at
+0.15 mm against a 0.2 mm rule, every one a track beside a TSSOP pin. The router
+had been *drawing* the connections it could not legally make — through cells
+exempted from clearance because they are a pad's own copper. `block_pad_copper`
+says "a segment inside a pad's own copper cannot be too close to anything,
+because the pad already is not", which is true of the **pad** and not of the
+**0.25 mm track** the router then lays through that cell. A TSSOP pad is
+0.40 mm across, so a cell more than 0.075 mm off its centre line draws copper
+past the pad's edge and straight at the neighbour. At 1.27 mm pitch the
+overhang reaches nobody, which is why no board before this one showed it.
+
+`route.access()` had a second one of the same shape: its docstring says a pad
+with no free interior cell "cannot be reached on this grid, and route_all()
+reports the net", and its last line returned the nearest cell *outside* the pad
+— the one case that line ever ran in. `_stub_is_clear()` now tests that stub
+the way every other piece of track is tested, and the copper claim is inset by
+half a track.
+
+**The number went up and the board got better.** `verify.UNROUTED_ITEMS` is 8
+now, naming `ENVA1`, `ENVA2`, `MISO` and `MOSI`, where before six of those
+connections were drawn 0.15 mm from a neighbouring pin. A router that gives up
+and says so beats one that trades violations for finished connections, which is
+this repo's own rule about the number. **What would close it is a fan-out
+pass**, laying each fine-pitch pin's escape as fixed copper on the pad's own
+centre line before the router runs — the way `stitch_grounds()` already lays 133
+vias, and the way a person drawing this by hand would do it without thinking
+about it. That is a pass of its own.
+
 **The 2-bit coarse pad is gone, and it is the largest thing this repo has
 deleted.** 36 parts, 52 % of the placed courtyard, about two thirds of the BOM,
 24 coil drives and a coil supply rail `design.RAILS` never had — for a benefit
@@ -205,18 +355,22 @@ range**: at 1 kHz the top string's rectified fundamental (659 Hz) is above
 Nyquist and folds to −29 dB, −33 dB of it near DC where no averaging removes it.
 2 kHz, and the unremovable residue is −53 dB. `design.envelope_sample_rate()`.
 
-**The board is placed, poured, fully routed and DRC-clean, and the floorplan is
-now held to it.** 222 footprints and 3 reserved courtyards, 101.4 × 187.8 mm,
-four layers, ground split at y = 157.4; 104 ground pads stitched to the planes,
-1140 track runs and 345 vias; 0 unconnected items and 0 DRC violations.
+**The board is placed, poured, routed and DRC-clean, and the floorplan is
+now held to it.** 266 footprints and no reserved courtyards, 101.4 × 203.2 mm,
+four layers, ground split at y = 157.4; 133 ground pads stitched to the planes,
+1489 track runs and 516 vias; **0 DRC violations, and 8 unconnected items at
+the envelope ADC** — `verify.UNROUTED_ITEMS` declares them and names the four
+nets. See the fine-pitch section below: that number went *up* this pass and the
+board got better.
 
 `placement.py` is floorplan.py's zones turned into coordinates — twelve
 rows in two bands, quad packages spanning the channels their sections serve,
 computed from `design.SECTIONS` rather than typed — and `check_zones()` asserts
 that a column's parts are in the ground domain its zone declares, so the two
-files cannot drift apart. `gen_pcb.py` places all 222 footprints through KiCad's
-own `pcbnew`, reserves a courtyard for each of the three unchosen relays, draws
-the derived outline and pours the two grounds either side of the split.
+files cannot drift apart. `gen_pcb.py` places every footprint through KiCad's
+own `pcbnew`, draws the derived outline and pours the two grounds either side of
+the split. It reserved a courtyard for each unchosen part until there were none
+left to reserve.
 
 **DRC went 262 → 0.** The first placement put quad packages across rows they do
 not serve, and the fault underneath was a loop counter: `design.SECTIONS` keys

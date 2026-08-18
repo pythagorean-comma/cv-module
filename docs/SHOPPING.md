@@ -22,16 +22,16 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | Ref | Value | MPN | Fitted | Order | Unit | Basis | Mouser UK |
 |---|---|---|---|---|---|---|---|
 | C101–C814 | 10u/16V X7R | `GRM21BR61C106KE15L` | 8 | 12 | GBP 0.08–0.25 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR61C106KE15L) |
-| C102–C602 | 1200p/50V C0G | `GRM2165C1H122JA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H122JA01D) |
+| C102–C652 | 1200p/50V C0G | `GRM2165C1H122JA01D` | 12 | 16 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H122JA01D) |
 | C121–C621 | 100p/50V C0G | `GRM2165C1H101JA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H101JA01D) |
 | C131–C631 | 150n/50V X7R | `GRM216R71H154KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H154KA01D) |
 | C141–C641 | 56n/50V X7R | `GRM216R71H563KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H563KA01D) |
 | C142–C642 | 22n/50V X7R | `GRM216R71H223KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H223KA01D) |
 | C151–C810 | 470n/50V X7R | `GRM21BR71H474KA88L` | 7 | 11 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71H474KA88L) |
-| C701–C809 | 100n/50V X7R | `GRM216R71H104KA01D` | 26 | 30 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H104KA01D) |
+| C701–C819 | 100n/50V X7R | `GRM216R71H104KA01D` | 29 | 33 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H104KA01D) |
 | C801 | 100n/50V C0G | `GRM2195C1H104JA01D` | 1 | 5 | GBP 0.15–0.45 | band | [search](https://www.mouser.co.uk/c/?q=GRM2195C1H104JA01D) |
 | C805 | 2n2/50V C0G | `GRM2165C1H222JA01D` | 1 | 5 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H222JA01D) |
-| C806 | 1u/16V X7R | `GRM21BR71C105KA01L` | 1 | 5 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71C105KA01L) |
+| C806–C816 | 1u/16V X7R | `GRM21BR71C105KA01L` | 3 | 7 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71C105KA01L) |
 | C807–C813 | 10u/50V X7R | `GRM32ER71H106KA12L` | 5 | 9 | GBP 0.30–0.80 | band | [search](https://www.mouser.co.uk/c/?q=GRM32ER71H106KA12L) |
 | D151–D652 | 1N4148W | `1N4148WS-7-F` | 12 | 13 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=1N4148WS-7-F) |
 | D801–D833 | BAT54 | `BAT54-7-F` | 5 | 6 | GBP 0.05–0.15 | band | [search](https://www.mouser.co.uk/c/?q=BAT54-7-F) |
@@ -47,16 +47,19 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | J9 | CTRL | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
 | J10 | CTRL2 | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
 | J11 | CTRL3 | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
+| J12 | SPI | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
+| J13 | SPI2 | `61300511121` | 1 | 5 | GBP 0.40–0.90 | band | [search](https://www.mouser.co.uk/c/?q=61300511121) |
 | K801–K803 | G6S-2 DC5 | `G6S-2 DC5` | 3 | 7 | GBP 3.00–5.50 | band | [search](https://www.mouser.co.uk/c/?q=G6S-2 DC5) |
+| L801 | 744222 | `744222` | 1 | 5 | GBP 1.97 | read | [search](https://www.mouser.co.uk/c/?q=744222) |
 | Q801 | DMG1012T | `DMG1012T-7` | 1 | 2 | GBP 0.06–0.20 | band | [search](https://www.mouser.co.uk/c/?q=DMG1012T-7) |
 | R101–R802 | 10k 0.1% | `ERA6AEB103V` | 14 | 18 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB103V) |
 | R111–R621 | 12k1 0.1% | `ERA6AEB1212V` | 12 | 16 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB1212V) |
 | R115–R615 | 220R 1% | `RC0805FR-07220RL` | 6 | 10 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-07220RL) |
 | R131–R632 | 1M 1% | `RC0805FR-071ML` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-071ML) |
-| R141–R644 | 22k 1% | `RC0805FR-0722KL` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0722KL) |
+| R141–R656 | 22k 1% | `RC0805FR-0722KL` | 18 | 22 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0722KL) |
 | R142–R643 | 17k8 1% | `RC0805FR-0717K8L` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0717K8L) |
 | R151–R655 | 10k 1% | `RC0805FR-0710KL` | 24 | 28 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0710KL) |
-| R154–R654 | 4k99 1% | `RC0805FR-074K99L` | 6 | 10 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-074K99L) |
+| R154–R657 | 4k99 1% | `RC0805FR-074K99L` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-074K99L) |
 | R803–R816 | 100k 1% | `RC0805FR-07100KL` | 7 | 11 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-07100KL) |
 | R804, R805 | 4R7 1% | `RC0805FR-074R7L` | 2 | 6 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-074R7L) |
 | R901, R902 | 0R | `RC0805JR-070RL` | 2 | 6 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805JR-070RL) |
@@ -67,10 +70,12 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | U13, U14 | TL074 | `TL074CDR` | 2 | 3 | GBP 0.25–0.70 | band | [search](https://www.mouser.co.uk/c/?q=TL074CDR) |
 | U15 | TMR6-2422WI | `TMR 6-2422WI` | 1 | 5 | GBP 18.16 | read | [search](https://www.mouser.co.uk/c/?q=TMR 6-2422WI) |
 | U16 | NCP1117-5.0 | `NCP1117DT50G` | 1 | 2 | GBP 0.35–0.90 | band | [search](https://www.mouser.co.uk/c/?q=NCP1117DT50G) |
+| U17 | MCP3564 | `MCP3564-E/ST` | 1 | 2 | GBP 5.35 | read | [search](https://www.mouser.co.uk/c/?q=MCP3564-E/ST) |
+| U18 | MCP1700-3.3 | `MCP1700T-3302E/TT` | 1 | 2 | GBP 0.38 | read | [search](https://www.mouser.co.uk/c/?q=MCP1700T-3302E/TT) |
 
 ## Totals, per currency, fitted quantities
 
-- **GBP 46.57 – 76.33**
+- **GBP 55.38 – 86.98**
 - **USD 27.96 – 49.80**
 
 Kept per currency rather than converted: two lines were priced in dollars because that is the currency the figures were found in, and folding them into a sterling total at a rate nobody looked up would turn two honest figures into one invented one.
@@ -79,7 +84,7 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **C101–C814** — 1210 X7R
 
-**C102–C602** — 0805 C0G
+**C102–C652** — 0805 C0G
 
 **C121–C621** — 0805 C0G
 
@@ -91,13 +96,13 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **C151–C810** — 0805 X7R
 
-**C701–C809** — 0805 X7R
+**C701–C819** — 0805 X7R
 
 **C801** — 0805 C0G at 100 nF is a large part for the class and priced accordingly. It is the reference's NR capacitor, which is worth C0G.
 
 **C805** — 0805 C0G
 
-**C806** — 0805 X7R
+**C806–C816** — 0805 X7R
 
 **C807–C813** — 1210 X7R at 50 V, which is 4x derating on the +/-12 V rails and 2.5x on the 20 V primary. A 25 V part would be cheaper and would have lost most of its capacitance at the top of the inlet range -- the same argument the mixer makes at its own VIN_P.
 
@@ -129,7 +134,13 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **J11** — Wurth WR-PHD 1x05 vertical, gold-plated: CONN_MPN[5].
 
+**J12** — Wurth WR-PHD 1x05 vertical, gold-plated: CONN_MPN[5].
+
+**J13** — Wurth WR-PHD 1x05 vertical, gold-plated: CONN_MPN[5].
+
 **K801–K803** — Omron G6S-2 DC5, surface-mount G6S-2F body. Single-side stable, which is Omron's name for non-latching and is the property the whole fail-safe turns on. The line worth reading twice is the contact material -- bifurcated crossbar, Ag(Au-Alloy) -- because a plain silver contact needs a wetting current a guitar string will never supply, and fails intermittently in a way that looks like a dry joint.
+
+**L801** — page fetched: £1.97 at 1, £1.94 at 10, £1.75 at 50, £1.69 at 100, £1.37 at 1000 T&R, net of VAT, 12,641 in stock. The listing's own "1 mH @ 100 kHz", 800 mA and 207 mOhm agree with the datasheet read for design.INLET_CHOKE, and its "6 kOhms @ 4 MHz" is the frequency the datasheet's Zmax row omits -- which is what puts 580 kHz on the inductive slope rather than over the peak. The datasheet is at https://www.we-online.com/components/products/datasheet/744222.pdf -- fetched and read.
 
 **Q801** — Diodes DMG1012T in SOT-523. Chosen for one row of its table: R_DS(on) 0.7 ohm max at V_GS = 1.8 V, which is the gate voltage pump_timing() computes and the only voltage this circuit can produce. Vgs(th) 1.0 V max is the stated filter; being characterised at 1.8 V is what made this part rather than another that meets it.
 
@@ -141,13 +152,13 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **R131–R632** — 0805 thick film
 
-**R141–R644** — 0805 thick film
+**R141–R656** — 0805 thick film
 
 **R142–R643** — 0805 thick film, E96
 
 **R151–R655** — 0805 thick film. The envelope rectifier's ratios are 1 %, not the 0.1 % the audio path uses: a 2 % ratio error is 0.17 dB on a *reported level*, which is inside what envelope_balance() already allows for the E96 half-value.
 
-**R154–R654** — 0805 thick film, E96
+**R154–R657** — 0805 thick film, E96
 
 **R803–R816** — 0805 thick film
 
@@ -169,9 +180,12 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **U16** — NCP1117DT50G, DPAK. **The DT suffix and not ST**, which is the whole of v5_regulator(): the SOT-223 part is the same die, the same price and 160 C/W against 0.77 W.
 
+**U17** — page fetched: £5.35 at 1, £4.46 at 25, £4.05 at 100, net of VAT, 599 in stock, "20-TSSOP (0.173", 4.40mm Width)". The tube part; MCP3564T-E/ST is the same die on tape. Datasheet DS20006181C at https://download.mikroe.com/documents/datasheets/MCP3564_datasheet.pdf -- fetched and read. Microchip's own ww1 URL 301s to a filehandler that refuses an automated fetch, which is the same obstacle the converter's own datasheet had, and STYLE.md rule 10 says a link nobody can follow is not a citation.
+
+**U18** — page fetched: £0.38 at 1, £0.322 at 25, £0.298 at 100, net of VAT, 81,458 in stock, SOT-23-3. Its 4 uA of quiescent current is the whole reason a third linear rail was affordable: an NCP1117 in the same position is 10 mA maximum, which is a third of the converter's remaining headroom spent on a regulator's own biasing. Datasheet DS20001826F at https://ww1.microchip.com/downloads/aemDocuments/documents/APID/ProductDocuments/DataSheets/MCP1700-Data-Sheet-20001826F.pdf -- fetched; the 336 C/W this design uses is from DS21826B, which publishes the minimum-pad figure revision F drops.
+
 ## Not on this BOM
 
 The deferred blocks, each with its reason. None of them is costed here, so the totals above are a floor for the module and not its price.
 
 - **controller** — RP2040 and its QSPI flash, crystal, USB and MIDI: shared block, and the scope statement puts shared blocks after one channel is complete.
-- **envelope ADC** — ADS131M08 or MCP3564, undecided in spec section 4.4 -- but its sample rate is decided now, at 2 kHz rather than the 1-2 kHz the spec offers, and the six ENV{n} nets exist and are driven. See envelope_sample_rate(); the ADC hangs off them, in the analogue section, so that only SPI crosses the domain boundary.

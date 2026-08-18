@@ -45,6 +45,7 @@ What this pass does and does not do:
     verify.UNROUTED_ITEMS holds the number rather than the prose.
 """
 
+import math
 import os
 import pathlib
 import subprocess
@@ -511,6 +512,97 @@ def check_courtyards(board):
     return problems
 
 
+def check_fine_pitch_access(board, rectangle, skip=("MAGND", "MDGND")):
+    """Every pad that has to be routed can be started on.
+
+    **The check the ADC needed, and the one nothing had.** route.access() joins
+    a net to a pad at a cell whose centre is inside the pad, for a stated
+    reason -- a stub inside a pad's own copper cannot be too close to anything,
+    and letting it spiral outside cost 17 shorts the last time it was tried. It
+    has one fallback, the nearest cell outside, and that fallback is safe
+    exactly when the pad has no close neighbour in the direction it steps.
+
+    So this is two conditions and not one, and the second is what makes it a
+    check rather than a nuisance. **Q801 is why**: a SOT-523's pads are
+    0.510 x 0.400 mm and two of them hold no grid cell in y either, and that
+    part has been routed correctly on every build this board has ever had --
+    because its neighbours are 1.1 mm away along y, so the fallback steps into
+    open board. Flagging it would have been a check that fires on a working
+    board, which is the fastest way to get a check switched off.
+
+    rules.pad_reach() is the arithmetic for the pair: a pad holds a cell at
+    every phase only if it is wider than the grid pitch, and it can be at most
+    `pin_pitch - clearance` wide, so a package is reachable at every phase only
+    above `grid + clearance` of pitch -- 0.70 mm here. A SOIC clears that by
+    0.57 mm; a TSSOP misses by 0.05, so two of the ADC's ten pin rows hold no
+    cell at any placement whatsoever *and* their neighbours are 0.65 mm away,
+    which puts the fallback 0.075 mm from another net's copper.
+
+    What a placement can do is choose which two rows lose, and
+    design.ENV_ADC_CHANNEL spends that on the two grounded channels -- the
+    router skips MAGND entirely, because stitch_grounds() has already
+    connected it. **The window is 45 um wide**, which is not something to
+    leave to a comment: the grid's origin is the board outline, so anything
+    added north of the ADC moves the phase, and this is where that shows up.
+    It runs before routing, so it fails with the arithmetic rather than with
+    three unrouted nets and two wrong diagnoses.
+    """
+    left, top, right, bottom = rectangle
+    pitch = ROUTE_PITCH_MM
+    crowded = rules.pad_reach()["needed_pitch_mm"]
+    problems = []
+    for ref, footprint in sorted(board.footprints.items()):
+        boxes = []
+        for pad in footprint.Pads():
+            box = pad.GetBoundingBox()
+            boxes.append((pad, pcbnew.ToMM(pad.GetPosition().x),
+                          pcbnew.ToMM(pad.GetPosition().y),
+                          pcbnew.ToMM(box.GetLeft()), pcbnew.ToMM(box.GetTop()),
+                          pcbnew.ToMM(box.GetRight()),
+                          pcbnew.ToMM(box.GetBottom())))
+        for pad, cx, cy, x0, y0, x1, y1 in boxes:
+            net = pad.GetNetname()
+            if not net or net in skip:
+                continue
+            no_column = (math.floor((x1 - left) / pitch)
+                         < math.ceil((x0 - left) / pitch))
+            no_row = (math.floor((y1 - top) / pitch)
+                      < math.ceil((y0 - top) / pitch))
+            if not (no_column or no_row):
+                continue
+            # The fallback steps along the axis with no cell, so what makes
+            # it unsafe is a neighbour *in that direction* -- one the step
+            # moves towards. A pad on the far side of the package is 0.5 mm
+            # away in y and irrelevant, because the step does not go near it
+            # in x. So a neighbour counts only if it also overlaps this pad
+            # across the other axis, which is what "the next pin along this
+            # row" means geometrically.
+            axis = 0 if no_column else 1
+            here = (cx, cy)[axis]
+            low, high = (y0, y1) if axis == 0 else (x0, x1)
+            others = []
+            for other, ox, oy, ox0, oy0, ox1, oy1 in boxes:
+                if other is pad:
+                    continue
+                across = (oy0, oy1) if axis == 0 else (ox0, ox1)
+                if across[1] < low or across[0] > high:
+                    continue
+                others.append(abs((ox, oy)[axis] - here))
+            nearest = min(others) if others else float("inf")
+            if nearest >= crowded:
+                continue
+            problems.append(
+                f"{ref}.{pad.GetNumber()} on {net!r} is "
+                f"{x1 - x0:.3f} x {y1 - y0:.3f} mm, holds no {pitch} mm grid "
+                f"cell in {'x' if axis == 0 else 'y'}, and has a neighbour "
+                f"{nearest:.3f} mm away on that axis against the "
+                f"{crowded:.2f} mm rules.pad_reach() needs -- so route.access() "
+                f"can neither start inside the pad nor step outside it. The "
+                f"fix is this package's phase against the board outline, not "
+                f"more room around it")
+    return problems
+
+
 def build():
     # Before anything is placed: the rules this board is about to be built to
     # are inside what the fabricator publishes. Cheap, and it fails at the top
@@ -583,16 +675,34 @@ def build():
                    (iso_x + half, split + half, right - inset, bottom - inset),
                    priority=1)
 
+    unreachable = check_fine_pitch_access(board, rectangle)
+    if unreachable:
+        raise SystemExit(
+            "pads with no routing-grid cell inside them:\n  "
+            + "\n  ".join(unreachable[:8]))
+
     stitched, stitch_copper = board.stitch_grounds()
 
     # Everything else, through the router. The two grounds are skipped because
     # stitch_grounds() has already given them the only connection they want.
+    # **The primary's corner is reserved, and it is a keep-out with an
+    # exception list.** It has no ground pour under it by construction, which
+    # to a maze router reads as the widest free channel on the board -- and on
+    # the build that added the ADC the router duly ran VA+ through it, twenty
+    # tracks of secondary rail across the isolation barrier.
+    # verify.check_isolation_gap() caught every one, which is the check doing
+    # exactly its job and is still the wrong place to catch it: a rule the
+    # router cannot break is worth more than a rule it is caught breaking. So
+    # the region goes in as a reservation, and the five primary nets are the
+    # only ones admitted.
     tracks, vias, missed = route.route_all(
         rectangle, board.pad_boxes(), obstacles=stitch_copper,
         rules={"pitch": ROUTE_PITCH_MM, "track": TRACK_MM,
                "clearance": CLEARANCE_MM, "via": VIA_DIAMETER_MM,
                "edge": EDGE_CLEARANCE_MM},
-        skip=("MAGND", "MDGND"))
+        skip=("MAGND", "MDGND"),
+        reserve=((left, iso_y, iso_x, bottom),
+                 ("VIN", "VIN_J", "IGND", "IGND_J", "VIN_P")))
     shorts = route.check_no_shorts(tracks, vias, ROUTE_PITCH_MM)
     if shorts:
         raise SystemExit("the router shorted nets, which it cannot do if its "

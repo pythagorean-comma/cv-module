@@ -257,6 +257,49 @@ def check_one_ground_bond(nets):
     return problems
 
 
+def check_module_star(nets):
+    """Exactly one part bridges MAGND and MDGND, and it is R902.
+
+    **The module's own star, which had no check until a part arrived that
+    could break it.** check_one_ground_bond() holds the bond to the *mixer*
+    and constraint 5.2 is about that one; this is the boundary inside this
+    board, the one floorplan.py's whole zone argument is built on, and until
+    now nothing asserted it. It survived unasserted because no part had two
+    ground pins: the '541 and the relays straddle the line in *signals*, and
+    their grounds are all MAGND.
+
+    The envelope ADC is the first part with an AGND pin and a DGND pin, and
+    its own datasheet offers two ways to wire them. Section 7.3's first scheme
+    -- two supplies, two grounds, joined at their own star -- is the textbook
+    one and is wrong here, because this board already has a star and a second
+    one is a second join between two domains. The second scheme, "consider the
+    MCP3561/2/4 as an analog component, and therefore, connect AVDD to DVDD
+    and AGND to DGND", is what design.envelope_adc() draws.
+
+    **The fault it exists for draws correctly and measures correctly.** DGND
+    to MDGND is what a careful person does with a pin called DGND; it looks
+    tidier than the alternative, ERC is silent because both are ground nets,
+    DRC is silent because both pours exist, and the board works. What it makes
+    is a second conductor between the two returns, in parallel with R902 and
+    tens of millimetres away from it -- so the two enclose a loop, and every
+    milliamp of digital return current that finds it flows past six analogue
+    channels on its way home. That is the failure the split exists to prevent,
+    arriving through the one pin that invites it.
+    """
+    parts_on = {}
+    for name, nodes in nets.items():
+        for ref, _ in nodes:
+            parts_on.setdefault(ref, set()).add(name)
+    bridges = sorted(ref for ref, names in parts_on.items()
+                     if {"MAGND", "MDGND"} <= names)
+    if bridges == [design.DOMAIN_STAR]:
+        return []
+    return [f"MAGND and MDGND are bridged by {bridges or 'nothing'}, expected "
+            f"exactly ['{design.DOMAIN_STAR}'] -- a second bridge is a loop "
+            f"between the two returns, and floorplan.CROSSING_RULE is about "
+            f"what may cross it, not about how many joins there are"]
+
+
 def check_shield_returns(nets):
     """2b. Six separate returns to six pin-3s, not commoned in the module.
 
@@ -634,6 +677,102 @@ def check_rectifier_polarity(nets, values):
     return problems
 
 
+def check_envelope_adc(nets, values):
+    """The ADC sees a divided signal, its own reference, and one ground.
+
+    Four claims, and the first is the one that decides whether the part
+    survives its first hard-picked string.
+
+    **The divider is the right way up, and it is checked by arithmetic rather
+    than by reference.** R{n}56 and R{n}57 are two resistors in a potential
+    divider, and swapped they are still two resistors in a potential divider:
+    the sheet is identical, the netlist has the same parts on the same three
+    nodes, and every value string is one the BOM already carries. What changes
+    is the ratio, from 0.185 to 0.815 -- so the 11.65 V that stage B can
+    produce arrives at the pin as 9.5 V instead of 2.15, against an absolute
+    maximum of AVDD + 0.1. That is a destroyed part rather than a wrong
+    reading, and no instrument other than this one computes the number. So
+    this reads the *values KiCad exported* and does the division, which is
+    what makes it a check on the board rather than a restatement of
+    design.envelope_adc_input().
+
+    **ENVA{n} carries exactly three parts and the converter.** Anything else
+    on it is a load on a divider whose ratio the whole protection argument
+    rests on.
+
+    **The reference is VREF and not the rail.** REFIN+ on V3V3 would work,
+    would read, and would make the envelope's full scale an LDO's tolerance
+    instead of a 2.5 V reference -- and it would quietly falsify
+    floorplan.CROSSING_RULE's "the ADC's own reference is VREF", which is a
+    sentence this design chose a part to honour.
+
+    **And the two spare channels are grounded.** CH6 and CH7 are analogue
+    inputs inside a multiplexer the firmware can be told to scan; left open
+    they are floating nodes that read as noise, and DS20006181C's own note
+    asks for AGND on an unconnected pin.
+    """
+    problems = []
+    ref = design.ENV_ADC_REF
+    P = design.ENV_ADC_PINS
+    expected = {str(P["REFIN+"]): "VREF", str(P["REFIN-"]): "MAGND",
+                str(P["AGND"]): "MAGND", str(P["DGND"]): "MAGND",
+                str(P["AVDD"]): "V3V3", str(P["DVDD"]): "V3V3",
+                str(P["SCK"]): "SCLK", str(P["SDI"]): "MOSI",
+                str(P["SDO"]): "MISO", str(P["CS"]): "CS",
+                str(P["MCLK"]): "MCLK", str(P["IRQ"]): "IRQ"}
+    for name in design.ENV_ADC_GROUNDED:
+        expected[str(P[name])] = "MAGND"
+    for n in range(1, design.CHANNELS + 1):
+        expected[str(P[design.ENV_ADC_CHANNEL[n]])] = f"ENVA{n}"
+    found = {pin: net for net, entries in nets.items()
+             for part, pin in entries if part == ref}
+    for pin, net in sorted(expected.items(), key=lambda kv: int(kv[0])):
+        if found.get(pin) != net:
+            problems.append(
+                f"{ref}.{pin} is on {found.get(pin)!r} and should be {net!r} "
+                f"-- the pin map is design.ENV_ADC_PINS, page 3 of "
+                f"DS20006181C")
+
+    ceiling = design.RAILS["V3V3"] + design.ENV_ADC_INPUT_MARGIN
+    swing = design.MODULE_RAIL - design.OPAMP_SWING_HEADROOM
+    for n in range(1, design.CHANNELS + 1):
+        node = f"ENVA{n}"
+        want = {f"R{n}56", f"R{n}57", f"C{n}52", ref}
+        carried = {part for part, _ in nets.get(node, ())}
+        if carried != want:
+            problems.append(
+                f"{node} carries {sorted(carried)}, expected {sorted(want)} "
+                f"-- anything else on it moves the ratio the ADC's absolute "
+                f"input rating depends on")
+        top_ends = {name for name, entries in nets.items()
+                    if any(part == f"R{n}56" for part, _ in entries)}
+        bottom_ends = {name for name, entries in nets.items()
+                       if any(part == f"R{n}57" for part, _ in entries)}
+        if top_ends != {f"ENV{n}", node} or bottom_ends != {node, "MAGND"}:
+            problems.append(
+                f"the channel {n} divider spans {sorted(top_ends)} and "
+                f"{sorted(bottom_ends)}, expected {sorted({f'ENV{n}', node})} "
+                f"and {sorted({node, 'MAGND'})}")
+            continue
+        try:
+            top = kisim.magnitude(values[f"R{n}56"])
+            bottom = kisim.magnitude(values[f"R{n}57"])
+        except Exception as error:
+            problems.append(
+                f"channel {n}'s divider values do not parse ({error!r}) -- "
+                f"the absolute input rating cannot be checked")
+            continue
+        at_pin = swing * bottom / (top + bottom)
+        if at_pin > ceiling:
+            problems.append(
+                f"channel {n} presents {at_pin:.2f} V at {ref}."
+                f"{P[design.ENV_ADC_CHANNEL[n]]} when stage B is at its rail "
+                f"({swing:.2f} V), against an absolute maximum of "
+                f"{ceiling:.2f} V -- see design.envelope_adc_input(); the "
+                f"divider is the protection and it is the only protection")
+    return problems
+
+
 def check_fail_safe(nets, values):
     """De-energised is bypass, and every coil is on the one sink.
 
@@ -762,7 +901,39 @@ def check_fail_safe(nets, values):
 # ERC_ALLOWED's emptiness is. If a part moves and one net cannot be finished,
 # this is where the number goes back -- with the net named, not with the
 # category filtered out.
-UNROUTED_ITEMS = 0
+#
+# **It has gone back, to eight, and every one is at the envelope ADC.** The
+# four nets are ENVA1, ENVA2, MISO and MOSI -- two channel dividers into CH0
+# and CH1, and two SPI lines into SDO and SDI -- and the cause is one number
+# that rules.pad_reach() now carries: **a TSSOP-20's pad is 0.40 mm across and
+# a track is 0.25**, so a track drawn through that pad has 0.075 mm of latitude
+# either side before it overhangs the copper it is sitting on. The routing
+# grid is 0.5 mm and the pin pitch is 0.65, so a cell lands within 0.075 mm of
+# a pin's centre line for four pins in every ten. The other six have no legal
+# place for a track to end.
+#
+# **Every step of the way here was a wrong reading of the same symptom, and
+# they are worth listing because each one was plausible.** Unrouted nets at a
+# package read first as congestion, then as too little room, then as the wrong
+# rotation; three placements were tried and the count went 4, 3, 2. What was
+# actually happening only became visible when DRC reported eight clearance
+# violations at 0.15 mm against a 0.2 mm rule -- the router was *drawing* the
+# connections it could not legally make, through cells exempted from clearance
+# because they are a pad's own copper. The exemption is about the pad and what
+# gets drawn is a track. See route.Grid.block_pad_copper().
+#
+# So this number is larger than it was an hour ago and the board is better:
+# **DRC is at zero and these eight connections are unmade and named**, where
+# before six of them were drawn 0.15 mm from a neighbouring pin. A router that
+# gives up and says so beats one that trades violations for finished
+# connections, and that is this file's own rule.
+#
+# **What would fix it is a fan-out pass**, laying each fine-pitch pin's escape
+# as fixed copper on the pad's own centre line before the router runs -- the
+# way stitch_grounds() already lays 133 vias and their stubs, and the way a
+# person drawing this by hand would do it without thinking about it. That is a
+# pass of its own and it is written down here rather than attempted.
+UNROUTED_ITEMS = 8
 
 
 def read_drc(board, destination):
@@ -1202,7 +1373,11 @@ def check_open_pins(open_pins):
 # The primary side's nets, as a set, so that "primary" is one list in one
 # place rather than a pattern each check invents. IGND is the reference and
 # the other three are the inlet chain ahead of the converter.
-PRIMARY_NETS = frozenset({"IGND", "VIN", "VIN_P"})
+# **VIN_J and IGND_J are here because L801 is a part and not a wire.** The
+# choke splits the inlet pair into a jack side and a converter side, and both
+# are primary: a check that named only the converter side would let the whole
+# inlet chain be re-routed out of the isolated region without complaining.
+PRIMARY_NETS = frozenset({"IGND", "IGND_J", "VIN", "VIN_J", "VIN_P"})
 
 # How far non-primary copper has to stay out of the primary's region. Not a
 # creepage figure -- at 20 V across a barrier rated 1600 VDC, creepage is not
@@ -1235,6 +1410,17 @@ def check_supply(nets, values):
     it against the datasheet's own 250 mA rather than against a remembered
     figure -- which is the check that stops being true silently as the deferred
     controller and ADC land on VA+ one part at a time.
+
+    **A fourth now: the choke's windings, which is the one fault on this
+    board that a netlist can see and a drawing cannot.** L801 has two
+    windings, 1-4 and 2-3, and the inlet pair goes in at 1/2. Pair them 1-2
+    and 4-3 instead and the schematic is the same four wires between the same
+    four pins, ERC is silent, DRC is silent, the board works -- and the part
+    is now 1 mH in series with 387 mA of supply current instead of 3.6 kohm
+    across the common-mode path it was bought for. barrier_return() would go
+    on reporting 1.1 uV at the bond, because it reads a constant and not the
+    netlist. That is the same shape as the mixer's own DIODE_PINS: a part
+    whose *connection order* carries the whole of its purpose.
     """
     problems = []
     ref = design.SUPPLY_REF
@@ -1273,6 +1459,49 @@ def check_supply(nets, values):
                 f"returning to the digital pour because this is switching "
                 f"return current")
 
+    choke = design.INLET_CHOKE_REF
+    choke_expected = {
+        str(design.INLET_CHOKE_PINS["L1_IN"]): "VIN_J",
+        str(design.INLET_CHOKE_PINS["L1_OUT"]): "VIN",
+        str(design.INLET_CHOKE_PINS["L2_IN"]): "IGND_J",
+        str(design.INLET_CHOKE_PINS["L2_OUT"]): "IGND",
+    }
+    choke_found = {pin: net for net, entries in nets.items()
+                   for part, pin in entries if part == choke}
+    for pin, net in sorted(choke_expected.items(), key=lambda kv: int(kv[0])):
+        if choke_found.get(pin) != net:
+            problems.append(
+                f"{choke}.{pin} is on {choke_found.get(pin)!r} and should be "
+                f"{net!r} -- the windings are 1-4 and 2-3 (744222 datasheet, "
+                f"Schematic), and pairing them 1-2/4-3 puts the choke in "
+                f"series with the supply current instead of across the "
+                f"common-mode path")
+
+    # **Only the jack and the choke may touch the jack side**, which is the
+    # "L801 goes first" claim made checkable. Everything else on the primary
+    # -- the protection diode, the three decoupling capacitors, the converter
+    # -- belongs on the converter side of the winding. Fitted the other way
+    # round, with the capacitors ahead of the choke, they common the inlet
+    # pair in front of it and the common-mode current never sees 1 mH: the
+    # part is present, correct, the right value, and worth 0 dB.
+    # design.barrier_return() would go on reporting 1.1 uV either way, because
+    # it reads a constant and not a netlist.
+    #
+    # **This is the check the planted fault found missing.** The primary
+    # allow-list below says which parts may touch a primary net and says
+    # nothing about *which* primary net, so moving C807 across the winding
+    # changed nothing any instrument could see.
+    inlet_side = {"VIN_J", "IGND_J"}
+    for net in sorted(inlet_side):
+        strangers = sorted({part for part, _ in nets.get(net, ())}
+                           - {"J8", choke})
+        if strangers:
+            problems.append(
+                f"{net} is on the jack side of {choke} and reaches "
+                f"{strangers} -- only the inlet and the choke may, or the "
+                f"choke's own decoupling shorts the pair in front of it and "
+                f"the common-mode current never sees the winding")
+
     fit = design.supply_fit()
     for label, current in (("+Vout", fit["positive_ma"]),
                            ("-Vout", fit["negative_ma"])):
@@ -1294,7 +1523,7 @@ def check_supply(nets, values):
         entries = nets.get(net, ())
         strangers = sorted({part for part, _ in entries}
                            - set(design.ISOLATION_BRIDGE) - {ref}
-                           - {"J8", "D804", "C807", "C808", "C809"})
+                           - set(design.PRIMARY_PARTS))
         if strangers:
             problems.append(
                 f"{net} is a primary net and reaches {strangers} -- only the "
@@ -1406,6 +1635,7 @@ CHECKS = (
     ("1  no load on the mixer's rails", check_no_mixer_rail_load, ("nets",)),
     ("2a exactly one ground bond", check_one_ground_bond, ("nets",)),
     ("2b six shields, one per pin-3", check_shield_returns, ("nets",)),
+    ("2c one MAGND/MDGND star, and it is R902", check_module_star, ("nets",)),
     ("3  SIN{n} DC vs the mixer's own", check_sin_dc_by_construction,
      ("nets", "values")),
     ("4  PIN{n} load keeps the corner", check_pin_load, ("nets", "values")),
@@ -1415,6 +1645,8 @@ CHECKS = (
     ("   envelope diodes point the right way", check_rectifier_polarity,
      ("nets", "values")),
     ("   de-energised is bypass", check_fail_safe, ("nets", "values")),
+    ("   the ADC cannot be overdriven", check_envelope_adc,
+     ("nets", "values")),
     ("   open pins are the declared ones", check_open_pins, ("open_pins",)),
     ("   ERC finds only declared residue", check_erc, ("violations",)),
     ("   VREF load inside the MAX6126's range", check_reference_load,

@@ -95,7 +95,7 @@ For 40 dB of musical gate depth: per-channel depth **≥47 dB**, per-pair isolat
 | **CV filter** | **2-pole, 200–400 Hz, per channel. Mandatory.** Worth 15–20 dB of AM noise and doubles as the de-click | 2 kHz single-pole, treated as cosmetic |
 | **Resolution** | **Non-issue.** 10-bit = 0.074 dB/LSB on a dB-linear port | 12 vs 16 bit analysed at length |
 | **Dominant noise mechanism** | **Multiplicative** — control noise × 3.48/V, breathing with the signal | Additive, from the VCA |
-| **Envelope ADC** | **External SPI ADC** in the analogue section (ADS131M08 / MCP3564), **at 2 kHz** — derived, not chosen, and 1 kHz fails | On-chip; drove the wrong "must be RP2350B" conclusion |
+| **Envelope ADC** | **MCP3564**, external, in the analogue section, at 2 kHz. ~~derived, not chosen~~ — **chosen now**, and by the one number that could not be worked around: the ADS131M08's external reference input stops at 1.3 V, so its full scale is 1.20 V against a 1.233 V signal. `design.ENV_ADC` | On-chip; drove the wrong "must be RP2350B" conclusion |
 | **Envelope detector** | Six precision **full-wave** rectifiers into a symmetric 4.7 ms one-pole, drawn. The musical attack/release is a firmware constant at the frame rate, because bowed and picked want opposite shaping | Not decided; recorded as needing a musical target it turned out not to need |
 | **Reference** | 35–41 nV/√Hz (MAX6126 + NR cap, or ADR4525C/D), shared by DAC and ADC. Reference noise is **correlated across strings**, so it is the most perceptible kind | Not considered |
 | **Feature 12, compression** | **Analogue sidechain.** dB-out RMS detector (6.1 mV/dB) into the dB-in port ⇒ ratio is one resistor ratio | Software, in the sensing layer |

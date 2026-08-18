@@ -135,6 +135,21 @@ class Grid:
         # the moment two nets claim one cell in sequence; it is "put back what
         # blocking said", which is a constant.
         self.base = None
+        # **The isolation region, and it is a keep-out with an exception
+        # list.** Everything else the router must not enter is "blocked" for
+        # everybody -- the board edge, another net's pad ring. This one is
+        # different: the primary's corner is forbidden to every net *except*
+        # the primary's own, which is not something a single-owner cell can
+        # say. So it is held beside `owner` and consulted in free().
+        #
+        # It exists because verify.check_isolation_gap() caught the router
+        # putting VA+ through it. Nothing had ever told the router the region
+        # was special: it is empty of pour by construction, which to a maze
+        # router reads as the widest channel on the board. The check was doing
+        # its job and the fix belongs one step earlier -- a rule the router
+        # cannot break is worth more than a rule it is caught breaking.
+        self.reserved = set()
+        self.reserved_for = frozenset()
 
     # -- geometry ---------------------------------------------------------
     def cell_of(self, x, y):
@@ -161,8 +176,20 @@ class Grid:
     def free(self, layer, column, row, net):
         if not self.inside(column, row):
             return False
-        held = self.owner[layer][self.index(column, row)]
+        index = self.index(column, row)
+        if index in self.reserved and net not in self.reserved_for:
+            return False
+        held = self.owner[layer][index]
         return held is None or held == net
+
+    def reserve(self, x0, y0, x1, y1, nets):
+        """Keep a rectangle for `nets` alone. See `self.reserved`."""
+        self.reserved_for = frozenset(nets)
+        for column in range(self.columns):
+            for row in range(self.rows):
+                x, y = self.point_of(column, row)
+                if x0 <= x <= x1 and y0 <= y <= y1:
+                    self.reserved.add(self.index(column, row))
 
     def _cells_within(self, x0, y0, x1, y1, reach):
         """Every cell whose *centre* lies inside a rectangle grown by `reach`.
@@ -217,7 +244,29 @@ class Grid:
         lost the cells it is made of, `access()` found nothing free inside it
         and route_all() reported the net unreachable. That was IOUT1, IOUT4 and
         VREF, and from outside it looked exactly like congestion.
+
+        **And the exemption is about the pad, while what gets drawn is a
+        track.** "A cell inside the pad's copper cannot be too close to
+        anything" is true of the *pad*; the router then lays a track of
+        TRACK_MM through that cell, and a track wider than the pad sticks out
+        of it. At 1.27 mm of pin pitch the overhang never reaches anybody. At
+        0.65 mm it does: a TSSOP pad is 0.40 mm across, a track is 0.25, so a
+        cell more than **(0.40 - 0.25) / 2 = 0.075 mm** off the pad's centre
+        line draws copper past its edge and straight at the neighbour. DRC
+        reported eight of those at 0.15 mm against a 0.2 mm rule, all at U17,
+        on the first board this project has built with a fine pitch on it.
+
+        So the box is inset by half a track before the cells are taken: what
+        is claimed is not "inside the pad" but "inside the pad *with a track
+        drawn through it*", which is the thing the exemption was always about.
+        The cost is real and is the honest one -- some fine-pitch pads no
+        longer have a cell and route_all() reports them, which is what
+        rules.pad_reach() prices.
         """
+        inset = self.track / 2
+        x0, y0, x1, y1 = x0 + inset, y0 + inset, x1 - inset, y1 - inset
+        if x1 < x0 or y1 < y0:
+            return
         for column, row in self._cells_within(x0, y0, x1, y1, 0.0):
             self.take(layer, column, row, net)
             self.copper[layer].add(self.index(column, row))
@@ -261,6 +310,38 @@ class Grid:
         to a cell the grid said was free. If no cell inside the pad survives
         its neighbours' clearance rings, the honest answer is that this pad
         cannot be reached on this grid, and route_all() reports the net.
+
+        **And the last line of this function used to say the opposite.** It
+        ended `return (column, row) if self.free(...) else None`, with
+        `(column, row)` the nearest cell to the pad *centre* -- which is
+        outside the pad whenever nothing inside it is free, which is the only
+        case the line ever ran in. So the one path this docstring forbids was
+        the fallback, and it fired silently: the cell it returns is legal by
+        the grid, and the stub to it is not governed by the grid at all.
+
+        Nothing caught it for as long as the boards had room. check_no_shorts()
+        looks for shorts and this is a clearance; the grid's own bookkeeping is
+        correct, because the stub is the piece it does not own. **DRC caught
+        it** -- eight violations at 0.15 mm against a 0.2 mm rule, every one a
+        track beside a TSSOP pin, on the first board with a 0.65 mm pitch on
+        it. The SOT-523 that has the same geometry sits in open board, so its
+        stub never came near anything.
+
+        A convenience whose safety depended on a condition nobody had written
+        down, in the one function whose docstring states that condition.
+
+        **Deleting it outright was wrong too, and Q801 is why.** A SOT-523's
+        pads hold no cell in y either, and that part routed correctly on every
+        board this project has built -- its neighbours are on the far side of
+        the package, so its stub steps into open board. Removing the fallback
+        cost FSD and FSG, two nets that had never been in any doubt.
+
+        So the fallback stays and the condition is stated: **the stub is
+        allowed outside the pad only where the copper it sweeps is free to
+        this net.** _stub_is_clear() walks the cells the segment passes within
+        a clearance of, which is the same test the grid applies to every other
+        piece of track -- the stub stops being the one piece nobody checks.
+        rules.pad_reach() is the arithmetic for which packages will fail it.
         """
         column, row = self.cell_of(x, y)
         first = (int(math.ceil((x - half_w - self.left) / self.pitch)),
@@ -278,7 +359,39 @@ class Grid:
                     best, distance = (candidate_column, candidate_row), span
         if best is not None:
             return best
-        return (column, row) if self.free(layer, column, row, net) else None
+        outside = self.cell_of(x, y)
+        if (self.free(layer, *outside, net)
+                and self._stub_is_clear(layer, x, y, outside, net)):
+            return outside
+        return None
+
+    def _stub_is_clear(self, layer, x, y, cell, net):
+        """Does the stub from a pad centre to `cell` keep its clearance?
+
+        The stub is drawn as copper and is not laid cell by cell, so nothing
+        else in this file tests it. It does not need to when it stays inside
+        the pad -- a segment inside a pad's own copper cannot be too close to
+        anything, because the pad already is not. Outside the pad it is
+        ordinary track and has to answer the ordinary question.
+
+        Cheap, because a stub is at most one pitch long: take the segment's
+        bounding box, grow it by the same reach block_pad_ring() uses, and
+        require every cell in it to be free to this net. A cell held by
+        another pad's ring is exactly the 0.15 mm DRC reported.
+        """
+        target = self.point_of(*cell)
+        reach = self.clearance + self.track / 2
+        x0, x1 = sorted((x, target[0]))
+        y0, y1 = sorted((y, target[1]))
+        for column, row in self._cells_within(x0, y0, x1, y1, reach):
+            if self.index(column, row) in self.copper[layer]:
+                held = self.owner[layer][self.index(column, row)]
+                if held is not None and held != net:
+                    return False
+                continue
+            if not self.free(layer, column, row, net):
+                return False
+        return True
 
     def freeze(self):
         """Take the snapshot. Called once, after blocking and before routing."""
@@ -480,7 +593,7 @@ def _connect(grid, net, entries, access, crossable=None, claim=True):
     return tracks, vias, cells, displaced
 
 
-def _one_pass(rect, pads, obstacles, rules, skip, first):
+def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None):
     """Route every net once, on a clean grid, in an order this pass is given.
 
     `first` is the nets to attempt before the rest; everything else follows in
@@ -490,6 +603,8 @@ def _one_pass(rect, pads, obstacles, rules, skip, first):
     grid = Grid(rect, rules["pitch"], rules["track"], rules["clearance"],
                 rules["via"])
     grid.block_edge(rules["edge"])
+    if reserve:
+        grid.reserve(*reserve[0], reserve[1])
 
     # Pads block, on the front layer where they are, under the name of
     # whatever net they carry -- and **the ones carrying no net block hardest**.
@@ -618,7 +733,7 @@ def _one_pass(rect, pads, obstacles, rules, skip, first):
 RETRY_PASSES = 4
 
 
-def route_all(rect, pads, obstacles, rules, skip=()):
+def route_all(rect, pads, obstacles, rules, skip=(), reserve=None):
     """Route every net in `pads`. Returns tracks, vias and what was missed.
 
     `pads` is {net: [(x, y, half_width, half_height, layers), ...]} in
@@ -690,7 +805,7 @@ def route_all(rect, pads, obstacles, rules, skip=()):
     best = None
     first, tally = [], {}
     for _ in range(RETRY_PASSES):
-        result = _one_pass(rect, pads, obstacles, rules, skip, first)
+        result = _one_pass(rect, pads, obstacles, rules, skip, first, reserve)
         if best is None or len(result[2]) < len(best[2]):
             best = result
         if not result[2]:

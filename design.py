@@ -183,15 +183,26 @@ MEASURED = {
                  "ground bond, the mixer's own AGND/PGND star, and the two "
                  "inlet leads back to the shared barrel jack? It is a "
                  "property of how the box is wired, not of either board.",
-        sets="how much of the barrier's common-mode current prefers the "
-             "audio bond to the Y-capacitor",
-        when_wrong="It is the *denominator* of the split, so a smaller loop "
-                   "is a worse result: at 0.3 uH more of the barrier current "
-                   "takes the long way round. The whole declared range keeps "
-                   "the residual below the mixer's own noise floor, and the "
-                   "answer if it did not is a common-mode choke in the inlet "
-                   "pair -- which raises exactly this number and is the "
-                   "reason it is worth knowing."),
+        sets="the impedance of the bond the barrier's residual current is "
+             "developed across",
+        when_wrong="**Re-read after L801 was fitted, and it is a different "
+                   "assumption now.** It used to be the *denominator of a "
+                   "split* -- barrier_return() divided the barrier current "
+                   "between C810 and this loop, so a smaller loop was a "
+                   "worse result and the whole declared range mattered. The "
+                   "choke puts 3.6 kohm in that denominator, so the split is "
+                   "set by the part and not by the box: 0.3 and 1.5 uH give "
+                   "the same 99.98 % local return to four figures. What is "
+                   "left is a straight scale on the residual, because the "
+                   "bond voltage is this impedance times a current that no "
+                   "longer depends on it -- a factor of 5 across the range, "
+                   "on 1.1 uV that is 42 dB under the mixer's own noise "
+                   "floor. Every point in the range is inaudible and so is "
+                   "every point outside it. The old clause named a choke as "
+                   "the answer if the number went the wrong way; the choke is "
+                   "fitted, so the question this assumption asks has stopped "
+                   "being load-bearing and is kept because it is still "
+                   "unmeasured."),
 
     "logic_law_error": Assumption(
         value=0.23e-2, units=" fractional, '541 output-impedance asymmetry",
@@ -1364,6 +1375,431 @@ def envelope_sample_rate(tau=None):
 
 
 # ---------------------------------------------------------------------------
+# The envelope ADC, and what the repo already believed about it
+# ---------------------------------------------------------------------------
+# **Six places said something about this block and they did not agree.** The
+# rule the last pass arrived at -- a deferred block is not drawn, so nothing
+# forces its descriptions to agree -- said to start here rather than with what
+# the part needs:
+#
+#   1. DEFERRED said "ADS131M08 or MCP3564 ... the six ENV{n} nets exist and
+#      are driven ... so that only SPI crosses the domain boundary";
+#   2. floorplan.CROSSING_RULE said the four SPI signals "cross in the same
+#      direction, because the ADC's own reference is VREF and its ground is
+#      MAGND";
+#   3. floorplan.ZONES puts it in **zone D2**, whose domain is DIGITAL, "at
+#      the D2/A4 edge so only SPI crosses";
+#   4. NET_DC's own comment on ENV{n} says "the ADC that reads it is
+#      single-supply";
+#   5. **RAILS has carried "V3V3": 3.3 since the first pass**, with no net of
+#      that name anywhere on the board;
+#   6. supply-decision.md's correction index says flatly *"there is no 3V3
+#      rail on the board. The reference is on V5 and the MCU is deferred."*
+#
+# (2) and (3) disagree about which domain the part is in. (5) and (6)
+# contradict each other outright. And the "only SPI" of (1) is enumerated by
+# (2), after spec section 4.4, as four signals -- where the part needs six.
+# Every one of those was consumed by something --
+# check_crossings() reads CROSSINGS, check_zones() reads ZONES, NET_DC reads
+# RAILS -- and none of them could fail, because **a rail with no net is
+# invisible to every check that walks nets, and a zone with no parts is
+# invisible to every check that walks parts.** That is zone P's fault again,
+# one artefact along: `RAILS` is a declaration nothing is obliged to use.
+# check_rails_are_drawn() below is the instrument, and V3V3 is why it exists.
+#
+# The resolutions: the part is **analogue**, so (2) wins over (3) and ZONES is
+# corrected; V3V3 becomes real, so (5) wins over (6) and the supply document's
+# index gains a line; and (1) becomes six signals rather than four.
+
+# **MCP3564 against ADS131M08, and the full scale settles it in one line.**
+#
+# Both are named by spec section 4.4 and neither was chosen. Read first-hand:
+# SBAS950B (ADS131M08, revised February 2021) and DS20006181C (MCP3561/2/4,
+# 2021).
+#
+#   | | ADS131M08 | MCP3564 |
+#   |---|---|---|
+#   | channels | 8, simultaneous | 8 single-ended, multiplexed (SCAN) |
+#   | external VREF | **1.1 / 1.25 / 1.3 V** | **0.6 V to AVDD** |
+#   | full scale, gain 1 | +/-0.96 x VREF = 1.20 V | +/-VREF = 2.50 V |
+#   | clock | CLKIN, or a crystal on XTAL1/2 | MCLKIN, or internal RC |
+#   | AVDD current | 6.5 typ / 7.7 max mA | 0.93 typ / 1.3 max mA |
+#   | package | 32-pin WQFN or TQFP | 20-lead TSSOP |
+#
+# **socket.clipping_peak() is 1.233 V** -- the mixer's own largest per-channel
+# peak with all six aligned, and therefore the largest level this detector
+# exists to report. The ADS131M08's full scale at unity gain is 1.20 V. It
+# clips **0.24 dB below the signal it is there to measure**, and its own
+# reference input cannot be raised to fix it: the top of the range, 1.3 V,
+# buys 1.248 V and 0.1 dB. Its minimum gain is 1, so there is no setting that
+# helps; the fix would be six attenuators, which is what the MCP3564 needs
+# anyway for a different reason and does not need in order to *reach* the
+# level.
+#
+# The MCP3564 takes the board's own 2.5 V reference and gives 2.5 V of full
+# scale, which at unity is **6.1 dB above clipping_peak** -- and it makes
+# floorplan.CROSSING_RULE's already-written sentence true rather than
+# aspirational. That sentence was written before either part was read, and
+# exactly one of the two candidates can honour it.
+#
+# The secondary differences all point the same way and none of them would have
+# decided it: a fifth of the AVDD current, a leaded package a person can
+# inspect, and one datasheet paragraph (7.3) that sanctions by name the thing
+# this board wants -- "consider the MCP3561/2/4 as an analog component, and
+# therefore, connect AVDD to DVDD and AGND to DGND with a star connection",
+# with its cost stated ("the decoupling capacitors may be larger").
+#
+# **What the multiplexer costs is a clock, and that is the honest debit.** The
+# ADS131M08 converts all eight channels at once; the MCP3564 converts one at a
+# time and envelope_adc_clock() shows its internal RC oscillator cannot make
+# the rate. So MCLK crosses the domain boundary as a sixth signal. See
+# floorplan.CROSSINGS.
+ENV_ADC = "MCP3564"
+ENV_ADC_REF = "U17"
+ENV_ADC_MPN = "MCP3564-E/ST"
+ENV_ADC_DATASHEET = ("https://download.mikroe.com/documents/datasheets/"
+                     "MCP3564_datasheet.pdf")
+ENV_ADC_REVISION = "DS20006181C, 2021"
+# DS20006181C page 3, the 20-lead TSSOP for the quad-channel device.
+ENV_ADC_PINS = {"AVDD": 1, "AGND": 2, "REFIN-": 3, "REFIN+": 4,
+                "CH0": 5, "CH1": 6, "CH2": 7, "CH3": 8, "CH4": 9, "CH5": 10,
+                "CH6": 11, "CH7": 12, "CS": 13, "SCK": 14, "SDI": 15,
+                "SDO": 16, "IRQ": 17, "MCLK": 18, "DGND": 19, "DVDD": 20}
+ENV_ADC_AVDD_RANGE = (2.7, 3.6)
+ENV_ADC_AIDD_MA = (0.93, 1.3)          # BOOST = 1x, the default
+ENV_ADC_DIDD_MA = (0.25, 0.37)
+ENV_ADC_VREF_RANGE = (0.6, None)       # None means "AVDD" -- the table's own
+ENV_ADC_INPUT_MARGIN = 0.1             # AGND - 0.1 V to AVDD + 0.1 V
+ENV_ADC_ZIN_OHMS = 260_000.0           # gain 1x, typ, at the table's AMCLK
+ENV_ADC_ZIN_AMCLK = 4.9152e6           # "proportional to 1/AMCLK"
+ENV_ADC_MCLK_RANGE = (1.0e6, 20.0e6)   # external, DVDD >= 2.7 V
+ENV_ADC_MCLK_INTERNAL = (3.3e6, 6.6e6)
+# Table 5-6, "Oversampling Ratio and Sinc Filter Relationship": OSR setting ->
+# (conversion time in DMCLK periods, no-missing-code resolution in bits). Only
+# the settings that could reach 2 kHz on six channels inside the 20 MHz clock
+# limit are listed; the rest of the table runs to OSR 98304.
+ENV_ADC_OSR = {32: (96, 16), 64: (192, 19), 128: (384, 22), 256: (768, 24)}
+# **Which string goes on which channel is free, and this is what spends it.**
+# A TSSOP's pins are 0.65 mm apart and the router's grid is 0.5 mm, so
+# rules.pad_reach() shows some pads contain no grid cell at all -- and no
+# placement fixes it, because a pad wide enough to always contain one would be
+# closer to its neighbour than this board's own clearance rule allows. What a
+# placement *can* do is choose *which* pads lose, and the loser here costs
+# nothing: CH4 and CH7 are grounded, so the six channels take CH0-CH3, CH5 and
+# CH6 and the two pads the grid cannot reach carry no routed net. See
+# placement.SUPPLY's note at U17 and gen_pcb.check_fine_pitch_access(), which
+# is what holds the phase.
+#
+# Firmware reads the mapping from here; nothing electrical distinguishes one
+# channel from another.
+ENV_ADC_CHANNEL = {1: "CH0", 2: "CH1", 3: "CH2", 4: "CH3", 5: "CH5", 6: "CH6"}
+ENV_ADC_GROUNDED = ("CH4", "CH7")
+ENV_ADC_PRESCALE = 1
+# The chosen point. envelope_adc_clock() is the arithmetic; this is its answer
+# written where the netlist can see it.
+ENV_ADC_OSR_CHOICE = 64
+
+# The 3.3 V rail, and it exists because the ADC does.
+#
+# Microchip MCP1700, DS20001826F (2005-2020) with DS21826B alongside for the
+# figure the newer revision drops. Read first-hand:
+#
+#     Input operating voltage   VIN   2.3 to 6.0 V; absolute maximum 6.5
+#     Quiescent current         Iq    1.6 uA typ, 4 uA max at IL = 0
+#     Maximum output current          250 mA min for VR >= 2.5 V
+#     Dropout                         178 mV typ, 350 mV max at 250 mA
+#     Line / load regulation          +/-0.75 %/V typ, +/-1.0 % typ
+#     Output noise              eN    3 uV/rtHz at 1 kHz, COUT = 1 uF
+#     PSRR                            44 dB at 100 Hz, COUT = 1 uF
+#     Thermal, SOT-23           thJA  212 C/W (rev F, JESD51-7);
+#                                     336 C/W (rev B, minimum trace, 1 layer)
+#     Tj max                          150 C
+#     SOT-23 pinout                   1 GND, 2 VOUT, 3 VIN
+#
+# **The 6.0 V input limit is a feature here and not a compromise**: it makes
+# V5 the only rail this regulator can hang off, and V5 is the right source
+# anyway. The alternative is VA+, and 12 V into 3.3 at even 50 mA is 435 mW in
+# a SOT-23 -- v5_regulator()'s arithmetic one package smaller. From V5 the
+# same 50 mA is 85 mW. The part cannot be fitted the wrong way round because
+# its own rating forbids it.
+#
+# **336 C/W and not 212**, following v5_regulator()'s stated principle: the
+# minimum-pad figure is the honest one to design to, because a number that
+# depends on how much copper somebody poured is a number the fabricator can
+# change. Revision F publishes only the JESD51-7 four-layer figure; revision B
+# publishes both, so the pessimistic one is still a reading.
+#
+# Its SOT-23 pin map is the NCP1117's -- 1 GND, 2 VOUT, 3 VIN -- which is why
+# V5_PINS serves both and there is no second dict.
+V3V3_PART = "MCP1700-3.3"
+V3V3_MPN = "MCP1700T-3302E/TT"
+V3V3_REF = "U18"
+V3V3_VOLTS = 3.3
+V3V3_VIN_MAX = 6.0
+V3V3_IQ_MA = 0.004
+V3V3_IOUT_MA = 250.0
+V3V3_DROPOUT_V = 0.35                  # maximum, at 250 mA
+V3V3_THETA_JA = 336.0                  # rev B, minimum trace, single layer
+V3V3_TJ_MAX = 150.0
+V3V3_CAP = "1u/16V X7R"                # the datasheet's own CIN and COUT
+V3V3_CAP_FARADS = 1e-6
+V3V3_DATASHEET = ("https://ww1.microchip.com/downloads/aemDocuments/documents/"
+                  "APID/ProductDocuments/DataSheets/"
+                  "MCP1700-Data-Sheet-20001826F.pdf")
+
+# The per-channel network between ENV{n} and the ADC pin. Three parts a
+# channel and every one of them is derived at envelope_adc_input().
+ENV_ADC_R_TOP = "22k 1%"
+ENV_ADC_R_TOP_OHMS = 22_000.0
+ENV_ADC_R_BOT = "4k99 1%"
+ENV_ADC_R_BOT_OHMS = 4_990.0
+ENV_ADC_C = "1200p/50V C0G"
+ENV_ADC_C_FARADS = 1200e-12
+# Local decoupling, and the one number here that is a refusal: see
+# envelope_adc_reference().
+ENV_ADC_LOCAL = "100n/50V X7R"
+
+
+def envelope_adc_mclk(osr=None, sample_hz=None, channels=None):
+    """The minimum master clock for one OSR setting, in Hz.
+
+    Split out of envelope_adc_clock() because envelope_adc_input() needs it
+    too -- the ADC's input impedance is "proportional to 1/AMCLK", so the
+    divider's loading depends on the clock, and the clock depends on the
+    channel count and the OSR and nothing else. Two functions calling one
+    third is the shape that keeps them from calling each other.
+    """
+    osr = osr or ENV_ADC_OSR_CHOICE
+    periods = ENV_ADC_OSR[osr][0]
+    return (4 * ENV_ADC_PRESCALE * (channels or CHANNELS) * periods
+            * (sample_hz or ENV_SAMPLE_HZ))
+
+
+def envelope_adc_clock(sample_hz=None, channels=None):
+    """What MCLK has to be, and why it cannot come from inside the part.
+
+    The MCP3564 has one modulator and a multiplexer, so six channels cost six
+    conversions. DS20006181C's Figure 5-16 is explicit that SCAN Continuous is
+    not pipelined across channels -- the decimation filter is reset between
+    them -- so each channel costs a full settling conversion:
+
+        DMCLK       = MCLK / (4 x Prescale)          equation 4-2
+        TCONV       = Table 5-6, in DMCLK periods    (3 x OSR3 x OSR1)
+        rate/channel = DMCLK / (channels x TCONV)
+
+    which rearranges to the minimum master clock for a given rate:
+
+        MCLK_min = 4 x Prescale x channels x TCONV x rate
+
+    **The internal oscillator fails this, and it fails it on its tolerance
+    rather than on its value.** DS20006181C gives fMCLK_INT as 3.3 to 6.6 MHz
+    -- a factor of two, because it is an RC -- and the design has to hold at
+    the *bottom* of it. Even at the coarsest useful setting, OSR = 32, the
+    slow end gives 1432 Hz per channel, and envelope_sample_rate() has already
+    shown what happens below 2 kHz: the top fretted string's rectified
+    fundamental crosses Nyquist and folds towards DC, where no averaging
+    removes it. So MCLK is external, from the deferred controller, and that is
+    a signal crossing the analogue boundary that the simultaneous-sampling
+    alternative would not have needed. It is the multiplexer's bill.
+
+    **Which OSR, and it is decided by the detector's floor rather than by the
+    converter.** Every row below reaches 2 kHz inside the part's own 20 MHz
+    ceiling except OSR 256, so the choice is free in parts and costs only
+    clock frequency. The LSB is quoted referred to ENV{n} -- through
+    envelope_adc_input()'s divider, which is where the measurement actually
+    happens -- against the 3 mV that envelope_balance() calls the floor of the
+    whole detector. OSR 32's LSB is 413 uV, which is under that floor but not
+    under the offset of the OPA1644 that stage B actually is; OSR 64 is 52 uV
+    and is under both, for one octave of MCLK. That is the setting fitted.
+    """
+    sample_hz = sample_hz or ENV_SAMPLE_HZ
+    channels = channels or CHANNELS
+    scale = envelope_adc_input()["ratio"]
+    rows = {}
+    for osr, (periods, bits) in sorted(ENV_ADC_OSR.items()):
+        mclk_min = envelope_adc_mclk(osr, sample_hz, channels)
+        lsb = 2 * VREF / 2 ** bits
+        rows[osr] = {
+            "tconv_periods": periods,
+            "bits": bits,
+            "mclk_min": mclk_min,
+            "fits": mclk_min <= ENV_ADC_MCLK_RANGE[1],
+            "lsb_at_pin": lsb,
+            "lsb_at_env": lsb / scale,
+            "internal_rate_low": (ENV_ADC_MCLK_INTERNAL[0]
+                                  / (4 * ENV_ADC_PRESCALE * channels
+                                     * periods)),
+            "internal_rate_high": (ENV_ADC_MCLK_INTERNAL[1]
+                                   / (4 * ENV_ADC_PRESCALE * channels
+                                      * periods)),
+        }
+    chosen = rows[ENV_ADC_OSR_CHOICE]
+    return {
+        "rows": rows,
+        "osr": ENV_ADC_OSR_CHOICE,
+        "sample_hz": sample_hz,
+        "channels": channels,
+        "mclk_min": chosen["mclk_min"],
+        "mclk_max": ENV_ADC_MCLK_RANGE[1],
+        "internal_range": ENV_ADC_MCLK_INTERNAL,
+        # The best the internal oscillator can do at *any* OSR, against the
+        # rate the design needs: the coarsest setting is the fastest, so this
+        # is OSR 32's slow end and it is 2.9 dB short.
+        "internal_best_hz": max(row["internal_rate_low"]
+                                for row in rows.values()),
+        "internal_short_db": 20 * math.log10(
+            sample_hz / max(row["internal_rate_low"]
+                            for row in rows.values())),
+        "internal_usable": any(row["internal_rate_low"] >= sample_hz
+                               for row in rows.values()),
+        "dmclk": chosen["mclk_min"] / (4 * ENV_ADC_PRESCALE),
+        "detector_floor_v": envelope_balance()["floor_volts"],
+    }
+
+
+def envelope_adc_input(r_top=None, r_bot=None, c_farads=None, mclk=None):
+    """The three parts between ENV{n} and CH{n-1}, each with its reason.
+
+    **The problem is that ENV{n} is a +/-12 V node and the ADC is a 3.3 V
+    part.** NET_DC declares ENV{n} as (0, MODULE_RAIL) and stage B is an
+    OPA1644, so the largest voltage it can present is the rail less
+    OPAMP_SWING_HEADROOM -- 11.65 V. The MCP3564's absolute input rating is
+    AGND - 0.1 V to AVDD + 0.1 V, which is 3.4 V, and its own text says what
+    happens above it: "Any voltage above or below this range will cause
+    leakage currents through the ESD diodes at the input pins. This ESD
+    current can cause unexpected performance of the device."
+
+    **A series resistor is the obvious answer and it is the wrong one.** It
+    limits the ESD current but does not stop it, and the current has to go
+    somewhere: into AVDD, on a rail whose regulator cannot sink. Six channels
+    clipping together would put more current *into* the 3.3 V rail than the
+    ADC draws out of it, and the rail would rise towards the 3.6 V the part is
+    rated to. That is a failure whose trigger is a hard-picked string.
+
+    So the input is **divided**, not clamped, and the ratio is set by the one
+    number that bounds ENV{n} from above:
+
+        11.65 V x 4990 / (22000 + 4990) = 2.15 V
+
+    which is inside VREF and therefore inside the linear range, not merely
+    inside the absolute rating. **No input on this ADC can reach a voltage
+    that needs protecting, at any signal the module can produce.**
+
+    What it costs is range at the other end, and the cost is computable:
+    socket.clipping_peak() lands at 9.1 % of full scale, so 20.8 dB of the
+    converter's span sits above the loudest level the system has. That is why
+    envelope_adc_clock() spends an octave of MCLK on OSR 64 rather than 32 --
+    the bits given away here are bought back there, for no parts.
+
+    **The loading is a scale error and it is stated rather than trimmed.** The
+    ADC's input is a switched capacitor, so it presents ENV_ADC_ZIN_OHMS in
+    parallel with the divider's lower leg, and the datasheet gives that figure
+    as a typical proportional to 1/AMCLK with no tolerance. It is identical on
+    all six channels -- same value, same clock -- so it is a gain error and
+    not a matching error, in the same sense MEASURED["logic_law_error"] is,
+    and one measured curve calibrates it in firmware.
+
+    **C{n}52 is the anti-alias, and its two bounds are 25 kHz apart.** The
+    modulator samples at DMCLK, and the only band-limiting between stage B's
+    own 33.9 Hz pole and that sampler is this RC. Above, it must be flat
+    across the band envelope_sample_rate() sweeps -- up to the top fretted
+    string's rectified fundamental, which at the 24th fret is 2.64 kHz; below,
+    it must be as far under DMCLK as that allows. 1200 pF sits at 32.6 kHz,
+    which is 0.03 dB of droop at 2.64 kHz and 37 dB of rejection at DMCLK.
+    """
+    r_top = r_top or ENV_ADC_R_TOP_OHMS
+    r_bot = r_bot or ENV_ADC_R_BOT_OHMS
+    c_farads = c_farads or ENV_ADC_C_FARADS
+    mclk = mclk or envelope_adc_mclk()
+    ratio = r_bot / (r_top + r_bot)
+    swing = MODULE_RAIL - OPAMP_SWING_HEADROOM
+    z_in = ENV_ADC_ZIN_OHMS * ENV_ADC_ZIN_AMCLK / mclk
+    loaded_bot = 1.0 / (1.0 / r_bot + 1.0 / z_in)
+    loaded = loaded_bot / (r_top + loaded_bot)
+    source = 1.0 / (1.0 / r_top + 1.0 / r_bot)
+    corner = 1.0 / (2 * math.pi * source * c_farads)
+    peak = socket.clipping_peak()
+    ripple_hz = 2 * STRING_HZ[-1] * 2 ** (ENV_TOP_FRET / 12.0)
+    return {
+        "ratio": ratio,
+        "loaded_ratio": loaded,
+        "load_error": loaded / ratio - 1.0,
+        "z_in": z_in,
+        "swing": swing,
+        "at_swing": swing * ratio,
+        "at_clipping_peak": peak * ratio,
+        "full_scale": VREF,
+        "absolute_max": V3V3_VOLTS + ENV_ADC_INPUT_MARGIN,
+        "headroom_db": 20 * math.log10(VREF / (swing * ratio)),
+        "clipping_peak_fraction": peak * ratio / VREF,
+        "range_given_up_db": 20 * math.log10(VREF / (peak * ratio)),
+        "source_ohms": source,
+        "corner_hz": corner,
+        "ripple_hz": ripple_hz,
+        "droop_db": -10 * math.log10(1 + (ripple_hz / corner) ** 2),
+    }
+
+
+def envelope_adc_reference():
+    """What REFIN+ may take from the MAX6126, and what it may not.
+
+    Two sentences from two datasheets meet on this net and they do not both
+    fit.
+
+    DS20006181C section 3.2: *"For optimal ADC accuracy, appropriate bypass
+    capacitors should be placed between REFIN+ and AGND at all times. Using a
+    0.1 uF and a 10 uF ceramic capacitor can help ... These bypass capacitors
+    are not mandatory for correct ADC operation."*
+
+    The MAX6126's own page 4, via design.classify_reference_load(): **one**
+    output capacitor between 0.1 and 10 uF, and any number of 0.1 uF locals
+    beside it. VREF already carries its one -- C802 at 10 uF -- so a 10 uF at
+    REFIN+ would be a *second bulk capacitor* on a part qualified for one.
+    That is the exact fault this repo deleted C804 to fix, arriving from a
+    different direction and with a datasheet sentence recommending it.
+
+    **So the 10 uF is refused and the 100 nF is fitted**, and the refusal is
+    the cheaper of the two: the MCP3564 calls the capacitor optional and the
+    MAX6126 calls its own limit a stability range.
+
+    **The buffer the ADC's Figure 7-1 draws is also refused, and for the
+    opposite kind of reason.** That figure puts an op-amp between reference
+    and REFIN+ "because the REFIN+ input is not buffered", which is true and
+    is about *driving* the switched-capacitor load. What it would cost here is
+    a series element between a reference and a load whose current
+    DS20006181C never states -- there is no reference input current row
+    anywhere in it -- so the DC accuracy would depend on an unknown. Section 6
+    of the spec forbids inventing that number, and the honest move is to
+    remove the term rather than guess it: connected directly, the load current
+    reaches VREF through no resistance at all and shows up only as load
+    regulation.
+
+    **Which is bounded even though the current is not**, and that is what
+    makes the direct connection safe to assert. The MAX6126's load regulation
+    maximum is 28 uV/mA, so the question to ask is not "how big is this
+    current" but "how big would it have to be", and that one the datasheets
+    answer between them. To move VREF by 100 uV -- 0.004 % of 2.5 V, and five
+    times the 19 uV of load regulation reference_load() already attributes to
+    the '541 -- it would have to be **3.6 mA**, which is five times the whole
+    '541 load and nearly three times the ADC's own maximum AVDD current. A
+    switched-capacitor reference input on a part drawing 1.3 mA is not that,
+    by any reading of any of it.
+    """
+    load_reg = 28e-6                    # V/mA, MAX6126 maximum
+    target = 100e-6
+    return {
+        "local_farads": 100e-9,
+        "bulk_refused_farads": 10e-6,
+        "existing_bulk": reference_load()["total_farads"],
+        "ceiling_farads": VREF_CLOAD_MAX_F,
+        "load_regulation_v_per_ma": load_reg,
+        "current_to_move_100uv_ma": target / load_reg,
+        "logic_load_ma": reference_load()["step_amps"] * 1e3,
+        "adc_avdd_ma": ENV_ADC_AIDD_MA[1],
+    }
+
+
+# ---------------------------------------------------------------------------
 # The DC servo, and constraint 3
 # ---------------------------------------------------------------------------
 
@@ -2052,6 +2488,16 @@ def supply_load():
     envs = quads("VA+", set(ENV_PACKAGES_REFS))
     vcas = quads("VA+", set(VCA_PACKAGES_REFS))
     coils = sorted(on_rail.get("V5", set()) & set(BYPASS_RELAY_REFS))
+    # The 3.3 V rail, counted on V5 because that is where it comes from. Its
+    # own load is the ADC, and the regulator's quiescent current goes with it
+    # -- 4 uA maximum, which is the reason a linear rail was affordable here
+    # at all and is the number the NCP1117 would have made 10 mA.
+    adc = sorted(on_rail.get("V3V3", set()) & {ENV_ADC_REF})
+    v3v3_typ = len(adc) * (ENV_ADC_AIDD_MA[0] + ENV_ADC_DIDD_MA[0])
+    v3v3_max = len(adc) * (ENV_ADC_AIDD_MA[1] + ENV_ADC_DIDD_MA[1])
+    if adc:
+        v3v3_typ += V3V3_IQ_MA
+        v3v3_max += V3V3_IQ_MA
 
     bipolar_typ = (len(opamps) * OPAMP_SECTIONS * OPAMP_IQ_MA[0]
                    + len(envs) * OPAMP_SECTIONS * ENV_OPAMP_IQ_MA[0]
@@ -2063,14 +2509,25 @@ def supply_load():
                           BYPASS_COIL_MA[1] * len(coils))
     return {
         "VA+": {"typ_ma": bipolar_typ, "max_ma": bipolar_max,
-                "volts": RAILS["VA+"], "parts": opamps + envs + vcas},
+                "volts": RAILS["VA+"], "parts": opamps + envs + vcas,
+                "source": None},
         "VA-": {"typ_ma": bipolar_typ, "max_ma": bipolar_max,
-                "volts": RAILS["VA-"], "parts": opamps + envs + vcas},
+                "volts": RAILS["VA-"], "parts": opamps + envs + vcas,
+                "source": None},
         # The reference is on V5 and its own draw is small against three coils;
         # it is counted at its datasheet maximum rather than omitted.
-        "V5": {"typ_ma": coil_typ + VREF_SUPPLY_MA[0],
-               "max_ma": coil_max + VREF_SUPPLY_MA[1],
-               "volts": RAILS["V5"], "parts": coils + [REF_REF]},
+        "V5": {"typ_ma": coil_typ + VREF_SUPPLY_MA[0] + v3v3_typ,
+               "max_ma": coil_max + VREF_SUPPLY_MA[1] + v3v3_max,
+               "volts": RAILS["V5"],
+               "parts": coils + [REF_REF] + ([V3V3_REF] if adc else []),
+               "source": None},
+        # Declared as a rail of its own even though it is drawn from V5,
+        # because check_rails_are_drawn() reads RAILS and RAILS is the list of
+        # rails this board *has*. A rail whose current is folded into its
+        # parent's line and named nowhere is how V3V3 sat in RAILS for four
+        # passes with no net.
+        "V3V3": {"typ_ma": v3v3_typ, "max_ma": v3v3_max,
+                 "volts": RAILS["V3V3"], "parts": adc, "source": "V5"},
     }
 
 
@@ -2099,11 +2556,18 @@ def supply_requirement():
     closes: the number is now derived from what is drawn.
     """
     load = supply_load()
+    # **Only the rails nothing else feeds.** V3V3 is made from V5 and its
+    # current is already counted in V5's line, so adding 3.3 V x 1.67 mA here
+    # would count the same milliamps twice and dissipate them at two voltages
+    # at once. That is the same mistake in method supply_fit() records at the
+    # other end -- summing rail powers without the topology between them -- so
+    # the topology is data now: each rail says what feeds it, and this sums
+    # the roots.
     watts = sum(abs(rail["volts"]) * rail["max_ma"] * 1e-3
-                for rail in load.values())
+                for rail in load.values() if rail["source"] is None)
     return {
         "load": load,
-        "rails": {"VA+": RAILS["VA+"], "VA-": RAILS["VA-"], "V5": RAILS["V5"]},
+        "rails": {name: rail["volts"] for name, rail in load.items()},
         "isolated": True,
         "min_khz": SUPPLY_MIN_KHZ,
         "watts_max": watts,
@@ -2217,6 +2681,12 @@ SUPPLY_REF = "U15"
 # claim and the copper claim are different claims: floorplan.check_isolation()
 # reads this one and verify.check_isolation_gap() reads the other.
 ISOLATION_BRIDGE = ("C810",)
+# Everything on the isolated primary, by reference. Declared here rather than
+# written out in verify.check_supply(), which is where the list used to live
+# as a set literal: a part added to the primary and not to that literal is a
+# check that quietly stops covering the thing it names. L801 is the part that
+# found it.
+PRIMARY_PARTS = ("J8", "L801", "D804", "C807", "C808", "C809")
 
 # ON Semiconductor NCP1117, publication NCP1117/D revision 25, June 2013, read
 # first-hand. The 5.0 V fixed part:
@@ -2285,6 +2755,75 @@ PRIMARY_HF_C = "100n/50V X7R"
 # gets about 0.35 V, which is what inlet_budget() spends.
 INLET_DIODE = "B340A"
 INLET_DIODE_VF = 0.35
+
+
+# The common-mode choke in the inlet pair, and it is the second half of
+# barrier_return() rather than an EMC part.
+#
+# Wurth Elektronik WE-SL2 **744222**, datasheet revision 008.002 of
+# 2023-04-12, read first-hand. Every figure below is its own:
+#
+#     Number of windings   N       2
+#     Inductance           L       100 kHz / 5 mV      1000 uH   +/-50 %
+#     Maximum impedance    Zmax                        6000 ohm  typ
+#     Rated current        IR      dT = 40 K            800 mA   max
+#     DC resistance        RDC     @ 20 C              0.207 ohm max
+#     Leakage inductance   LS      1 MHz / 1 mA           90 nH  typ
+#     Insulation test      VT      50 Hz / 3 mA / 3 s    500 VAC max
+#     Rated voltage        VR                             80 V
+#     Body                         9.2 x 6.0 x 5.0 mm, AEC-Q200 Grade 1
+#
+# **Why a choke and not more capacitor**, which is the whole of the argument
+# and is already written at barrier_return(): the barrier's common-mode
+# current divides between the Y-capacitor and the loop the shared inlet
+# closes, so a bigger C810 *divides* Z_Y and a choke *multiplies* Z_loop.
+# C810 is at the value the low-frequency side of that trade allows -- 470 nF
+# against a 610 nF ceiling -- so the capacitor has nothing left to give, and
+# the remaining 19 dB has to come from the other side of the divider.
+#
+# **Four filters, and the third is the one that eliminates the obvious part.**
+#
+#   * **mH class.** At 580 kHz a ferrite bead is a few ohms and a 5 uH choke
+#     is 18. Traco name their own TCK-122 as a compatible accessory and it is
+#     5 uH: barrier_return(choke_uh=5.0) prices it at 4.3 dB, which is an EMC
+#     accessory doing an EMC accessory's job and not this one. 1 mH is
+#     3.6 kohm at 580 kHz, against a Z_Y of 0.58 ohm.
+#   * **>= 0.5 A.** inlet_budget() gives 382 mA at the bottom of the accepted
+#     brick range and 800 mA is the datasheet's own rated current at a 40 K
+#     rise.
+#   * **DC resistance is in series with the whole module.** Two windings carry
+#     the supply current, so the DC loop sees 2 x 0.207 = 0.414 ohm maximum:
+#     158 mV at 382 mA, which inlet_budget() now spends and which the
+#     converter's 9 V minimum input has thirty times over.
+#   * **It has to fit in the primary region**, which has no pour under it.
+#     10.09 x 6.59 mm of courtyard, and the row it goes in re-spaces by
+#     1.5 mm rather than the board growing -- see placement.SUPPLY.
+#
+# **580 kHz is on the inductive slope and the datasheet says where the slope
+# ends**: Zmax is 6000 ohm and the distributor listing that quotes it gives
+# the frequency as 4 MHz, so the self-resonance is nearly a decade above the
+# converter's fundamental and |Z| = wL holds there. The binding uncertainty is
+# not the frequency, it is the **+/-50 % tolerance**, and barrier_return()
+# reports both ends of it.
+INLET_CHOKE = "744222"
+INLET_CHOKE_REF = "L801"
+INLET_CHOKE_UH = 1000.0
+INLET_CHOKE_TOLERANCE = 0.5
+INLET_CHOKE_ZMAX = 6000.0
+INLET_CHOKE_ZMAX_HZ = 4.0e6
+INLET_CHOKE_IR_MA = 800.0
+INLET_CHOKE_RDC = 0.207                # ohm, one winding, maximum
+INLET_CHOKE_LEAKAGE_NH = 90.0
+INLET_CHOKE_VR = 80.0
+INLET_CHOKE_DATASHEET = ("https://www.we-online.com/components/products/"
+                         "datasheet/744222.pdf")
+# The datasheet's own Schematic block: winding A is 1-4 and winding B is 2-3,
+# with 1 and 2 on one side of the body and 4 and 3 on the other. The inlet
+# pair goes in at 1/2 and the converter hangs off 4/3, which is the connection
+# that cancels the differential flux and leaves the common-mode inductance.
+# Getting this pairing wrong -- 1-2 and 4-3 -- draws identically, passes ERC,
+# and puts 1 mH in series with the supply current instead of across it.
+INLET_CHOKE_PINS = {"L1_IN": 1, "L2_IN": 2, "L2_OUT": 3, "L1_OUT": 4}
 
 
 def supply_fit():
@@ -2473,7 +3012,7 @@ def rail_filter(r_ohms=None, c_farads=None, f_khz=None):
     }
 
 
-def barrier_return(c_y=None, node_vpp=None, loop_uh=None):
+def barrier_return(c_y=None, node_vpp=None, loop_uh=None, choke_uh=None):
     """Where the isolation barrier's own current goes, and it is load-bearing.
 
     The one part of this block that constraint 5.2 can be lost to, and it is
@@ -2486,31 +3025,80 @@ def barrier_return(c_y=None, node_vpp=None, loop_uh=None):
          millimetres;
       2. out through the secondary ground, across R902, across R901, along the
          bond wire into the mixer's AGND, through the mixer's own AGND/PGND
-         star, back down the shared inlet lead to the barrel jack and into the
-         primary. **That path runs through the audio ground bond**, which is
-         the one conductor this whole design is arranged around.
+         star, back down the shared inlet lead to the barrel jack, through
+         **L801** and into the primary. **That path runs through the audio
+         ground bond**, which is the one conductor this whole design is
+         arranged around.
 
     Without (1) all of it takes (2), and this computes what that is worth:
     milliamps at 580 kHz across a bond whose impedance at that frequency is
     the loom's inductance, in series with every channel's signal return.
 
-    **The value is a trade and not a maximum**, which is why it is computed
-    rather than picked. A larger Y-capacitor takes more of the barrier current
-    locally and also lowers the impedance of the low-frequency loop that the
-    isolation exists to open -- so the same part that fixes the 580 kHz
-    problem re-creates a hum loop if it is made big enough. Both directions
-    are below, and 100 nF is where the residual at 580 kHz and the injection
-    at 100 Hz are both small: the second is helped by the fact that the bond's
-    impedance at 100 Hz is its resistance, milliohms, and not the fraction of
-    an ohm it presents at half a megahertz.
+    **The value of C810 is a trade and not a maximum**, which is why it is
+    computed rather than picked. A larger Y-capacitor takes more of the
+    barrier current locally and also lowers the impedance of the
+    low-frequency loop that the isolation exists to open -- so the same part
+    that fixes the 580 kHz problem re-creates a hum loop if it is made big
+    enough. Both directions are below, and 470 nF is where the residual at
+    580 kHz and the injection at 100 Hz are both small: the second is helped
+    by the fact that the bond's impedance at 100 Hz is its resistance,
+    milliohms, and not the fraction of an ohm it presents at half a megahertz.
 
-    Two figures here are assumptions with ranges, and both are declared in
-    MEASURED because neither is on any datasheet: the switching node's
-    amplitude, and the inductance of the loop the shared inlet closes.
+    **The choke is the other side of that divider and it is fitted now.** The
+    split is Z_Y against Z_loop; a capacitor can only divide the first and
+    C810 is already at the largest value the 100 Hz side allows. L801 is
+    3.6 kohm at 580 kHz against a 2.8 ohm loop, so it multiplies the second by
+    1300 and the residual goes from 1.24 mV to about a microvolt -- from
+    18.7 dB *above* the mixer's own noise floor to 42 dB below it. See
+    INLET_CHOKE for the part and the four filters that chose it.
+
+    ------------------------------------------------------------------------
+    **The correction, and it is the reason fitting the part had to change the
+    function rather than just its argument.** This returned
+
+        bond_v = through_loop * z_loop
+
+    with z_loop the whole of MEASURED["inlet_loop_uh"] plus BOND_R_OHMS. That
+    is right -- pessimistically right -- while every ohm in the loop *is*
+    bond: the loop and the bond are the same conductor, so the current times
+    the loop impedance is the voltage across the thing the audio returns
+    share, and attributing all of the loom's inductance to the bond overstates
+    it in the safe direction.
+
+    **Fitting the choke breaks that identity, and it breaks it in the
+    direction that hides the result.** With 3.6 kohm of choke in the loop,
+    `through_loop * z_loop` is 1.5 mV -- *larger* than the 1.24 mV it reports
+    unfitted -- because the current falls by 1300 and the impedance it is
+    multiplied by rises by 1300. The function would have said the choke made
+    the design 0.4 dB worse, and every number downstream would have agreed
+    with it. The voltage across a choke on the primary side is not a voltage
+    in series with any audio return; it is the whole point of the part.
+
+    So the two impedances are separate now: `z_bond` is what the residual is
+    developed across, `z_choke` is what keeps the current out of it, and
+    `z_loop` is their sum and is only used as the denominator of the divider.
+    Nothing about the unfitted answer changes -- at choke_uh = 0 the two are
+    equal and this returns exactly what it returned before.
+
+    **What that says about the instrument, which is the part to keep.** The
+    old expression was not a wrong formula. It was a formula that was correct
+    only because two quantities happened to be the same number, with nothing
+    anywhere recording that they were different quantities. A design change
+    that separated them was always going to produce a confident wrong answer,
+    and the only warning was that the answer got worse when the part got
+    better. This repo's habit of printing a delta rather than a value is what
+    would have caught it, and did.
+    ------------------------------------------------------------------------
+
+    Three figures here are assumptions or tolerances rather than readings, and
+    all three are declared: the switching node's amplitude and the loop
+    inductance are in MEASURED, and the choke's own +/-50 % is the datasheet's
+    own tolerance, reported at both ends as `bond_v_low_l`.
     """
     c_y = c_y if c_y is not None else BARRIER_C_FARADS
     node_vpp = node_vpp or MEASURED["dcdc_node_v"].value
     loop_uh = loop_uh or MEASURED["inlet_loop_uh"].value
+    choke_uh = INLET_CHOKE_UH if choke_uh is None else choke_uh
     omega = 2 * math.pi * SUPPLY_KHZ_TYP * 1e3
     # Fundamental of the switching node, treated as a sine of the stated
     # peak-to-peak. A real flyback edge has more high-frequency content and
@@ -2518,11 +3106,20 @@ def barrier_return(c_y=None, node_vpp=None, loop_uh=None):
     drive_rms = node_vpp / (2 * math.sqrt(2))
     source_z = 1.0 / (omega * SUPPLY_ISO_PF)
     z_y = 1.0 / (omega * c_y) if c_y else math.inf
-    z_loop = omega * loop_uh * 1e-6 + BOND_R_OHMS
+    # The two halves of the return path, kept apart. z_bond is the conductor
+    # the audio shares; z_choke is in the same loop and in nothing else.
+    z_bond = omega * loop_uh * 1e-6 + BOND_R_OHMS
+    z_choke = omega * choke_uh * 1e-6
+    z_loop = z_bond + z_choke
     total = drive_rms / source_z
     through_loop = total * z_y / (z_y + z_loop)
+    # The same arithmetic at the bottom of the choke's tolerance band, which
+    # is what the design has to survive: 1000 uH +/-50 % is 500 uH minimum.
+    z_low = z_bond + z_choke * (1 - INLET_CHOKE_TOLERANCE)
+    through_low = total * z_y / (z_y + z_low)
     # At 100 Hz the same loop is resistive: the bond is 0R plus wire, and the
-    # Y-capacitor is what limits the current.
+    # Y-capacitor is what limits the current. The choke does not appear --
+    # 1 mH is 0.63 ohm there, against 3.4 kohm of capacitor.
     hum_omega = 2 * math.pi * 100.0
     hum_z = 1.0 / (hum_omega * c_y) if c_y else math.inf
     hum_current = LOOP_EMF_V / hum_z
@@ -2530,16 +3127,29 @@ def barrier_return(c_y=None, node_vpp=None, loop_uh=None):
     # band, not the whole 20 kHz: a third octave at 100 Hz is 23.1 Hz wide.
     third_octave = 100.0 * (2 ** (1 / 6.0) - 2 ** (-1 / 6.0))
     floor = MEASURED["noise_floor"].value * math.sqrt(third_octave / BANDWIDTH)
+    bond_v = through_loop * z_bond
     return {
         "c_y": c_y,
         "node_vpp": node_vpp,
         "loop_uh": loop_uh,
+        "choke_uh": choke_uh,
         "barrier_ma": total * 1e3,
         "local_fraction": 1.0 - through_loop / total,
         "through_bond_ma": through_loop * 1e3,
-        "bond_v": through_loop * z_loop,
-        "bond_v_unfitted": total * z_loop,
+        "bond_v": bond_v,
+        # Both references the fitted answer is quoted against. The first is
+        # no Y-capacitor and no choke -- every milliamp on the bond; the
+        # second is C810 alone, which is where this block stood before L801.
+        "bond_v_unfitted": total * z_bond,
+        "bond_v_no_choke": (total * z_y / (z_y + z_bond)) * z_bond,
+        "bond_v_low_l": through_low * z_bond,
         "improvement_db": 20 * math.log10(total / through_loop),
+        # The residual against the mixer's own noise floor, which is the
+        # comparison that decides whether another part is worth fitting.
+        # Positive is above the floor.
+        "floor_db": 20 * math.log10(bond_v / MEASURED["noise_floor"].value),
+        "floor_db_low_l": 20 * math.log10(
+            through_low * z_bond / MEASURED["noise_floor"].value),
         "hum_current_a": hum_current,
         "hum_v": hum_current * BOND_R_OHMS,
         "hum_floor_v": floor,
@@ -2547,6 +3157,8 @@ def barrier_return(c_y=None, node_vpp=None, loop_uh=None):
             floor / (hum_current * BOND_R_OHMS)),
         "noise_floor_v": MEASURED["noise_floor"].value,
         "z_y": z_y,
+        "z_bond": z_bond,
+        "z_choke": z_choke,
         "z_loop": z_loop,
     }
 
@@ -2606,22 +3218,50 @@ def inlet_budget():
     beside. Recorded rather than acted on: the mixer is fabricated and nothing
     here touches it, but the *brick* is a system-level part and somebody
     ordering one from that string would order the wrong thing.
+
+    **The choke is in this budget twice and only one of them costs anything.**
+    Its rated current has to clear the working current, which it does by 2.1x;
+    and both of its windings carry that current, so the DC loop gains
+    2 x RDC of series resistance. That drop comes out of the converter's own
+    input headroom, which is 9 V against a 12 V brick -- so the number worth
+    printing is not the drop but what is left of the margin after it.
     """
     fit = supply_fit()
     watts_in = fit["watts"] / SUPPLY_EFFICIENCY
     low, high = INLET_VOLTS
-    module_ma = {volts: watts_in / (volts - INLET_DIODE_VF) * 1e3
-                 for volts in (low, high)}
+    choke_r = 2 * INLET_CHOKE_RDC
+    # Solved rather than iterated: the converter is a constant-power load, so
+    # V_in x I = W with V_in = V_brick - Vf - I x R_choke gives a quadratic in
+    # I. R x I^2 - (V - Vf) x I + W = 0, and the root that matters is the
+    # small one.
+    module_ma = {}
+    for volts in (low, high):
+        head = volts - INLET_DIODE_VF
+        disc = head * head - 4 * choke_r * watts_in
+        current = (head - math.sqrt(disc)) / (2 * choke_r)
+        module_ma[volts] = current * 1e3
+    worst = max(module_ma.values())
     return {
         "watts_out": fit["watts"],
         "watts_in": watts_in,
         "module_ma": module_ma,
-        "worst_ma": max(module_ma.values()),
+        "worst_ma": worst,
         "mixer_ma": 25.0,
-        "total_ma": max(module_ma.values()) + 25.0,
+        "total_ma": worst + 25.0,
         "mixer_range": socket.SUPPLY_RANGE,
         "fuse_a": SUPPLY_FUSE_A,
-        "diode_watts": max(module_ma.values()) * 1e-3 * INLET_DIODE_VF,
+        "diode_watts": worst * 1e-3 * INLET_DIODE_VF,
+        # The choke's own two lines.
+        "choke_ohms": choke_r,
+        "choke_drop_v": worst * 1e-3 * choke_r,
+        "choke_watts": (worst * 1e-3) ** 2 * choke_r,
+        "choke_rated_ma": INLET_CHOKE_IR_MA,
+        "choke_margin": INLET_CHOKE_IR_MA / worst,
+        # What the converter's +Vin pin sees at the bottom of the brick range,
+        # against its own 9 V minimum.
+        "converter_vin_low": (low - INLET_DIODE_VF
+                              - module_ma[low] * 1e-3 * choke_r),
+        "converter_vin_min": SUPPLY_VIN[0],
     }
 
 
@@ -3109,7 +3749,33 @@ LIBS = {
     # And the regulator from AP1117-50, which is the same 1117 pin map -- 1
     # Adjust/Ground, 2 Output and the tab, 3 Input -- at the same 5.0 V.
     "cv:NCP1117-5.0": ("cv", "Regulator_Linear", "AP1117-50", "NCP1117-5.0"),
+    # The 3.3 V regulator, and this one is *not* borrowed: KiCad ships the
+    # MCP1700 in its SOT-23 variant under its own name, so the only reason it
+    # is under the cv nickname is that gen_project.py writes one library.
+    "cv:MCP1700-3.3": ("cv", "Regulator_Linear", "MCP1700x-330xxTT",
+                       "MCP1700-3.3"),
+    # **The ADC, and it is the largest repinning in this table.** KiCad has no
+    # MCP3564. What it has is the ADS131M04 -- the four-channel sibling of the
+    # part this design rejected -- and that symbol is a 20-pin TSSOP whose
+    # four corners already agree: 1 AVDD, 2 AGND, 19 DGND, 20 DVDD. The
+    # sixteen pins between them are renamed to ENV_ADC_PINS.
+    #
+    # Borrowing the *loser's* symbol is worth a sentence, because it looks
+    # like a mistake and is the opposite of one. A symbol carries a pin map
+    # and a body, and nothing else; what separated the two candidates was full
+    # scale and reference range, which live in neither. The alternative was to
+    # draw a 20-pin rectangle from scratch, which is a second place for a pin
+    # map to be wrong -- the same argument the relay's renumbering makes.
+    "cv:MCP3564": ("cv", "Analog_ADC", "ADS131M04xPW", "MCP3564"),
     "Device:D_Schottky": ("Device", "Device", "D_Schottky", None),
+    # The inlet choke. The generic four-terminal symbol and not a
+    # part-specific one, and the suffix is load-bearing: _1423 puts 1 and 4 on
+    # the top winding and 2 and 3 on the bottom, which is the 744222's own
+    # Schematic block. _1234 would draw the same body with the windings paired
+    # 1-2 and 3-4 -- the connection that puts the choke in series with the
+    # supply current instead of across it, and it draws identically.
+    "cv:744222": ("cv", "Filter", "Choke_CommonMode_FerriteCore_1423",
+                  "744222"),
     "power:GNDA": ("power", "power", "GNDA", None),
     "power:GNDD": ("power", "power", "GNDD", None),
     "power:PWR_FLAG": ("power", "power", "PWR_FLAG", None),
@@ -3234,6 +3900,28 @@ def patch_symbol(lib_id, definition):
                       "Quad current-in/current-out VCA, Blackmer core, SOP-16")
         for cell in VCA_CHANNEL_PINS.values():
             _repin(definition, cell["IOUT"], "passive")
+    elif lib_id.endswith(":MCP3564"):
+        _set_property(definition, "Datasheet", ENV_ADC_DATASHEET)
+        _set_property(definition, "Description",
+                      "8-channel 24-bit delta-sigma ADC, SCAN sequencer, "
+                      "20-lead TSSOP")
+        # Every pin between the four corners, by number, from page 3 of
+        # DS20006181C. The corners are left alone because the borrowed symbol
+        # already has them right -- and leaving them alone is what makes this
+        # a rename rather than a redraw.
+        for name, kind in (("REFIN-", "input"), ("REFIN+", "input"),
+                           ("CH0", "input"), ("CH1", "input"),
+                           ("CH2", "input"), ("CH3", "input"),
+                           ("CH4", "input"), ("CH5", "input"),
+                           ("CH6", "input"), ("CH7", "input"),
+                           ("CS", "input"), ("SCK", "input"),
+                           ("SDI", "input"), ("SDO", "tri_state"),
+                           ("IRQ", "open_collector"), ("MCLK", "input")):
+            _repin(definition, ENV_ADC_PINS[name], kind, name=name)
+    elif lib_id.endswith(":MCP1700-3.3"):
+        _set_property(definition, "Datasheet", V3V3_DATASHEET)
+        _set_property(definition, "Description",
+                      "3.3 V 250 mA LDO, 1.6 uA quiescent, SOT-23")
     elif lib_id.endswith(":Relay"):
         # **The generic symbol is IEC-numbered and the chosen relay is not.**
         # KiCad's Relay_DPDT carries A1/A2 and 11/12/14, 21/22/24, which was
@@ -3275,6 +3963,31 @@ SOD123F_FP = "Diode_SMD:D_SOD-123F"
 SOT523_FP = "Package_TO_SOT_SMD:SOT-523"
 RELAY_FP = "Relay_SMD:Relay_DPDT_Omron_G6S-2F"
 SOT23_FP = "Package_TO_SOT_SMD:SOT-23"
+# The inlet choke, and **KiCad's own footprint is fine as it stands**, which
+# is worth stating because the opposite was expected. These four-terminal
+# bodies draw their courtyard as a run of fp_line segments rather than as one
+# rectangle -- WE-SL5 uses four, ACM7060 and DR331 twelve each -- and
+# placement.SIZE and gen_pcb.check_courtyards() are both written around a
+# rectangle. The two facts do not meet: what check_courtyards() reads is
+# `GetCourtyard(F_CrtYd).BBox()`, and KiCad builds that polygon from whatever
+# closed outline is on the layer, however many segments it took. All four
+# candidate footprints return exactly one closed outline and a bounding box
+# (WE-SL2 10.090 x 6.590, measured). So neither of the two things this could
+# have needed -- a generated footprint like the TMR 6WI's, or a polygon-aware
+# courtyard check -- is needed at all.
+#
+# **The mistake worth recording is the shape of the claim**, not the claim: a
+# statement about how a drawing is *drawn* was read as a statement about what
+# the API *returns*. The distinction is invisible from the .kicad_mod source,
+# which is where the polylines are, and takes one call to settle.
+CHOKE_FP = "Inductor_SMD:L_CommonMode_Wuerth_WE-SL2"
+# The ADC's own body. 20-lead TSSOP, 4.4 x 6.5 mm, which is the leaded option
+# of the two the datasheet offers -- the other is a 3 x 3 mm UQFN with a
+# thermal pad. Leaded on purpose and it is the same argument the DPAK made at
+# v5_regulator(): this is a spike whose board a person has to be able to
+# inspect and rework, and a 0.5 mm-pitch QFN under a microscope is a different
+# kind of project. The part dissipates 6 mW, so the pad buys nothing here.
+TSSOP20_FP = "Package_SO:TSSOP-20_4.4x6.5mm_P0.65mm"
 # The supply's own three, and the first of them is this repo's first footprint.
 #
 # **KiCad has no TMR 6WI land pattern and the two it has that look like one are
@@ -3345,6 +4058,15 @@ ORDER_CODES = {
     V5_PART:          V5_MPN,
     INLET_DIODE:      "B340A-13-F",
     RAIL_FILTER_R:    "RC0805FR-074R7L",
+    # Wurth print their own order code as the bare number, and it is the whole
+    # part number: no package suffix, because the series is one package.
+    INLET_CHOKE:      "744222",
+    # E is the extended temperature grade and ST is the 20-lead TSSOP. The
+    # tube part rather than MCP3564T-E/ST, which is the same die on tape.
+    ENV_ADC:          ENV_ADC_MPN,
+    # T here is *not* a grade: for the SOT-23 and SOT-89 packages the MCP1700
+    # is only sold on tape, so the T is part of the code rather than a choice.
+    V3V3_PART:        V3V3_MPN,
     "10u/50V X7R":    "GRM32ER71H106KA12L",
 }
 
@@ -3454,12 +4176,18 @@ DEFERRED = {
     "controller": "RP2040 and its QSPI flash, crystal, USB and MIDI: shared "
                   "block, and the scope statement puts shared blocks after "
                   "one channel is complete.",
-    "envelope ADC": "ADS131M08 or MCP3564, undecided in spec section 4.4 -- "
-                    "but its sample rate is decided now, at 2 kHz rather than "
-                    "the 1-2 kHz the spec offers, and the six ENV{n} nets "
-                    "exist and are driven. See envelope_sample_rate(); the "
-                    "ADC hangs off them, in the analogue section, so that only "
-                    "SPI crosses the domain boundary.",
+    # **"envelope ADC" was here and it is drawn.** Its reason read
+    # "ADS131M08 or MCP3564, undecided in spec section 4.4", and what settled
+    # it was neither channel count nor price: the ADS131M08's external
+    # reference input tops out at 1.3 V, so its full scale at unity gain is
+    # 1.20 V against socket.clipping_peak()'s 1.233 -- it clips 0.24 dB below
+    # the level it exists to measure. See ENV_ADC.
+    #
+    # Deferral had hidden four disagreements about a block nobody had drawn:
+    # which domain it is in, whether this board has a 3.3 V rail, how many
+    # signals cross, and whether "only SPI" was four things or six. That is
+    # the same lesson zone P taught about the converter, and this time it was
+    # looked for first.
     # "relay drive" was here -- 2 x TPIC6B595 and the 74LVC1G123 one-shot,
     # section 4.5. It existed only to drive the coarse pad's coils and goes
     # with it. Section 4.5 calls the one-shot's absence "the
@@ -3537,8 +4265,41 @@ class Design:
         for net, entries in self.nets.items():
             assert len(entries) >= 2, f"net {net} has only {entries}"
         self.check_net_potentials()
+        self.check_rails_are_drawn()
         self.check_pin_numbers()
         self.check_orderable()
+
+    def check_rails_are_drawn(self):
+        """Every rail RAILS declares is a net some part is on.
+
+        **The instrument V3V3 needed and nothing had.** RAILS has carried
+        "V3V3": 3.3 since the first pass and no net of that name existed
+        anywhere, while docs/supply-decision.md's own correction index said
+        flatly that this board has no 3.3 V rail. Two artefacts, one saying a
+        rail exists and one saying it does not, both consumed -- NET_DC reads
+        RAILS, supply_requirement() named its three rails by hand -- and
+        nothing could tell them apart, because **a rail with no net is
+        invisible to every check that walks nets**, which is all of them.
+
+        That is zone P one artefact along. A deferred block is not drawn, so
+        the things it would have made real stay declarations, and a
+        declaration nothing is obliged to use cannot be wrong. The general
+        form: a table that is read by consumers is not thereby checked by
+        them, because a consumer that finds nothing to do is a consumer that
+        passes.
+
+        The other direction is deliberately not checked. A net that carries a
+        rail and is missing from RAILS is caught by check_net_potentials(),
+        which refuses any net with no NET_DC entry, and NET_DC is built from
+        RAILS -- so the two halves are already covered by different means.
+        """
+        undrawn = sorted(name for name in RAILS if name not in self.nets)
+        if undrawn:
+            raise AssertionError(
+                f"RAILS declares {', '.join(undrawn)} and no part is on "
+                f"{'them' if len(undrawn) > 1 else 'it'} -- either draw the "
+                f"rail or stop declaring it. A rail that exists only in RAILS "
+                f"is a claim no check can reach")
 
     def check_net_potentials(self):
         """Every net declares what DC potential it sits at.
@@ -3747,6 +4508,13 @@ for _n in range(1, CHANNELS + 1):
 NET_DC["IGND"] = 0.0
 NET_DC["VIN"] = (0.0, INLET_UNLOADED_MAX)
 NET_DC["VIN_P"] = (0.0, INLET_UNLOADED_MAX - INLET_DIODE_VF)
+# The jack side of the choke. Two more nets rather than a longer VIN, because
+# L801 is a *part* between them and a net that spans a winding is a net that
+# says the winding is not there. Same potentials as their partners -- the
+# choke's differential drop is 160 mV -- and the names carry the J because
+# what distinguishes them is which side of the choke they are on.
+NET_DC["VIN_J"] = (0.0, INLET_UNLOADED_MAX)
+NET_DC["IGND_J"] = 0.0
 # The converter's own output pins, ahead of the rail filter and of the 5 V
 # regulator. Named RAW because that is what they are: 75 mVp-p of 580 kHz on
 # them is a datasheet maximum, and VA+/VA- are what is left after rail_filter().
@@ -3786,6 +4554,21 @@ for _index, _key in enumerate(sorted(k for k in SECTIONS if k[0] == "spare")):
 # bounding it by the rails it lives between is the honest declaration. That is
 # enough for the polarity and rating checks C801 needs and it is not a reading.
 NET_DC["VNR"] = (0.0, VREF)
+
+# The envelope ADC. ENVA{n} is ENV{n} through the divider, so it is positive
+# by the same construction and bounded by envelope_adc_input()["at_swing"]
+# rather than by a rail -- which is the whole point of the divider and is
+# worth declaring as a *number* rather than as MODULE_RAIL, because that is
+# the claim the part's absolute input rating rests on.
+for _n in range(1, CHANNELS + 1):
+    NET_DC[f"ENVA{_n}"] = (0.0, round(
+        (MODULE_RAIL - OPAMP_SWING_HEADROOM)
+        * ENV_ADC_R_BOT_OHMS / (ENV_ADC_R_TOP_OHMS + ENV_ADC_R_BOT_OHMS), 3))
+# The SPI, and MCLK with it. All six are V3V3 logic, and all six cross the
+# analogue/digital boundary -- see floorplan.CROSSINGS, where the direction
+# claim had to be corrected to a level claim to accommodate SDO and IRQ.
+for _name in ("SCLK", "MOSI", "MISO", "CS", "MCLK", "IRQ"):
+    NET_DC[_name] = (0.0, RAILS["V3V3"])
 
 
 def net_dc(net):
@@ -4122,6 +4905,142 @@ def envelope(design, n):
     design.connect("MAGND", (package, non_inverting))
 
 
+def envelope_adc(design):
+    """The ADC, its 3.3 V rail, the six input networks and the SPI out.
+
+    Spec section 4.4's "external SPI ADC placed in the analogue section", and
+    the reason it is in the analogue section is the count: six analogue traces
+    crossing the boundary against six logic ones, with the logic ones each
+    tolerating about 1.5 V of ground offset and the analogue ones about
+    0.1 mV. That is floorplan.CROSSING_RULE's arithmetic and it is unchanged;
+    what changed is that the rule said *four* signals and named them by
+    direction. There are six and two of them go the other way. See
+    envelope_adc_clock() for why MCLK is one of them.
+
+        ENV{n} --R{n}56--+--R{n}57--+ MAGND        U18: V5 -> V3V3
+                         |          |
+                         +--C{n}52--+              U17: CH{n-1}
+                        ENVA{n}                         REFIN+ = VREF
+                                                        AGND = DGND = MAGND
+
+    **AGND and DGND are the same net here, and it is the datasheet's own
+    second option rather than a shortcut.** Section 7.3 offers two schemes:
+    two supplies and two grounds joined at a star, or "consider the
+    MCP3561/2/4 as an analog component, and therefore, connect AVDD to DVDD
+    and AGND to DGND with a star connection", whose stated cost is that "the
+    decoupling capacitors may be larger, due to the ripple on the digital
+    power supply ... now causing glitches on the analog power supply". This
+    board already has a star -- R902 -- and putting the ADC's own second star
+    beside it would be two joins between two domains, which is precisely the
+    thing floorplan.py exists to forbid. So the part is analogue, entirely,
+    and the boundary stays where it is.
+    """
+    # -- the 3.3 V rail ----------------------------------------------------
+    #
+    # From V5 and not from VA+, and the part's own 6.0 V input rating is what
+    # makes that a fact rather than a preference. See V3V3_PART.
+    design.add(Part(V3V3_REF, V3V3_PART, SOT23_FP, mpn=V3V3_MPN,
+                    description="+3.3 V for the envelope ADC, from V5. "
+                                "1.6 uA of quiescent current, which is what "
+                                "keeps it off the converter's headroom -- "
+                                "see supply_fit()"))
+    design.connect("V5", (V3V3_REF, V5_PINS["VI"]))
+    design.connect("V3V3", (V3V3_REF, V5_PINS["VO"]))
+    design.connect("MAGND", (V3V3_REF, V5_PINS["GND"]))
+    # The datasheet's own CIN and COUT, at its own value: every figure in its
+    # electrical table is specified at 1 uF of each. **The MCP3564 asks for
+    # 10 uF here and it is declined**, for the reason the reference's own
+    # bulk capacitor was: a larger output capacitor is a change to a
+    # regulator's loop that its datasheet has not qualified, and "stable with
+    # 1.0 uF ceramic output capacitor" is the only claim this one makes.
+    _capacitor(design, "C815", V3V3_CAP, "V5", "MAGND", footprint=C_FP,
+               description="U18 input capacitor, 1 uF -- the datasheet's own "
+                           "test condition")
+    _capacitor(design, "C816", V3V3_CAP, "V3V3", "MAGND", footprint=C_FP,
+               description="U18 output capacitor, 1 uF -- the value its "
+                           "stability is stated at")
+
+    # -- the six input networks -------------------------------------------
+    for n in range(1, CHANNELS + 1):
+        _resistor(design, f"R{n}56", ENV_ADC_R_TOP, f"ENV{n}", f"ENVA{n}",
+                  description=f"Channel {n} ADC divider, upper -- see "
+                              f"envelope_adc_input(): the ratio is set by the "
+                              f"largest voltage stage B can produce, not by "
+                              f"the largest it should")
+        _resistor(design, f"R{n}57", ENV_ADC_R_BOT, f"ENVA{n}", "MAGND",
+                  description=f"Channel {n} ADC divider, lower")
+        _capacitor(design, f"C{n}52", ENV_ADC_C, f"ENVA{n}", "MAGND",
+                   description=f"Channel {n} ADC anti-alias, "
+                               f"{envelope_adc_input()['corner_hz'] / 1e3:.1f}"
+                               f" kHz against DMCLK")
+
+    # -- the converter -----------------------------------------------------
+    design.add(Part(ENV_ADC_REF, ENV_ADC, TSSOP20_FP, mpn=ENV_ADC_MPN,
+                    description="Envelope ADC: 8 single-ended channels, "
+                                "SCAN sequencer, 24-bit. Six used at "
+                                f"{ENV_SAMPLE_HZ / 1e3:.0f} kHz each -- see "
+                                "envelope_sample_rate()"))
+    design.connect("V3V3", (ENV_ADC_REF, ENV_ADC_PINS["AVDD"]),
+                   (ENV_ADC_REF, ENV_ADC_PINS["DVDD"]))
+    design.connect("MAGND", (ENV_ADC_REF, ENV_ADC_PINS["AGND"]),
+                   (ENV_ADC_REF, ENV_ADC_PINS["DGND"]),
+                   # "For single-ended reference applications, the REFIN- pin
+                   # should be directly connected to AGND" -- DS20006181C 3.2,
+                   # and note 3 of the electrical table says the same.
+                   (ENV_ADC_REF, ENV_ADC_PINS["REFIN-"]))
+    design.connect("VREF", (ENV_ADC_REF, ENV_ADC_PINS["REFIN+"]))
+    for n in range(1, CHANNELS + 1):
+        design.connect(f"ENVA{n}",
+                       (ENV_ADC_REF, ENV_ADC_PINS[ENV_ADC_CHANNEL[n]]))
+    # **The two spare channels are grounded, not flagged, and which two they
+    # are is a routing decision.** They are analogue inputs on a part whose own
+    # note asks for AGND on an unconnected pin "for a better susceptibility to
+    # electromagnetic fields", and an input left open inside a multiplexer is a
+    # floating node the SCAN sequencer can be told to read. A no-connect flag
+    # would declare the opposite of what is wanted -- see NO_CONNECT, which is
+    # for pins that must stay open. See ENV_ADC_CHANNEL for why they are CH4
+    # and CH7 rather than CH6 and CH7.
+    design.connect("MAGND", *[(ENV_ADC_REF, ENV_ADC_PINS[name])
+                              for name in ENV_ADC_GROUNDED])
+    for name, net in (("SCK", "SCLK"), ("SDI", "MOSI"), ("SDO", "MISO"),
+                      ("CS", "CS"), ("MCLK", "MCLK"), ("IRQ", "IRQ")):
+        design.connect(net, (ENV_ADC_REF, ENV_ADC_PINS[name]))
+    # Local decoupling at the two supply pins and at the reference input.
+    # envelope_adc_reference() is why the third of these is 100 nF and not the
+    # 10 uF its own datasheet suggests.
+    for ref, net, note in (
+            ("C817", "V3V3", "U17 AVDD decoupling, at the pin"),
+            ("C818", "V3V3", "U17 DVDD decoupling, at the pin"),
+            ("C819", "VREF", "U17 REFIN+ decoupling -- 100 nF and not the "
+                             "10 uF DS20006181C suggests, because VREF's one "
+                             "bulk capacitor is already fitted. See "
+                             "envelope_adc_reference()")):
+        _capacitor(design, ref, ENV_ADC_LOCAL, net, "MAGND", description=note)
+
+    # -- out to the deferred controller ------------------------------------
+    #
+    # Two more of the mixer's own 5-way headers, with a ground between the
+    # signals that need one, exactly as J9-J11. The order is not arbitrary:
+    # the two clocks sit in the *middle* of their connectors so that each has
+    # a ground on both sides, and the three that are static or slow take the
+    # ends.
+    design.add(Part("J12", "SPI", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
+                    description="To the RP2040 (DEFERRED): 1=MOSI, 3=SCLK, "
+                                "5=MISO, grounds between. SCLK is in the "
+                                "middle because it is the fast one"))
+    for pin, net in ((1, "MOSI"), (2, "MDGND"), (3, "SCLK"),
+                     (4, "MDGND"), (5, "MISO")):
+        design.connect(net, ("J12", pin))
+    design.add(Part("J13", "SPI2", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
+                    description="To the RP2040 (DEFERRED): 1=CS, 3=MCLK, "
+                                "5=IRQ. MCLK is the continuous clock this "
+                                "board asks the controller for -- see "
+                                "envelope_adc_clock()"))
+    for pin, net in ((1, "CS"), (2, "MDGND"), (3, "MCLK"),
+                     (4, "MDGND"), (5, "IRQ")):
+        design.connect(net, ("J13", pin))
+
+
 def shared(design):
     """The reference, the logic buffer, the amplifiers and the two ground stars.
 
@@ -4378,8 +5297,28 @@ def supply(design):
                                 f"parallel with the mixer's own J8 at the "
                                 f"barrel jack: 1=sleeve (+), 2=centre pin "
                                 f"(0 V). Primary side -- see IGND"))
-    design.connect("VIN", ("J8", 1))
-    design.connect("IGND", ("J8", 2))
+    design.connect("VIN_J", ("J8", 1))
+    design.connect("IGND_J", ("J8", 2))
+
+    # -- the common-mode choke, and it goes first for a reason ------------
+    #
+    # Everything else on the primary -- D804, the three decoupling
+    # capacitors, the converter's own +Vin and -Vin -- sits on the converter
+    # side of it. That is what makes the barrier's return current see 1 mH:
+    # the current arrives from the mixer through *both* inlet conductors at
+    # once, so what it meets has to be common mode to both, and a choke placed
+    # after the decoupling would have the capacitors shorting the pair
+    # together in front of it. See barrier_return(); the same part in the
+    # wrong place is worth 0 dB and looks identical on the sheet.
+    design.add(Part(INLET_CHOKE_REF, INLET_CHOKE, CHOKE_FP,
+                    mpn=INLET_CHOKE, description=(
+                        "Common-mode choke in the inlet pair, 2 x 1 mH, "
+                        "800 mA: the second half of barrier_return(). "
+                        "Windings are 1-4 and 2-3 -- see INLET_CHOKE_PINS")))
+    design.connect("VIN_J", (INLET_CHOKE_REF, INLET_CHOKE_PINS["L1_IN"]))
+    design.connect("VIN", (INLET_CHOKE_REF, INLET_CHOKE_PINS["L1_OUT"]))
+    design.connect("IGND_J", (INLET_CHOKE_REF, INLET_CHOKE_PINS["L2_IN"]))
+    design.connect("IGND", (INLET_CHOKE_REF, INLET_CHOKE_PINS["L2_OUT"]))
 
     # **There is no fuse here and the datasheet asks for one, so this is the
     # place to say why.** Its own line reads "Recommended Input Fuse, 24 Vin
@@ -4500,6 +5439,9 @@ def build():
     for n in range(1, CHANNELS + 1):
         channel(design, n)
         envelope(design, n)
+    # After the six, because it hangs off all of them: ENV{n} has to exist
+    # before the divider that reads it.
+    envelope_adc(design)
     design.check()
     return design
 
@@ -4567,7 +5509,18 @@ def reference_load():
     netlist rather than against this function, so a capacitor drawn onto VREF
     fails even when nothing in design.py changed.
     """
-    fitted = {"C802": VREF_RESERVOIR_FARADS, "C803": LOGIC_LOCAL_FARADS}
+    # **C819 is here because this assertion refused to let it be anywhere
+    # else.** The envelope ADC's REFIN+ hangs on VREF, so its local decoupling
+    # is a third capacitor on a net qualified for one bulk part -- and the
+    # first thing that happened when the block was drawn was this function
+    # stopping the build. That is the check working: it was written against a
+    # capacitor somebody might add without re-reading the stability range, and
+    # the somebody was this pass. See envelope_adc_reference() for why the
+    # value is 100 nF and not the 10 uF the ADC's own datasheet suggests --
+    # the second bulk capacitor is the fault C804 was deleted to remove, and
+    # it would have arrived here with a datasheet sentence recommending it.
+    fitted = {"C802": VREF_RESERVOIR_FARADS, "C803": LOGIC_LOCAL_FARADS,
+              "C819": 100e-9}
     # Cross-checked against the netlist, so a capacitor added to VREF cannot be
     # left out of the total by being left out of this dict.
     on_vref = {ref for ref, _ in NETS["VREF"] if ref.startswith("C")}
@@ -4789,6 +5742,55 @@ def _report():
               f"{row['folds_to_dc_hz']:.0f} Hz")
     print()
 
+    print(f"the envelope ADC -- {ENV_ADC}, and the full scale chose it")
+    adc = envelope_adc_input()
+    clk = envelope_adc_clock()
+    print(f"  ADS131M08 full scale     1.20 V at unity, against "
+          f"clipping_peak {socket.clipping_peak():.3f} V -- "
+          f"{20 * math.log10(1.20 / socket.clipping_peak()):+.2f} dB. Its "
+          f"reference input stops at 1.3 V")
+    print(f"  {ENV_ADC} full scale{VREF:>10.2f} V, "
+          f"{20 * math.log10(VREF / socket.clipping_peak()):+.2f} dB, on the "
+          f"board's own VREF")
+    print(f"  divider              {adc['ratio']:>10.4f}  "
+          f"({ENV_ADC_R_TOP} / {ENV_ADC_R_BOT}): "
+          f"{adc['swing']:.2f} V of amplifier swing becomes "
+          f"{adc['at_swing']:.2f}, inside a {adc['full_scale']:.1f} V full "
+          f"scale and a {adc['absolute_max']:.1f} V absolute rating")
+    print(f"  -> no input can reach a voltage that needs clamping, so no ESD "
+          f"current is ever injected into a 3.3 V rail that cannot sink it")
+    print(f"  clipping_peak lands at   {adc['clipping_peak_fraction'] * 100:.1f}"
+          f" % of full scale, giving up {adc['range_given_up_db']:.1f} dB")
+    print(f"  loading error        {adc['load_error'] * 100:>10.2f} %  "
+          f"(Z_IN {adc['z_in'] / 1e3:.0f} kohm at this AMCLK; common to all "
+          f"six, so a law error)")
+    print(f"  anti-alias           {adc['corner_hz'] / 1e3:>10.1f} kHz  "
+          f"({adc['droop_db']:+.3f} dB at the top string's ripple, "
+          f"{20 * math.log10(clk['dmclk'] / adc['corner_hz']):.0f} dB at "
+          f"DMCLK)")
+    print(f"  six channels at {ENV_SAMPLE_HZ / 1e3:.0f} kHz need a master "
+          f"clock, and the part's own RC cannot make it:")
+    for osr, row in sorted(clk["rows"].items()):
+        print(f"    OSR {osr:>4}  {row['bits']:>2} bits  MCLK >= "
+              f"{row['mclk_min'] / 1e6:>6.3f} MHz  "
+              f"{'' if row['fits'] else '(over the 20 MHz limit)':<24}"
+              f"  internal RC gives "
+              f"{row['internal_rate_low']:>4.0f}-{row['internal_rate_high']:.0f} Hz"
+              f"{'   <- fitted' if osr == clk['osr'] else ''}")
+    print(f"  -> internal oscillator is {clk['internal_short_db']:.1f} dB "
+          f"short at its best setting, so MCLK is external and crosses the "
+          f"boundary. That is the multiplexer's bill")
+    ref = envelope_adc_reference()
+    print(f"  REFIN+ decoupling    {ref['local_farads'] * 1e9:>10.0f} nF  "
+          f"and not the 10 uF its datasheet suggests: VREF already carries "
+          f"{ref['existing_bulk'] * 1e6:.1f} uF against a "
+          f"{ref['ceiling_farads'] * 1e6:.0f} uF ceiling")
+    print(f"  -> the reference input current is unspecified; it would have to "
+          f"reach {ref['current_to_move_100uv_ma']:.1f} mA to move VREF by "
+          f"100 uV, against {ref['logic_load_ma'] * 1e3:.0f} uA for the whole "
+          f"'541")
+    print()
+
     print("DC servo, and constraint 3")
     s = servo_residual()
     print(f"  integrator corner    {s['corner']:>8.2f} Hz")
@@ -4917,10 +5919,21 @@ def _report():
           f"which is {rails['lc_peak_db']:.0f} dB at "
           f"{rails['corner_hz'] / 1e3:.1f} kHz -- hence a resistor")
     print(f"  barrier              {barrier['barrier_ma'] * 1e3:>7.0f} uA "
-          f"through {SUPPLY_ISO_PF * 1e12:.0f} pF; "
-          f"{barrier['local_fraction'] * 100:.0f} % returns locally, "
-          f"{barrier['bond_v'] * 1e3:.2f} mV left across the bond against "
-          f"{barrier['bond_v_unfitted'] * 1e3:.1f} unfitted")
+          f"through {SUPPLY_ISO_PF * 1e12:.0f} pF, and the bond carries "
+          f"{barrier['bond_v'] * 1e6:.2f} uV of it")
+    print(f"    {barrier['bond_v_unfitted'] * 1e3:.2f} mV bare, "
+          f"{barrier['bond_v_no_choke'] * 1e3:.2f} mV with C810 alone, "
+          f"{barrier['bond_v'] * 1e6:.2f} uV with L801 -- "
+          f"{barrier['floor_db']:+.0f} dB against the mixer's noise floor, "
+          f"{barrier['floor_db_low_l']:+.0f} at the choke's -50 %")
+    print(f"    Z_Y {barrier['z_y']:.2f} ohm against Z_bond "
+          f"{barrier['z_bond']:.2f} and Z_choke "
+          f"{barrier['z_choke'] / 1e3:.2f} kohm: the capacitor divides the "
+          f"first, the choke multiplies the second")
+    print(f"  the inlet choke      {inlet['choke_drop_v'] * 1e3:>7.0f} mV of "
+          f"DC drop at {inlet['worst_ma']:.0f} mA, "
+          f"{inlet['choke_margin']:.1f}x inside its rating; the converter "
+          f"sees {inlet['converter_vin_low']:.1f} V of its 9 V minimum")
     print(f"  V5 regulator         {regulator['watts']:>7.2f} W: "
           + ", ".join(f"{name} {rise:.0f} C rise"
                       for name, rise in sorted(regulator['rises'].items()))

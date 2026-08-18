@@ -479,6 +479,82 @@ def _(nets, values, open_pins, violations, drc, board):
     nets["IGND"].add(("R902", "1"))
 
 
+# **The choke's windings, and this is the one fault on the board that no
+# drawing can show.** Pairing 1-2 and 4-3 instead of 1-4 and 2-3 is the same
+# four wires between the same four pins: the schematic is identical to a
+# reader, ERC counts the same pins, DRC sees the same copper, and the module
+# powers up. What it does is put 1 mH in series with 389 mA of supply current
+# instead of 3.6 kohm across the common-mode path barrier_return() bought it
+# for -- and barrier_return() would go on reporting 1.1 uV at the bond,
+# because it reads a constant and not a netlist.
+@case("the inlet choke's windings are paired the wrong way",
+      verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    ref = design.INLET_CHOKE_REF
+    out1 = str(design.INLET_CHOKE_PINS["L1_OUT"])
+    in2 = str(design.INLET_CHOKE_PINS["L2_IN"])
+    nets["VIN"].discard((ref, out1))
+    nets["IGND_J"].discard((ref, in2))
+    nets["VIN"].add((ref, in2))
+    nets["IGND_J"].add((ref, out1))
+
+
+# The other half of the same part: the choke fitted after the decoupling
+# rather than before it, which is what "put the filter next to the converter"
+# would produce. IGND_J then reaches C807, and the primary allow-list is what
+# says which parts may touch which primary net.
+@case("the choke is fitted downstream of the primary decoupling",
+      verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["IGND"].discard(("C807", "2"))
+    nets["IGND_J"].add(("C807", "2"))
+
+
+# **The module's own star, and the fault is the tidy way to wire a DGND pin.**
+@case("the ADC's DGND goes to MDGND", verify.check_module_star)
+def _(nets, values, open_pins, violations, drc, board):
+    pin = str(design.ENV_ADC_PINS["DGND"])
+    nets["MAGND"].discard((design.ENV_ADC_REF, pin))
+    nets["MDGND"].add((design.ENV_ADC_REF, pin))
+
+
+@case("a second 0R bridges the two module grounds",
+      verify.check_module_star)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["MAGND"].add(("R903", "1"))
+    nets["MDGND"].add(("R903", "2"))
+
+
+# **The ADC's divider upside down, which is the fault that destroys the part.**
+# Two resistors in a divider are two resistors in a divider whichever way
+# round they are: the sheet is identical, the netlist has the same three
+# nodes, and both values are already on this BOM. The ratio goes from 0.185
+# to 0.815, so stage B at its rail arrives at the pin as 9.5 V against an
+# absolute maximum of 3.4.
+@case("the ADC's input divider is upside down", verify.check_envelope_adc)
+def _(nets, values, open_pins, violations, drc, board):
+    values["R356"], values["R357"] = values["R357"], values["R356"]
+
+
+@case("the ADC's reference is the rail instead of VREF",
+      verify.check_envelope_adc)
+def _(nets, values, open_pins, violations, drc, board):
+    pin = str(design.ENV_ADC_PINS["REFIN+"])
+    nets["VREF"].discard((design.ENV_ADC_REF, pin))
+    nets["V3V3"].add((design.ENV_ADC_REF, pin))
+
+
+@case("a spare ADC channel is left floating", verify.check_envelope_adc)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["MAGND"].discard((design.ENV_ADC_REF,
+                           str(design.ENV_ADC_PINS["CH7"])))
+
+
+@case("something extra loads the ADC divider", verify.check_envelope_adc)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["ENVA2"].add(("C999", "1"))
+
+
 # **Not a netlist fault at all, and it is the one that will actually happen.**
 # The converter's outputs are 250 mA each and the deferred controller and ADC
 # both land on VA+, one part at a time, with nothing in between to say when the

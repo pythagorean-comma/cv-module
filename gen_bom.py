@@ -131,6 +131,49 @@ PRICES = {
         "there for a forward drop that falls as the diode is run below its "
         "rating -- see design.INLET_DIODE."),
 
+    # The envelope ADC, and it is the second-largest line on this BOM after
+    # the converter. Worth seeing beside the part it beat: an ADS131M08 is a
+    # 32-pin QFN at about twice this, and it lost on a number that costs
+    # nothing to have -- reference input range. See design.ENV_ADC.
+    design.ENV_ADC: read(
+        5.35, "GBP", 1,
+        "https://www.digikey.co.uk/en/products/detail/microchip-technology/"
+        "MCP3564-E-ST/11618284",
+        "page fetched: \u00a35.35 at 1, \u00a34.46 at 25, \u00a34.05 at 100, "
+        "net of VAT, 599 in stock, \"20-TSSOP (0.173\", 4.40mm Width)\". The "
+        "tube part; MCP3564T-E/ST is the same die on tape. Datasheet "
+        "DS20006181C at " + design.ENV_ADC_DATASHEET + " -- fetched and read. "
+        "Microchip's own ww1 URL 301s to a filehandler that refuses an "
+        "automated fetch, which is the same obstacle the converter's own "
+        "datasheet had, and STYLE.md rule 10 says a link nobody can follow "
+        "is not a citation."),
+
+    design.V3V3_PART: read(
+        0.38, "GBP", 1,
+        "https://www.digikey.co.uk/en/products/detail/microchip-technology/"
+        "MCP1700T-3302E-TT/652676",
+        "page fetched: \u00a30.38 at 1, \u00a30.322 at 25, \u00a30.298 at "
+        "100, net of VAT, 81,458 in stock, SOT-23-3. Its 4 uA of quiescent "
+        "current is the whole reason a third linear rail was affordable: an "
+        "NCP1117 in the same position is 10 mA maximum, which is a third of "
+        "the converter's remaining headroom spent on a regulator's own "
+        "biasing. Datasheet DS20001826F at " + design.V3V3_DATASHEET + " -- "
+        "fetched; the 336 C/W this design uses is from DS21826B, which "
+        "publishes the minimum-pad figure revision F drops."),
+
+    design.INLET_CHOKE: read(
+        1.97, "GBP", 1,
+        "https://www.digikey.co.uk/en/products/detail/"
+        "w%C3%BCrth-elektronik/744222/1638889",
+        "page fetched: \u00a31.97 at 1, \u00a31.94 at 10, \u00a31.75 at 50, "
+        "\u00a31.69 at 100, \u00a31.37 at 1000 T&R, net of VAT, 12,641 in "
+        "stock. The listing's own \"1 mH @ 100 kHz\", 800 mA and 207 mOhm "
+        "agree with the datasheet read for design.INLET_CHOKE, and its "
+        "\"6 kOhms @ 4 MHz\" is the frequency the datasheet's Zmax row omits "
+        "-- which is what puts 580 kHz on the inductive slope rather than "
+        "over the peak. The datasheet is at "
+        + design.INLET_CHOKE_DATASHEET + " -- fetched and read."),
+
     design.RAIL_FILTER_R: band(
         0.01, 0.03, "GBP", 100,
         "0805 thick film. Two of them, and they are the rail filter: "

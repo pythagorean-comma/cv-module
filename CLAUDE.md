@@ -274,9 +274,132 @@ Three things about the block that must survive compaction:
   isolation — this module shares no rail with the mixer — and the fact that the
   product is second order. Do not re-derive the rule and stop there.
 * **Summing rail powers understates a linear rail.** `supply_requirement()`
-  says 3.10 W and the converter has to deliver 3.87, because V5 is made from
+  says 3.11 W and the converter has to deliver 3.89, because V5 is made from
   VA+ and leaves the converter at twelve volts. `supply_fit()` counts from the
-  converter's pins outward.
+  converter's pins outward, and every rail now carries a `source` so a child
+  rail is not counted twice.
+* **The barrier's return is a divider and both sides are fitted.** `C810`
+  divides `Z_Y`; `L801` — a WE-SL2 744222, 2 × 1 mH, immediately at `J8` and
+  ahead of every other primary part — multiplies `Z_loop`. Together they take
+  the 580 kHz residual at the audio bond from 7.15 mV bare to **1.14 µV**,
+  which is 42 dB under the mixer's own noise floor. The choke has to be at the
+  inlet: put it after the decoupling and the capacitors common the pair in
+  front of it, and the same part is worth 0 dB and draws identically.
+
+---
+
+## The two things drawing these blocks taught, and they are one thing
+
+**A declaration nothing is obliged to use cannot be wrong.** That is zone P's
+lesson generalised, and it cost two more findings this pass.
+
+`design.RAILS` had carried `"V3V3": 3.3` since the first pass with **no net of
+that name anywhere on the board**, while `docs/supply-decision.md`'s own
+correction index said flatly that this board has no 3.3 V rail. Both were
+consumed — `NET_DC` is built from `RAILS` — and neither could fail, because a
+rail with no net is invisible to every check that walks nets, and that is all
+of them. `Design.check_rails_are_drawn()` is the instrument, and it exists
+because the envelope ADC made V3V3 real.
+
+`barrier_return()` returned `through_loop * z_loop` as the voltage at the audio
+bond. That was not a wrong formula; it was a formula that was right only
+because two quantities happened to be the same number, with nothing recording
+that they were different quantities. Fitting the choke separated them, and the
+unfixed version reported the choke making the design **0.4 dB worse** — the
+current fell by 1300 and the impedance it was multiplied by rose by 1300. The
+only warning was that the answer got worse when the part got better.
+
+**And a rule whose stated test is narrower than its stated mechanism will be
+quoted long after it stops being true.** `floorplan.CROSSING_RULE` said "every
+crossing here is an *input* to the analogue domain" and gave the mechanism as
+logic threshold against precision output. Those are not the same test: a logic
+signal tolerates a ground offset in either direction. The ADC has to return
+data, so `MISO` and `IRQ` leave the analogue domain, and they are exactly as
+cheap as the six that enter. Nothing would have failed — `check_crossings()`
+reads `CROSSINGS`, not the prose — so the wrong sentence would have gone on
+being quoted.
+
+**What to do about it, and it is the only general answer this project has
+found:** when a deferred block is drawn, the first question is not "what does
+it need" but "what does the repo already believe about it, in how many places,
+and do those agree". Six places said something about the envelope ADC and four
+of them disagreed. That list is at the head of the ADC section in `design.py`.
+
+---
+
+## The router reaches a pad only if a cell lands inside it
+
+**`rules.pad_reach()`, and it is one line further out than
+`escape_corridor()`.** That function asks whether a track can pass *between*
+two pins; this asks whether one can *start* on one. `route.access()` will only
+join a net to a pad at a grid cell whose centre is inside the pad, so:
+
+* a pad holds a cell at **every** phase only if it is wider than the grid;
+* a pad can be at most `pin_pitch − clearance` wide, because two pads are two
+  nets.
+
+So a package is reachable at every placement only above **`grid + clearance`**
+of pitch — 0.70 mm here. A SOIC's 1.27 mm clears it by 0.57. **A TSSOP's
+0.65 mm misses by 0.05 mm**, so two of the ADC's ten pin rows hold no cell at
+any placement whatsoever, and no amount of room around the package changes it.
+Nor can the stub reach out: the nearest cell is 0.20–0.25 mm away and a track
+laid to it comes within 0.075 mm of the neighbouring pad against a 0.2 mm rule.
+
+What a placement *can* choose is **which** rows lose. `design.ENV_ADC_CHANNEL`
+spends that on the two grounded channels — the router skips MAGND entirely,
+because `stitch_grounds()` has already connected it — and the six strings take
+CH0–CH3, CH5 and CH6. The window is **45 µm wide**, so
+`gen_pcb.check_fine_pitch_access()` computes it against the grid the router
+actually builds and fails the build with the arithmetic. Anything added north
+of the ADC moves the board outline, which moves the grid origin, which moves
+the phase.
+
+**Three readings of the same symptom were wrong before this one.** Unrouted
+nets at a package read as congestion, then as "not enough room", then as "the
+wrong rotation" — and the first two cost a placement change each. From outside,
+an unreachable pad and a full board look identical.
+
+**And the check is two conditions, not one, because `Q801` is not a fault.**
+`route.access()` has a fallback — the nearest cell outside the pad — and it is
+safe exactly when the stub reaching it does not sweep another net's copper. A
+SOT-523's pads hold no cell in y either and that part has routed correctly on
+every build this board has had, because its neighbours are on the far side of
+the package. A check that fires on a working board is the fastest way to get a
+check switched off.
+
+---
+
+## Two claims in `route.py` were about a pad and were applied to a track
+
+Both were found by DRC, on the first board this project has built with a
+0.65 mm pin pitch on it, and both had been true for as long as every package
+was a SOIC.
+
+* **`block_pad_copper`** exempts a pad's own cells from clearance — *"a
+  segment inside a pad's own copper cannot be too close to anything, because
+  the pad already is not."* True of the pad. What the router draws there is a
+  **0.25 mm track**, and a TSSOP pad is 0.40 mm across, so a cell more than
+  **0.075 mm** off its centre line puts copper past the pad's edge and at the
+  neighbour. The box is inset by half a track now.
+* **`route.access()`**'s docstring says a pad with no free interior cell
+  "cannot be reached on this grid, and `route_all()` reports the net". Its last
+  line returned the nearest cell *outside* the pad — which is the only case
+  that line ever ran in. The fallback stays, because `Q801` needs it, but
+  `_stub_is_clear()` now tests the stub the way every other piece of track is
+  tested.
+
+**Neither was catchable from inside the router.** `check_no_shorts()` looks for
+shorts and both are clearances; the grid's own bookkeeping was correct, because
+in both cases the offending copper is the piece the grid does not own. The
+general form is this repo's oldest one, in a new place: **a claim that is true
+of one object, applied to a different object that happens to sit in the same
+cell.**
+
+**The number that measures it went up and the board got better.**
+`verify.UNROUTED_ITEMS` is 8, naming four nets, where before six of those
+connections were drawn 0.15 mm from a neighbouring pin. What closes it is a
+fan-out pass — fine-pitch escapes laid as fixed copper on each pad's own centre
+line before the router runs, the way `stitch_grounds()` already lays 133 vias.
 
 ---
 

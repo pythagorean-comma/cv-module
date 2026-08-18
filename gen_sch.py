@@ -924,10 +924,27 @@ def supply_block(sch, y):
     inlet = sch.place("J8", "Connector_Generic:Conn_01x02",
                       circuit.PARTS["J8"].value, 40 * G, y,
                       footprint=circuit.PARTS["J8"].footprint)
-    for pin, net in (("1", "VIN"), ("2", "IGND")):
+    for pin, net in (("1", "VIN_J"), ("2", "IGND_J")):
         px, py = inlet.pin(pin)
         sch.wire((px, py), (px + 7.62, py))
         sch.label(net, px + 7.62, py)
+
+    # The common-mode choke, drawn with the jack side on the left and the
+    # converter side on the right, which is also the order the current takes.
+    # **The two windings are 1-4 and 2-3**, and the symbol is chosen for that:
+    # Choke_CommonMode_FerriteCore_**1423** puts 1 and 4 on the same winding.
+    # A reader cannot tell 1-4/2-3 from 1-2/4-3 by looking at four wires
+    # between four pins, which is why design.INLET_CHOKE_PINS names them by
+    # role and verify.check_supply() asserts the map.
+    choke = sch.place(circuit.INLET_CHOKE_REF, "cv:744222",
+                      circuit.INLET_CHOKE, 75 * G, y,
+                      footprint=circuit.PARTS[
+                          circuit.INLET_CHOKE_REF].footprint)
+    for role, net, side in (("L1_IN", "VIN_J", -1), ("L2_IN", "IGND_J", -1),
+                            ("L1_OUT", "VIN", 1), ("L2_OUT", "IGND", 1)):
+        px, py = choke.pin(str(circuit.INLET_CHOKE_PINS[role]))
+        sch.wire((px, py), (px + side * 7.62, py))
+        sch.label(net, px + side * 7.62, py)
 
     diode = sch.place("D804", "Device:D_Schottky",
                       circuit.PARTS["D804"].value, 110 * G, y,
@@ -1018,6 +1035,148 @@ def supply_block(sch, y):
         sch.wire((px, py - 5.08), (px, py))
         sch.label(net, px, py - 5.08)
         _drop(sch, cap, "2", "MDGND", dy=5.08)
+
+
+ADC_SHEET_Y = SUPPLY_SHEET_Y + 150 * G
+
+
+def adc_block(sch, y):
+    """The envelope ADC, its 3.3 V rail and the six input networks.
+
+    Drawn as its own block rather than folded into shared_block(), because it
+    is its own zone on the board -- floorplan.ZONES entry A6 -- and the sheet
+    reads better when the two agree about what a block is.
+
+    **Two of the ADC's pins are drawn on the wrong side and it is the least
+    bad of the options.** The borrowed symbol is the ADS131M04's, which has
+    eight analogue pins on its left column; the MCP3564 has ten, so CH6 and
+    CH7 land in the right-hand column with the logic. They are the two spare
+    channels, grounded, which is the pair it costs least to have there -- and
+    the alternative was to draw a 20-pin rectangle from scratch, which is a
+    second place for a pin map to be wrong. See design.LIBS.
+    """
+    P = circuit.ENV_ADC_PINS
+    adc = sch.place(circuit.ENV_ADC_REF, "cv:MCP3564", circuit.ENV_ADC,
+                    260 * G, y,
+                    footprint=circuit.PARTS[circuit.ENV_ADC_REF].footprint)
+
+    # -- the six input networks, west of the package ----------------------
+    #
+    # One row per channel, each row a divider and its capacitor. ENV{n} comes
+    # in from the envelope rows above; ENVA{n} is the node between them and is
+    # what the ADC pin sees.
+    for n in range(1, circuit.CHANNELS + 1):
+        row = y - 40 * G + (n - 1) * 20 * G
+        top = _r(sch, f"R{n}56", 40 * G, row, angle=HORIZ)
+        px, py = top.pin("1")
+        sch.wire((px - 6.35, py), (px, py))
+        sch.label(f"ENV{n}", px - 6.35, py)
+        node = top.pin("2")
+        sch.wire(node, (node[0] + 6.35, node[1]))
+        sch.label(f"ENVA{n}", node[0] + 6.35, node[1])
+        # The lower leg and the capacitor, each in its own column so that
+        # neither drop lands on the other's wire end.
+        bot = _r(sch, f"R{n}57", 70 * G, row + 6 * G, angle=VERT)
+        bx, by = bot.pin("1")
+        sch.wire((bx, by - 6.35), (bx, by))
+        sch.label(f"ENVA{n}", bx, by - 6.35)
+        _drop(sch, bot, "2", "MAGND", dy=5.08)
+        cap = _c(sch, f"C{n}52", 90 * G, row + 6 * G, angle=VERT)
+        cx, cy = cap.pin("1")
+        sch.wire((cx, cy - 6.35), (cx, cy))
+        sch.label(f"ENVA{n}", cx, cy - 6.35)
+        _drop(sch, cap, "2", "MAGND", dy=5.08)
+
+    # -- the analogue side of the package ---------------------------------
+    for n in range(1, circuit.CHANNELS + 1):
+        px, py = adc.pin(str(P[circuit.ENV_ADC_CHANNEL[n]]))
+        sch.wire((px, py), (px - 10.16, py))
+        sch.label(f"ENVA{n}", px - 10.16, py)
+    px, py = adc.pin(str(P["REFIN+"]))
+    sch.wire((px, py), (px - 10.16, py))
+    sch.label("VREF", px - 10.16, py)
+    # REFIN- goes to MAGND, and it goes out further than the labels above
+    # before it drops: a ground symbol in that column would sit on the pin
+    # below it. DS20006181C note 3 -- "REFIN- must be connected to ground for
+    # single-ended measurements".
+    _drop_out(sch, adc, str(P["REFIN-"]), "MAGND", dx=-20.32, dy=-12.7)
+
+    # -- the two grounded spares, on the logic side -----------------------
+    for name, dx, dy in ((circuit.ENV_ADC_GROUNDED[0], -20.32, 15.24),
+                         (circuit.ENV_ADC_GROUNDED[1], 20.32, -15.24)):
+        _drop_out(sch, adc, str(P[name]), "MAGND", dx=dx, dy=dy)
+
+    # -- supplies ---------------------------------------------------------
+    #
+    # AVDD and DVDD are one net and AGND and DGND are one net: DS20006181C
+    # section 7.3's second scheme, and the only one compatible with this board
+    # having exactly one analogue/digital star. See design.envelope_adc().
+    for name in ("AVDD", "DVDD"):
+        px, py = adc.pin(str(P[name]))
+        sch.wire((px, py), (px, py - 10.16))
+        sch.label("V3V3", px, py - 10.16)
+    for name, dx in (("AGND", -7.62), ("DGND", 7.62)):
+        _drop_out(sch, adc, str(P[name]), "MAGND", dx=dx, dy=10.16)
+
+    # -- the six logic signals --------------------------------------------
+    for name, net in (("CS", "CS"), ("SCK", "SCLK"), ("SDI", "MOSI"),
+                      ("SDO", "MISO"), ("IRQ", "IRQ"), ("MCLK", "MCLK")):
+        px, py = adc.pin(str(P[name]))
+        sch.wire((px, py), (px + 10.16, py))
+        sch.label(net, px + 10.16, py)
+
+    # -- the 3.3 V rail ---------------------------------------------------
+    reg = sch.place(circuit.V3V3_REF, "cv:MCP1700-3.3", circuit.V3V3_PART,
+                    380 * G, y - 30 * G,
+                    footprint=circuit.PARTS[circuit.V3V3_REF].footprint)
+    px, py = reg.pin(str(circuit.V5_PINS["VI"]))
+    sch.wire((px - 10.16, py), (px, py))
+    sch.label("V5", px - 10.16, py)
+    px, py = reg.pin(str(circuit.V5_PINS["VO"]))
+    sch.wire((px, py), (px + 10.16, py))
+    sch.label("V3V3", px + 10.16, py)
+    _drop(sch, reg, str(circuit.V5_PINS["GND"]), "MAGND", dy=7.62)
+
+    for ref_name, net, dx in (("C815", "V5", 0), ("C816", "V3V3", 30 * G),
+                              ("C817", "V3V3", 60 * G),
+                              ("C818", "V3V3", 90 * G),
+                              ("C819", "VREF", 120 * G)):
+        cap = _c(sch, ref_name, 380 * G + dx, y + 10 * G, angle=VERT)
+        cx, cy = cap.pin("1")
+        sch.wire((cx, cy - 6.35), (cx, cy))
+        sch.label(net, cx, cy - 6.35)
+        _drop(sch, cap, "2", "MAGND", dy=5.08)
+
+    # -- out to the controller --------------------------------------------
+    for ref_name, x, pinout in (
+            ("J12", 560 * G, ((1, "MOSI"), (2, "MDGND"), (3, "SCLK"),
+                              (4, "MDGND"), (5, "MISO"))),
+            ("J13", 620 * G, ((1, "CS"), (2, "MDGND"), (3, "MCLK"),
+                              (4, "MDGND"), (5, "IRQ")))):
+        conn = sch.place(ref_name, "Connector_Generic:Conn_01x05",
+                         circuit.PARTS[ref_name].value, x, y,
+                         footprint=circuit.PARTS[ref_name].footprint)
+        for pin, net in pinout:
+            px, py = conn.pin(str(pin))
+            sch.wire((px, py), (px + 7.62, py))
+            # The ground symbol sits at the wire end rather than below it,
+            # which is J9-J11's own idiom and is not a style choice: a drop
+            # of 5.08 from pin 2 of a 1x05 lands exactly on pin 4's wire, and
+            # the two grounds and the three signals between them become one
+            # net. This sheet reported it as two merges on the first run.
+            if net == "MDGND":
+                _gnd(sch, px + 7.62, py, net)
+            else:
+                sch.label(net, px + 7.62, py)
+
+    sch.text("The envelope ADC. AGND and DGND are one net here and both are "
+             "MAGND -- DS20006181C section 7.3's second scheme, and the only "
+             "one compatible with this board having exactly one "
+             "analogue/digital star. Six logic signals leave at J12/J13 and "
+             "no analogue trace crosses the boundary; MCLK is one of the six "
+             "because the part's own RC oscillator cannot hold 2 kHz on six "
+             "channels -- see design.envelope_adc_clock().",
+             200 * G, y - 60 * G, size=2.0)
 
 
 def _between(point, a, b):
@@ -1309,6 +1468,7 @@ def build():
         envelope_row(sch, n, ENV_Y0 + (n - 1) * ENV_PITCH)
     shared_block(sch, SHARED_Y)
     supply_block(sch, SUPPLY_SHEET_Y)
+    adc_block(sch, ADC_SHEET_Y)
     sch._undrawn_flags = no_connects(sch)
     sch.auto_junctions()
     return sch

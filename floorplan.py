@@ -120,6 +120,8 @@ DOMAINS = (
     # the raw inlet: two pins, neither of them referenced to anything this
     # module calls ground. See design.supply().
     (r"^J8$", ISOLATED, "the shared DC inlet, primary side"),
+    (r"^L801$", ISOLATED, "the common-mode choke in the inlet pair -- the "
+                         "second half of design.barrier_return()"),
     (r"^D804$", ISOLATED, "inlet reverse protection"),
     (r"^C80[789]$", ISOLATED, "primary decoupling, at the converter's pins"),
     (r"^U15$", BARRIER, "the isolated converter: pins 1-3 primary, 6-8 "
@@ -136,6 +138,14 @@ DOMAINS = (
     (r"^R[1-6]0[12]$", ANALOGUE, "front-end inverting stage"),
     (r"^R[1-6]1[15]$", ANALOGUE, "R_IN and the VCA input RC"),
     (r"^R[1-6]5[1-5]$", ANALOGUE, "envelope rectifier, both stages"),
+    (r"^R[1-6]5[67]$", ANALOGUE, "the ADC input divider -- see "
+                                 "design.envelope_adc_input()"),
+    (r"^C[1-6]52$", ANALOGUE, "the ADC input anti-alias"),
+    (r"^U17$", ANALOGUE, "the envelope ADC: AGND and DGND both on MAGND, "
+                         "which is DS20006181C section 7.3's second scheme"),
+    (r"^U18$", ANALOGUE, "the 3.3 V regulator for the ADC, off V5"),
+    (r"^C81[5-9]$", ANALOGUE, "the ADC's rail and reference decoupling"),
+    (r"^J12$|^J13$", DIGITAL, "SPI and MCLK to the controller"),
     (r"^D[1-6]5[12]$", ANALOGUE, "envelope rectifier diodes -- inside A1's "
                                  "loop"),
     (r"^C[1-6]51$", ANALOGUE, "envelope one-pole, 4.7 ms"),
@@ -182,6 +192,16 @@ CROSSINGS = {
     "PWM5": "logic input to the '541, threshold-limited",
     "PWM6": "logic input to the '541, threshold-limited",
     "OE": "output enable, static in normal operation",
+    # The envelope ADC's six, and they are six rather than the four this file
+    # used to promise. See CROSSING_RULE.
+    "SCLK": "SPI clock into the ADC, V3V3 logic",
+    "MOSI": "SPI data into the ADC, V3V3 logic",
+    "MISO": "SPI data *out* of the analogue domain, V3V3 logic",
+    "CS": "chip select into the ADC, static between transfers",
+    "MCLK": "the ADC's master clock, into the analogue domain -- "
+            "design.envelope_adc_clock() is why it cannot come from inside "
+            "the part",
+    "IRQ": "data-ready *out* of the analogue domain, V3V3 logic",
     "VA+": "audio rail, from the converter through R804",
     "VA-": "audio rail, from the converter through R805",
     "V5": "reference supply, from the converter through U16",
@@ -190,27 +210,55 @@ CROSSINGS = {
 }
 
 CROSSING_RULE = """
-Seven signals and three rails cross, and the seven are all in the direction
-that is cheap.
+Thirteen signals and three rails cross, and every one of the thirteen is
+**logic** -- which is not the same claim this section used to make.
 
 A logic input tolerates about 1.5 V of ground offset before its threshold is in
 doubt -- 3.3 V of drive against the '541's 1.75 V VIH at Vcc = 2.5 V. A
-precision output tolerates about 0.1 mV before its error is audible. So every
-crossing here is an *input* to the analogue domain, and the '541 is the part
-that converts one to the other: digital in on one row, precision analogue out
-on the other, which is the package TI built and said so.
+precision output tolerates about 0.1 mV before its error is audible. That is
+the mechanism and it is unchanged.
+
+**What was wrong was the criterion stated over it.** This read "every crossing
+here is an *input* to the analogue domain", which was true of the seven that
+existed and is not the property the mechanism is about. A logic signal
+tolerates a ground offset in either direction; what makes a crossing cheap is
+its *level*, not its heading. The two were the same thing only while the
+crossings happened to be one-way, and the paragraph immediately below already
+promised the block that would break it: the envelope ADC has to return data,
+so MISO and IRQ leave the analogue domain. They are as cheap as the six that
+enter, and the '541 is still the part that converts one kind to the other:
+digital in on one row, precision analogue out on the other, which is the
+package TI built and said so.
+
+The failure is small and worth naming because it is this repo's usual one at
+one remove: a rule whose *stated test* was narrower than its *stated
+mechanism*, so satisfying the mechanism could look like violating the rule.
+The check reads CROSSINGS and not this prose, so nothing would have failed --
+the wrong sentence would simply have gone on being quoted.
 
 What deliberately does not cross:
 
   * **the six '541 outputs.** LOGO{n} is a 30.5 kHz square wave at 2.5 V and it
     is entirely inside the analogue domain, from the '541's Y pins to R{n}41. It
     is the loudest aggressor on the board and the shortest run on it.
-  * **SPI.** Spec section 4.4 puts the envelope ADC in the analogue section so
-    that only SCLK/MOSI/MISO/CS cross, instead of six analogue traces. When the
-    ADC lands, those four join this table -- and they cross in the same
-    direction, because the ADC's own reference is VREF and its ground is MAGND.
+  * **the six ENV{n}.** Spec section 4.4 puts the envelope ADC in the analogue
+    section so that SPI crosses instead of six analogue traces, and that is
+    what happened: ENV{n} stops at R{n}56 and never leaves the domain. The
+    ADC's own reference is VREF and its ground is MAGND, exactly as this
+    section said it would be before the part was chosen -- and only one of the
+    two candidates could honour it, because the ADS131M08's reference input
+    stops at 1.3 V. See design.ENV_ADC.
   * **audio.** Nothing audio-carrying crosses at all. That is what makes the
     boundary a line rather than a suggestion.
+
+**The SPI is six signals and this section promised four.** "Only
+SCLK/MOSI/MISO/CS" is spec section 4.4's own list and it is short by two: the
+part needs a data-ready line, and -- because it multiplexes one modulator
+across six channels rather than converting them at once -- a master clock its
+internal RC oscillator cannot make to tolerance. design.envelope_adc_clock()
+is that arithmetic. Both additions are logic, so both are cheap by the rule
+above; what they cost is two more conductors in the loom and one of them is a
+9.2 MHz clock, which is the reason MCLK sits between two grounds on J13.
 
 **The relay coils were the exception that proved the shape, and they are gone.**
 Twelve coils, each about 40 mA for 3 to 10 ms, driven from the digital domain
@@ -298,6 +346,20 @@ ZONES = (
      "is 470 nF, so a few picofarads of stray on it is 1e-5 of the pole. The "
      "same run on the CV filter's own summing node would not be."),
 
+    ("A6", "the envelope ADC and its rail", ANALOGUE,
+     "U17, the six input dividers and their anti-alias capacitors, U18's "
+     "3.3 V rail and the ADC's own decoupling. **Analogue, entirely** -- AGND "
+     "and DGND are both MAGND, which is the second of the two schemes "
+     "DS20006181C section 7.3 offers and the only one compatible with this "
+     "board having exactly one analogue/digital star. What leaves the domain "
+     "is six logic signals, and they leave at J12/J13 rather than here.",
+     "South of A5 in the shared band, north of the split so that every pad on "
+     "U17 stitches into its own pour, and east of the rail decoupling. The "
+     "dividers sit between the CV band's ENV{n} column and the package, so "
+     "the long run is ENV{n} -- which is a driven op-amp output -- and the "
+     "short one is ENVA{n}, which is a 4 kohm source into a switched "
+     "capacitor."),
+
     ("F", "the fail-safe", "STRADDLE",
      "Three bypass relays, the charge pump, the sink and the flyback diodes, "
      "plus D803 on the inverted reference. **The relays straddle** -- coils "
@@ -333,8 +395,13 @@ ZONES = (
 
     ("D2", "controller and drive", DIGITAL,
      "DEFERRED: RP2040, QSPI flash, crystal, USB, DIN MIDI, 2 x TPIC6B595, "
-     "the 74LVC1G123 one-shot, the fail-safe charge pump. Plus the envelope "
-     "ADC, which is analogue and sits at the D2/A4 edge so only SPI crosses.",
+     "the 74LVC1G123 one-shot, the fail-safe charge pump. Plus J12 and J13, "
+     "which are where the ADC's six logic signals leave the board for the "
+     "controller. **This entry used to place the envelope ADC itself here**, "
+     "'analogue and at the D2/A4 edge', which put an analogue part inside a "
+     "zone whose declared domain is MDGND -- a contradiction check_zones() "
+     "could not see, because it only walks per-channel columns. The ADC has "
+     "its own zone A6 now and it is north of the split.",
      "South-east, one edge, with the star R902 at its corner nearest A3."),
 
     # **This zone was declared for four passes with nothing in it, and the
@@ -556,6 +623,8 @@ COURTYARD = {
     "Relay_DPDT_Omron_G6S-2F": 164.0, "PinHeader_1x02": 22.0,
     "D_SMA": 25.0, "TO-252-2": 78.0,
     "TRACO_TMR-6-xxxxWI": 214.0,
+    "L_CommonMode_Wuerth_WE-SL2": 66.0,
+    "TSSOP-20": 55.0,
 }
 
 # **What the pad was, kept as arithmetic because the saving is the result.** A

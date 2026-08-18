@@ -101,6 +101,15 @@ SIZE = {
     # against it, which matters *more* for a generated footprint and not less:
     # two files this repo controls can be wrong together.
     "TRACO_TMR-6-xxxxWI": (22.30, 9.60),
+    # The inlet choke, and it is read off KiCad's own courtyard like every
+    # other row here -- 10.090 x 6.590 of bounding box, less the 0.045 per
+    # edge that is the outline's line width. The four-terminal chokes draw
+    # that courtyard as a polyline rather than a rectangle, which turns out
+    # not to matter: gen_pcb.check_courtyards() reads BBox() and KiCad builds
+    # the polygon from whatever closed outline is on the layer. See
+    # design.CHOKE_FP.
+    "L_CommonMode_Wuerth_WE-SL2": (10.00, 6.50),
+    "TSSOP-20": (7.70, 7.00),
     "TO-252-2": (11.10, 7.00), "Fuse_1206": (4.56, 2.26), "D_SMA": (7.00, 3.50),
     "SOIC-20W": (11.86, 13.30),
     "PinHeader_1x02": (3.54, 6.09), "PinHeader_1x05": (3.54, 13.70),
@@ -214,7 +223,7 @@ GROUND_GAP = 2.0
 # plenty of. The switching part of this module is now as far from the front
 # ends as the outline allows.
 SUPPLY_Y = SPLIT_Y + 39.56             # 197.0, the band's own row
-SUPPLY_U15_X = 32.0                    # pad 1, and the pins run east from it
+SUPPLY_U15_X = 35.0                    # pad 1, and the pins run east from it
 # Between pin 3 and pin 5, which are 5.08 mm apart because pin 4 does not
 # exist. Computed rather than typed so that moving the package moves the line.
 ISOLATION_X = SUPPLY_U15_X + 3 * 2.54
@@ -239,23 +248,35 @@ ISOLATION_STITCH_MM = 3.0
 
 SUPPLY = {
     # -- primary, west of ISOLATION_X, no pour beneath ---------------------
+    #
+    # **The whole row moved east by 2 mm to fit L801 and the board did not
+    # grow.** The choke is 10.09 mm of courtyard and the gap between J8 and
+    # D804 was 9.48, so something had to give; what gave is the 3 mm of slack
+    # between U15's east edge and R804, which is now 1 mm, plus 2 mm taken out
+    # of the secondary's own spacing. The alternative was to grow the band
+    # eastwards, which is the one direction that costs board *width* -- the
+    # supply band is the south edge, so it is free to grow in y and not in x.
     "J8": (6.0, SUPPLY_Y - 3.0, 0),
-    "D804": (17.0, SUPPLY_Y, 90),
-    "C807": (21.5, SUPPLY_Y, 90),
-    "C808": (25.5, SUPPLY_Y, 90),
-    "C809": (28.5, SUPPLY_Y, 90),
+    # Immediately at the inlet, ahead of everything else on the primary. See
+    # design.supply(): the decoupling has to be on the converter side of it or
+    # the choke sees the inlet pair already commoned.
+    "L801": (13.0, SUPPLY_Y, 0),
+    "D804": (20.0, SUPPLY_Y, 90),
+    "C807": (24.5, SUPPLY_Y, 90),
+    "C808": (28.5, SUPPLY_Y, 90),
+    "C809": (31.5, SUPPLY_Y, 90),
     "U15": (SUPPLY_U15_X, SUPPLY_Y, 0),
     # On the line, and the only thing that is. Offset east by half a pad so
     # that its MDGND end lands inside the pour and its IGND end does not.
     "C810": (ISOLATION_X + 0.6, ISOLATION_Y + 1.5, 0),
     # -- secondary, east of the package ------------------------------------
-    "R804": (56.0, SUPPLY_Y, 90),
-    "C811": (60.0, SUPPLY_Y, 90),
-    "R805": (64.0, SUPPLY_Y, 90),
-    "C812": (68.0, SUPPLY_Y, 90),
-    "C813": (73.0, SUPPLY_Y, 90),
-    "U16": (82.0, SUPPLY_Y, 0),
-    "C814": (91.0, SUPPLY_Y, 90),
+    "R804": (58.0, SUPPLY_Y, 90),
+    "C811": (62.0, SUPPLY_Y, 90),
+    "R805": (66.0, SUPPLY_Y, 90),
+    "C812": (70.0, SUPPLY_Y, 90),
+    "C813": (75.0, SUPPLY_Y, 90),
+    "U16": (84.0, SUPPLY_Y, 0),
+    "C814": (93.0, SUPPLY_Y, 90),
 }
 
 SHARED = {
@@ -317,12 +338,94 @@ SHARED = {
     # barrel reaches the plane that is *under* it. A through-hole pad is
     # already stitched only if it is in its own pour.
 
+    # Zone A6, the envelope ADC. **North of the split and it has to be**:
+    # AGND and DGND are both MAGND, so every pad on U17 stitches into the
+    # analogue pour, and a package straddling the line would put half of them
+    # in the wrong one -- which is the fault J8 was moved for.
+    #
+    # East of the rail decoupling and south of the reference, which leaves the
+    # ENV{n} runs coming down from the CV band into the dividers and the SPI
+    # leaving south across the split. The long run is the one on a driven
+    # op-amp output; the short one is the 4 kohm source into a switched
+    # capacitor. See floorplan.ZONES entry A6.
+    # **Rotation 0, and 7 mm of clear board west of it, and both are the
+    # router's.** A TSSOP-20 is a 0.65 mm pitch on 0.40 mm pads, so
+    # rules.escape_corridor() says there is no legal cell between two of its
+    # pins at any class this board could be ordered at -- every pin has to
+    # leave the package sideways. At rotation 0 the ten analogue pins face the
+    # divider columns and the ten logic pins face away from them, which is the
+    # only orientation where those two fans do not have to cross.
+    #
+    # The first placement had it at rotation 90 with 3.5 mm to the nearest
+    # column, and the router left ENVA3, ENVA6 and SCLK unfinished: six nets
+    # converging on six pins 0.65 mm apart need somewhere to fan out, and 3.5
+    # mm is not it.
+    # **The y is 10.21 and not 10.00, and the 0.21 is the routing grid.** A
+    # TSSOP's pins are 0.65 mm apart, the router's grid is 0.5, and
+    # rules.pad_reach() shows the two are incommensurable: at every phase, two
+    # of the ten pin rows contain no grid cell centre at all, so no track can
+    # start inside those pads. No placement removes them -- a pad wide enough
+    # to always hold a cell would sit closer to its neighbour than this
+    # board's own clearance rule allows -- but a placement chooses *which* two
+    # rows lose, and this one gives them to AGND/DGND and to CH4/CH7. All four
+    # are MAGND, which the router skips because stitch_grounds() has already
+    # connected them. See design.ENV_ADC_CHANNEL.
+    #
+    # **The window is 45 um wide, so it is checked rather than trusted.**
+    # gen_pcb.check_fine_pitch_access() computes it against the grid the
+    # router actually builds, and fails the build with the nudge if the board
+    # outline ever moves this package's phase -- which anything added north of
+    # it can do.
+    "U17": (70.0, SHARED_Y + 10.21, 0),
+    # The three locals, each at the pin it serves: AVDD, DVDD, REFIN+. **All
+    # three north of the package, and the third one moved there for a reason
+    # the router found.** C819 was south, which put its run to REFIN+ -- pin 4,
+    # near the north end of the west row -- straight up through the channel
+    # fan, in the 3.25 mm of pin row the six ENVA{n} nets are already
+    # converging into. ENVA1 and ENVA2 were what would not finish. The west
+    # row arrives in order from the north now: AVDD, REFIN+, then the
+    # channels, and nothing crosses anything.
+    "C817": (68.0, SHARED_Y + 3.5, 90),
+    "C818": (72.0, SHARED_Y + 3.5, 90),
+    "C819": (76.0, SHARED_Y + 3.5, 90),
+    # The rail, east of everything: its two nets are V5 and V3V3 and neither
+    # of them belongs in the fan.
+    "U18": (84.0, SHARED_Y + 10.0, 0),
+    "C815": (84.0, SHARED_Y + 3.5, 90),
+    "C816": (84.0, SHARED_Y + 16.5, 90),
+
     # Zone D2, the signal connectors, on the south edge where a loom can reach
     # them.
     "J9": (26.0, SPLIT_Y + 18.0, 0),
     "J10": (42.0, SPLIT_Y + 18.0, 0),
     "J11": (58.0, SPLIT_Y + 18.0, 0),
+    # The ADC's own two, on the same edge as the other three so the loom is
+    # one bundle -- but **west of J10 rather than east of J11**, and that is a
+    # routing fact rather than a tidy one. The three bypass relays sit across
+    # the ground split on 18 mm centres and are 15.3 mm wide, so the gaps
+    # between them are 2.7 mm; the one wide corridor through that row is the
+    # 9.7 mm between U11 and K801. Six SPI nets have to get from U17 to these
+    # connectors, and putting them east meant threading that row at 2.7 mm.
+    # SCLK was one of the three nets the router could not finish.
+    "J12": (31.0, SPLIT_Y + 18.0, 0),
+    "J13": (36.0, SPLIT_Y + 18.0, 0),
 }
+
+# The ADC's six input networks: three columns of one part per channel, on
+# their own row pitch rather than the board's 7.62 mm one. They are per-channel
+# parts in a shared block, which is a shape COLUMNS cannot express -- COLUMNS
+# rows are the twelve of the two bands -- so they get their own rule in
+# position() and their own constants here.
+ADC_INPUT_X = ((r"^R([1-6])56$", 50.0), (r"^R([1-6])57$", 54.0),
+               (r"^C([1-6])52$", 58.0))
+ADC_ROW_0 = SHARED_Y
+# 3.6 mm and not 4.0: an 0805 on its side is 3.36 mm of courtyard, so this is
+# 0.24 mm of clearance between rows and it takes 2 mm out of the vertical
+# spread the six ENVA{n} nets have to fan across. The fan is the one congested
+# thing in this block -- six tracks from a 18 mm column into 3.25 mm of pin
+# row -- and every millimetre of spread removed is one it does not have to
+# turn through.
+ADC_ROW_PITCH = 3.6
 
 # The pull-downs sit at the controller connector, which is where their whole
 # argument is: a hi-Z MCU has to read as a defined low at the pin it left.
@@ -421,6 +524,12 @@ def position(ref):
 
     if ref in SUPPLY:
         return SUPPLY[ref]
+
+    for pattern, x in ADC_INPUT_X:
+        found = re.match(pattern, ref)
+        if found:
+            return (x, ADC_ROW_0 + (int(found.group(1)) - 1) * ADC_ROW_PITCH,
+                    90)
 
     found = re.match(r"^R81([1-6])$", ref)
     if found:
