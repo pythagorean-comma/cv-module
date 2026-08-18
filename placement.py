@@ -112,8 +112,18 @@ SIZE = {
     "TSSOP-20": (7.70, 7.00),
     "TO-252-2": (11.10, 7.00), "Fuse_1206": (4.56, 2.26), "D_SMA": (7.00, 3.50),
     "SOIC-20W": (11.86, 13.30),
-    "PinHeader_1x02": (3.54, 6.09), "PinHeader_1x05": (3.54, 13.70),
+    "PinHeader_1x02": (3.54, 6.09), "PinHeader_1x03": (3.54, 8.62),
+    "PinHeader_1x05": (3.54, 13.70),
     "TestPoint": (3.00, 3.00),
+    # The controller block, every one read off KiCad's own F.CrtYd rather than
+    # off a body dimension -- which is the distinction the choke's comment
+    # above makes and the reason the SO-6L is 11.3 mm wide against a 10 mm
+    # body: it is a creepage package and the courtyard is where the creepage
+    # lives.
+    "QFN-56-1EP_7x7mm": (8.26, 8.26), "SOIC-8_5.3x5.3mm": (9.30, 5.80),
+    "SOT-23-6": (4.10, 3.40), "SO-6L": (11.30, 4.34),
+    "Crystal_SMD_3225": (4.20, 3.50), "L_Bourns_SRN6045TA": (7.00, 6.50),
+    "USB_Micro-B": (8.80, 6.10),
 }
 
 # Where a footprint's anchor sits inside its own courtyard, in the footprint's
@@ -121,7 +131,11 @@ SIZE = {
 # a pin header, whose anchor is pad 1 at one end -- 5.08 mm for the 1x05, which
 # is two thirds of its length. courtyard() centred every part on its position
 # and so drew the headers 5 mm north of where they are.
-ANCHOR = {"PinHeader_1x02": (0.0, 1.275), "PinHeader_1x05": (0.0, 5.08),
+ANCHOR = {"PinHeader_1x02": (0.0, 1.275), "PinHeader_1x03": (0.0, 2.54),
+          "PinHeader_1x05": (0.0, 5.08),
+          # The micro-B's courtyard is not centred on its anchor: the shell
+          # overhangs the pads to the south by 0.59 mm.
+          "USB_Micro-B": (0.0, 0.59),
           # Anchored on pad 1, the convention every Converter_DCDC footprint
           # in KiCad uses and therefore the one this one is written to.
           "TRACO_TMR-6-xxxxWI": (8.90, 1.05),
@@ -398,22 +412,144 @@ SHARED = {
     "C815": (84.0, SHARED_Y + 3.5, 90),
     "C816": (84.0, SHARED_Y + 16.5, 90),
 
-    # Zone D2, the signal connectors, on the south edge where a loom can reach
-    # them.
-    "J9": (26.0, SPLIT_Y + 18.0, 0),
-    "J10": (42.0, SPLIT_Y + 18.0, 0),
-    "J11": (58.0, SPLIT_Y + 18.0, 0),
-    # The ADC's own two, on the same edge as the other three so the loom is
-    # one bundle -- but **west of J10 rather than east of J11**, and that is a
-    # routing fact rather than a tidy one. The three bypass relays sit across
-    # the ground split on 18 mm centres and are 15.3 mm wide, so the gaps
-    # between them are 2.7 mm; the one wide corridor through that row is the
-    # 9.7 mm between U11 and K801. Six SPI nets have to get from U17 to these
-    # connectors, and putting them east meant threading that row at 2.7 mm.
-    # SCLK was one of the three nets the router could not finish.
-    "J12": (31.0, SPLIT_Y + 18.0, 0),
-    "J13": (36.0, SPLIT_Y + 18.0, 0),
+    # **Zone D2 was five connectors here and it is the controller now.** J9 to
+    # J13 sat on this row -- the five headers out to a controller on some other
+    # board -- and the block they stood in for is in CONTROLLER below, on the
+    # same band and using the same reasoning about where a loom can reach.
 }
+
+# ---------------------------------------------------------------------------
+# Zone D2: the controller
+# ---------------------------------------------------------------------------
+# **The band between the relays and the supply, and its height is what shapes
+# it.** The bypass relays are 10.7 mm tall on the split at y = 157.4, so their
+# courtyards reach 162.75; the supply band's own parts start at 190. That
+# leaves 27 mm of full-width board, and everything below is arranged in rows
+# inside it rather than around the package -- which is the same trade the ADC's
+# own block makes and for the same reason: a systematic placement is one a
+# person can check.
+#
+# Three placements in here are load-bearing and the rest are packing:
+#
+#   * **the flash beside U19's QSPI row.** Minimal design section 2.2: "the
+#     QSPI pins of RP2040 should be wired directly to the flash, using short
+#     connections to maintain the signal integrity, and to also reduce
+#     crosstalk in surrounding circuits". Those six pins are on the package's
+#     north row at its west end, so the flash is immediately west of the
+#     package and its own six face back;
+#   * **the crystal and its two load capacitors at XIN/XOUT**, which are pins
+#     20 and 21 on the south row. Section 2.3 makes this a value rather than a
+#     preference: the load capacitance the crystal sees includes the tracks,
+#     "we'll assume a value of 3pF for this ... Try and keep the layout as
+#     short as possible", and crystal_load() spends that 3 pF;
+#   * **U21's bypass within 10 mm of its pins**, which its own datasheet
+#     states as a distance: "The bypass capacitor should be placed within 1 cm
+#     of each pin." check_midi_bypass() below is what holds it, because a
+#     placement rule with a number in it is one a check can have.
+#
+# The MIDI receiver is at the west end with its jack header, as far from the
+# switcher as this band allows, and that is the one piece of separation here
+# that is about noise rather than about length: it is the only block on the
+# board whose ground is somebody else's.
+CONTROLLER_Y = SPLIT_Y + 20.6           # 178.0, the package's own row
+CONTROLLER_X = 82.0
+
+CONTROLLER = {
+    # -- the package and its twelve capacitors ----------------------------
+    "U19": (CONTROLLER_X, CONTROLLER_Y, 0),
+    # IOVDD pins 1 and 10 are on the west row, 33 and 42 on the east, 22 on
+    # the south and 49 on the north; DVDD is 23 south and 50 north. Each
+    # capacitor is on the side its pin is on, which is as close as a 0805 gets
+    # to "at the pin" on a 0.4 mm pitch package.
+    "C820": (76.0, 176.0, 90),
+    "C821": (76.0, 180.0, 90),
+    "C822": (83.0, 184.5, 90),
+    "C823": (88.0, 176.0, 90),
+    "C824": (88.0, 180.0, 90),
+    "C825": (81.0, 171.0, 90),
+    "C826": (87.0, 184.5, 90),
+    "C827": (84.0, 171.0, 90),
+    # The regulator's two and the two dedicated supplies, all north.
+    "C828": (90.0, 171.0, 90),
+    "C829": (87.0, 171.0, 90),
+    "C830": (93.0, 171.0, 90),
+    "C831": (78.0, 171.0, 90),
+
+    # -- the flash, west, facing the QSPI row -----------------------------
+    "U20": (71.0, 178.0, 90),
+    "C834": (66.5, 172.0, 90),
+    "R826": (66.5, 176.0, 90),
+    "R825": (66.5, 180.0, 90),
+
+    # -- the crystal, south, at XIN/XOUT ----------------------------------
+    # **The row is 4.5 mm apart and it was 2.5.** stitch_grounds() puts a via
+    # beyond a pad along the pad's own long axis, and a rotated 0805's long
+    # axis is *across* the row -- so at 2.5 mm centres C832's stitch landed
+    # inside Y801's pad clearance and the build stopped. The spacing is what
+    # the stitch needs, not what the parts need.
+    "Y801": (78.5, 184.5, 0),
+    "C832": (73.0, 184.5, 90),
+    "C833": (68.5, 184.5, 90),
+    "R824": (64.0, 184.5, 90),
+
+    # -- USB, at the east edge --------------------------------------------
+    #
+    # The one panel part on the board rather than on a header, and the edge is
+    # what it is for. Its two series resistors are between it and the package,
+    # which is minimal design 2.4.1's "placed close to the chip" read as an
+    # ordering rather than a distance: what matters is that the untermined
+    # length is the short one.
+    # **97.53 is solved rather than chosen and the solving is the point.** A
+    # connector that mates with something outside the board has to be *at* the
+    # edge: a micro-B plug is 6.8 mm wide and a receptacle 5 mm inside the
+    # outline cannot be reached at all. Every other part on this board is
+    # placed with MARGIN of clear board around it, and outline() adds that
+    # margin to whatever is outermost -- so a connector placed by eye is
+    # always 5 mm too far in, and nothing in this repo would have said so.
+    # This x puts its courtyard's east edge exactly on the outline the rest of
+    # the board implies, and check_edge_parts() is what holds it there.
+    "J14": (97.53, 178.0, 90),
+    "R820": (91.5, 176.0, 90),
+    "R821": (91.5, 180.0, 90),
+    "R822": (93.0, 186.0, 90),
+    "R823": (90.0, 186.0, 90),
+
+    # -- the 3.3 V switcher, south-east, next to the band it feeds from ---
+    "U22": (58.0, 190.5, 0),
+    "L802": (66.0, 190.5, 0),
+    "C840": (52.0, 190.5, 90),
+    "C841": (48.0, 190.5, 90),
+    "C842": (58.0, 186.0, 90),
+    "C843": (73.0, 190.5, 90),
+    "R850": (77.0, 190.5, 90),
+    "R851": (80.0, 190.5, 90),
+
+    # -- the panel headers, on the south edge where a loom can reach them --
+    "J15": (14.0, 176.0, 0),
+    "J16": (20.0, 176.0, 0),
+    "J17": (26.0, 176.0, 0),
+    "J18": (32.0, 176.0, 0),
+    "J19": (38.0, 176.0, 0),
+    "J20": (44.0, 176.0, 0),
+
+    # -- the MIDI receiver, west, on somebody else's ground ---------------
+    "U21": (14.0, 187.0, 0),
+    "C835": (10.0, 182.5, 90),
+    "R827": (22.0, 186.0, 90),
+    "D805": (25.0, 186.0, 90),
+    "C836": (28.0, 186.0, 90),
+    "R828": (31.0, 186.0, 90),
+    "R829": (34.0, 186.0, 90),
+
+    # -- the panel networks -----------------------------------------------
+    "R830": (37.0, 186.0, 90),
+    "R831": (40.0, 186.0, 90),
+    "C837": (43.0, 186.0, 90),
+    "R832": (46.0, 186.0, 90),
+    "R833": (49.0, 186.0, 90),
+    "C838": (52.0, 186.0, 90),
+}
+
 
 # The ADC's six input networks: three columns of one part per channel, on
 # their own row pitch rather than the board's 7.62 mm one. They are per-channel
@@ -433,8 +569,14 @@ ADC_ROW_PITCH = 3.6
 
 # The pull-downs sit at the controller connector, which is where their whole
 # argument is: a hi-Z MCU has to read as a defined low at the pin it left.
-PULLDOWN_X = 74.0
-PULLDOWN_Y = SPLIT_Y + 18.0
+# **The six PWM pull-downs moved with the thing they belong to.** They were at
+# x = 74 on the connector row, because design.py put them "on MDGND and at the
+# connector" -- their job is to define what the *driving* side's pin is doing,
+# and the driving side used to be a ribbon arriving at J9-J11. It is U19 now,
+# so they sit between the package and the '541 on the row above the panel
+# headers, which is the same sentence with the connector replaced by the part.
+PULLDOWN_X = 40.0
+PULLDOWN_Y = SPLIT_Y + 14.6
 
 # Designators that have to move, with the reason each one does. The mixer keeps
 # the same table and for the same cause: KiCad puts a reference above the body,
@@ -529,6 +671,9 @@ def position(ref):
     if ref in SUPPLY:
         return SUPPLY[ref]
 
+    if ref in CONTROLLER:
+        return CONTROLLER[ref]
+
     for pattern, x in ADC_INPUT_X:
         found = re.match(pattern, ref)
         if found:
@@ -551,16 +696,23 @@ def position(ref):
 def outline():
     """The board rectangle this placement implies, from SIZE alone.
 
-    gen_pcb.py computes the same thing from the footprints KiCad actually
+    gen_pcb.py draws the same rectangle from the footprints KiCad actually
     loads, and the two agreeing is worth something: it means this file can be
-    reasoned about without KiCad, which is the reason it exists.
+    reasoned about without KiCad, which is the reason it exists. **They agree
+    because they are the same function** -- this hands extents() its own boxes
+    and gen_pcb.py hands it KiCad's.
+
+    That was not true for one build and the symptom is the useful part. This
+    grew an EDGE_PARTS rule and extents() did not, so placement.py reported a
+    101.9 mm board with the USB connector flush on its east edge and gen_pcb.py
+    drew a 107.0 mm one with the connector 5 mm inside it. Both files were
+    self-consistent, both printed a number, and the numbers were different --
+    which is only visible if somebody reads two lines of output that are 20
+    minutes apart.
     """
-    boxes = [courtyard(ref) for ref in sorted(design.PARTS)]
-    boxes = [box for box in boxes if box]
-    return (round(min(b[0] for b in boxes) - MARGIN, 2),
-            round(min(b[1] for b in boxes) - MARGIN, 2),
-            round(max(b[2] for b in boxes) + MARGIN, 2),
-            round(max(b[3] for b in boxes) + MARGIN, 2))
+    return extents([(ref, *box) for ref, box in
+                    ((ref, courtyard(ref)) for ref in sorted(design.PARTS))
+                    if box])
 
 
 def area():
@@ -569,20 +721,32 @@ def area():
 
 
 def extents(courtyards):
-    """The board outline the placement implies, plus a margin.
+    """The board outline a set of courtyards implies, plus a margin.
 
     Derived rather than declared: a rectangle typed in by hand is a rectangle
     that stops being true the first time a part moves, and this repo has spent
     two passes on the consequences of exactly that in floorplan.py.
+
+    Takes `(ref, left, top, right, bottom)` so that **EDGE_PARTS can contribute
+    without the margin**, which is what makes "at the edge" expressible at all.
+    MARGIN is clear board around a part; a connector a cable plugs into wants
+    none of it on the side it faces, and adding it anyway is what made the
+    first attempt at this circular -- the connector pushed the outline out by
+    five millimetres and then failed to reach it, for ever.
     """
-    xs = [x for x, y, w, h in courtyards]
-    ys = [y for x, y, w, h in courtyards]
-    right = max(x + w / 2 for x, y, w, h in courtyards)
-    bottom = max(y + h / 2 for x, y, w, h in courtyards)
-    left = min(x - w / 2 for x, y, w, h in courtyards)
-    top = min(y - h / 2 for x, y, w, h in courtyards)
-    return (round(left - MARGIN, 2), round(top - MARGIN, 2),
-            round(right + MARGIN, 2), round(bottom + MARGIN, 2))
+    boxes = [(ref, left, top, right, bottom)
+             for ref, left, top, right, bottom in courtyards]
+    plain = [box for box in boxes if box[0] not in EDGE_PARTS]
+    left = min(b[1] for b in plain) - MARGIN
+    top = min(b[2] for b in plain) - MARGIN
+    right = max(b[3] for b in plain) + MARGIN
+    bottom = max(b[4] for b in plain) + MARGIN
+    for ref, box_left, box_top, box_right, box_bottom in boxes:
+        if ref in EDGE_PARTS:
+            left, top = min(left, box_left), min(top, box_top)
+            right = max(right, box_right)
+            bottom = max(bottom, box_bottom)
+    return (round(left, 2), round(top, 2), round(right, 2), round(bottom, 2))
 
 
 def check_placed():
@@ -636,6 +800,42 @@ def courtyard(ref):
             centre_x + width / 2, centre_y + height / 2)
 
 
+# Parts that must sit on the board's edge rather than inside it, with the
+# side each faces. A part in here is one whose whole purpose is to be reached
+# from outside the enclosure.
+EDGE_PARTS = {"J14": "east"}
+
+
+def check_edge_parts():
+    """An edge connector's courtyard reaches the outline, to within a hair.
+
+    **The check that the USB connector needed and nothing had.** Everything
+    else on this board is placed relative to its neighbours and outline() adds
+    MARGIN around the lot, so "at the edge" is not a thing a position can say
+    -- a part placed as far east as anything else is still 5 mm inside the
+    board. A receptacle there is a receptacle no plug reaches, and it draws,
+    routes and passes DRC exactly like one that works.
+
+    The tolerance is a tenth of a millimetre: this is a placement, not a
+    fabrication drawing, and the connector's own overhang is the fabricator's
+    business.
+    """
+    left, top, right, bottom = outline()
+    edges = {"east": (2, right), "west": (0, left),
+             "north": (1, top), "south": (3, bottom)}
+    problems = []
+    for ref, side in sorted(EDGE_PARTS.items()):
+        box = courtyard(ref)
+        index, edge = edges[side]
+        if box is None or abs(box[index] - edge) > 0.1:
+            problems.append(
+                f"{ref} is meant to be on the {side} edge and its courtyard "
+                f"reaches {box[index]:.2f} against an outline at {edge:.2f} "
+                f"-- a connector that mates with a cable has to be at the "
+                f"edge, not merely nearest to it")
+    return problems
+
+
 def check_overlaps():
     """No two courtyards overlap, against the estimates in SIZE."""
     problems = []
@@ -649,6 +849,92 @@ def check_overlaps():
                     f"{ref} and {other} overlap: "
                     f"{tuple(round(v, 1) for v in box)} against "
                     f"{tuple(round(v, 1) for v in box2)}")
+    return problems
+
+
+# Which parts implement the zones COLUMNS does not name. **The per-channel
+# columns already carry their zone tag; these are the blocks**, and until this
+# existed the only record of what was in zone P or zone D2 was prose in
+# floorplan.ZONES and a dict in this file that did not say which zone it was.
+#
+# That gap is the one design.supply() records: floorplan.py had a zone P on this
+# board while design.py described J8 as a secondary inlet from somewhere else,
+# both were consumed, and nothing compared them -- because "the parts in zone P"
+# was not a thing any file could be asked for. This is that question, answered
+# by a table, and check_zone_occupancy() is what asks it.
+ZONE_PARTS = {
+    "A0": (r"^J[1-7]$", r"^R901$"),
+    "A1": (r"^U[12]$",),
+    "A3": (r"^U9$", r"^U10$"),
+    "A4": (r"^U[3-6]$",),
+    "A5": (r"^U1[34]$",),
+    "A6": (r"^U1[78]$", r"^C81[5-9]$", r"^R[1-6]5[67]$", r"^C[1-6]52$"),
+    "C1": (r"^U[78]$",),
+    "R": (r"^U12$", r"^C80[123]$", r"^R80[12]$", r"^D803$", r"^C7\d\d$"),
+    "D1": (r"^U11$", r"^R81[1-6]$"),
+    "D2": tuple(f"^{ref}$" for ref in sorted(CONTROLLER)),
+    "F": (r"^K80[1-3]$", r"^C80[56]$", r"^D80[12]$", r"^D8[123]3$",
+          r"^R803$", r"^Q801$", r"^R902$"),
+    "P": tuple(f"^{ref}$" for ref in sorted(SUPPLY)),
+}
+
+
+def check_zone_occupancy():
+    """Every zone floorplan.py declares holds parts, and every part is in one.
+
+    **The instrument design.supply() named and nobody had written.** Its
+    comment says "`floorplan.check_zone_occupancy()` is the instrument that
+    would have said so and it is new here" -- and it was not new, it was
+    absent: a named check that does not exist, in a paragraph about two
+    artefacts disagreeing because nothing compared them. Found by grepping for
+    the name while drawing the last zone.
+
+    **It lives here and not in floorplan.py**, which is why the name in that
+    comment is now this one. floorplan.py cannot import this file: placement.py
+    imports *it*, for the domain table, and a cycle is not worth having to keep
+    a function on the side that reads better. The question is "what is placed
+    where", and that is this file's subject.
+
+    Two directions, and the second is the one that would have caught zone P:
+
+      * **a zone with no parts** is a declaration nothing is obliged to honour
+        -- the failure design.RAILS' V3V3 entry is the other example of, and
+        the reason a deferred block is dangerous rather than merely incomplete;
+      * **a part in no zone** is a part the floorplan does not describe, which
+        is how a decoupling capacitor ends up grounded to whatever was closest.
+    """
+    problems = []
+    covered = {}
+    zones = {tag for tag, _, _, _, _ in floorplan.ZONES}
+    patterns = dict(ZONE_PARTS)
+    for pattern, _, _, zone in COLUMNS:
+        patterns.setdefault(zone, ())
+        patterns[zone] = patterns[zone] + (pattern,)
+    for zone in sorted(zones):
+        if zone not in patterns:
+            problems.append(
+                f"floorplan.ZONES declares zone {zone} and nothing in "
+                f"placement.py implements it -- either place something there "
+                f"or stop declaring it")
+            continue
+        found = [ref for ref in sorted(design.PARTS)
+                 if any(re.match(p, ref) for p in patterns[zone])]
+        if not found:
+            problems.append(
+                f"zone {zone} holds no part on this board -- a zone with "
+                f"nothing in it is a claim no check can reach")
+        for ref in found:
+            covered.setdefault(ref, []).append(zone)
+    stale = sorted(set(patterns) - zones)
+    if stale:
+        problems.append(
+            f"placement.py places parts in {stale}, which floorplan.ZONES "
+            f"does not declare")
+    homeless = sorted(set(design.PARTS) - set(covered))
+    if homeless:
+        problems.append(
+            f"{len(homeless)} parts are in no zone at all ({homeless[:6]}) -- "
+            f"the floorplan is supposed to describe the whole board")
     return problems
 
 
@@ -681,7 +967,8 @@ def check_zones():
 
 def main():
     print("placement")
-    problems = check_placed() + check_zones() + check_overlaps()
+    problems = (check_placed() + check_zones() + check_overlaps()
+                + check_edge_parts() + check_zone_occupancy())
     print(f"  every part has a position              "
           f"{'ok' if not check_placed() else 'FAIL'}")
     print(f"  columns agree with floorplan zones     "
@@ -689,6 +976,10 @@ def main():
     overlaps = check_overlaps()
     print(f"  no two courtyards overlap              "
           f"{'ok' if not overlaps else str(len(overlaps)) + ' FAIL'}")
+    print(f"  edge connectors reach the outline      "
+          f"{'ok' if not check_edge_parts() else 'FAIL'}")
+    print(f"  every zone holds parts, every part a zone "
+          f"{'ok' if not check_zone_occupancy() else 'FAIL'}")
     for problem in problems[:12]:
         print(f"      {problem}")
     if len(problems) > 12:

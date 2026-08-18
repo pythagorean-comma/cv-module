@@ -56,6 +56,28 @@ ISOLATED = "IGND"
 # them differently -- a straddler is excluded from a crossing test, and these
 # are the *only* things allowed to cross this one.
 BARRIER = "BARRIER"
+# **The fourth domain, and this board has it because MIDI is a current loop.**
+# The far side of U21's LED belongs to whatever is transmitting: CA-033 puts a
+# 5 mA loop between two devices and requires that the receiver break it --
+# "the transmitter circuitry and receiver circuitry are internally separated
+# by an opto-isolator", and "Pin 2 of the MIDI In connector shall not have any
+# DC path to the receiver's ground". So J15, its loop resistor and the
+# protection diode return to a ground this module never touches, exactly as
+# the inlet's primary does.
+#
+# It is a second isolation barrier and this file used to say "the" barrier in
+# three places. U21 is its U15 and C836 is its C810 -- the declared bridge,
+# there for the same reason and with the same shape of argument: without it
+# the shield has no RF path at all, and with a DC path instead of a capacitor
+# the isolation would be gone.
+MIDI_LOOP = "MIDIGND"
+
+# The two barriers, each with the parts allowed to cross it. Read by
+# check_isolation(), which is one test run twice.
+BARRIERS = (
+    (ISOLATED, design.ISOLATION_BRIDGE, "the isolated primary"),
+    (MIDI_LOOP, design.MIDI_BRIDGE, "the MIDI transmitter's own ground"),
+)
 
 GROUND_STRATEGY = """
 Three stars, and only the first is a rule this module inherits.
@@ -134,7 +156,8 @@ DOMAINS = (
                             "MDGND, not MAGND, because this is switching "
                             "return current"),
     (r"^C81[1234]$", DIGITAL, "rail filter and regulator capacitors"),
-    (r"^J9$|^J10$|^J11$", DIGITAL, "PWM and OE from the controller"),
+    # J9-J13 were five rows here, the headers out to a deferred controller.
+    # The controller is on the board and its parts are below.
     (r"^R[1-6]0[12]$", ANALOGUE, "front-end inverting stage"),
     (r"^R[1-6]1[15]$", ANALOGUE, "R_IN and the VCA input RC"),
     (r"^R[1-6]5[1-5]$", ANALOGUE, "envelope rectifier, both stages"),
@@ -145,7 +168,45 @@ DOMAINS = (
                          "which is DS20006181C section 7.3's second scheme"),
     (r"^U18$", ANALOGUE, "the 3.3 V regulator for the ADC, off V5"),
     (r"^C81[5-9]$", ANALOGUE, "the ADC's rail and reference decoupling"),
-    (r"^J12$|^J13$", DIGITAL, "SPI and MCLK to the controller"),
+    # -- the controller, zone D2 ------------------------------------------
+    (r"^U19$", DIGITAL, "the RP2040 -- its exposed pad is the MDGND star for "
+                        "this zone"),
+    (r"^U20$", DIGITAL, "the QSPI flash, at the package"),
+    (r"^U22$", DIGITAL, "the 3.3 V switcher: its input is VA_RAW and its "
+                        "return is MDGND, which is where a pulse train "
+                        "belongs"),
+    (r"^Y801$", DIGITAL, "the 12 MHz crystal, case pins to MDGND"),
+    (r"^L802$", DIGITAL, "the switcher's inductor"),
+    # C836 is out of this range for R827's reason: it is the MIDI barrier's
+    # own bridge and belongs to BARRIER, below.
+    (r"^C82\d$|^C83[0-57-9]$", DIGITAL, "controller decoupling, the "
+                                         "crystal's load capacitors and the "
+                                         "panel's RC"),
+    (r"^C84[0-3]$", DIGITAL, "the switcher's input, bootstrap and output"),
+    # R827 is deliberately not in this range: it is the MIDI loop's own
+    # resistor and it returns to the sending device's ground, not to MDGND.
+    # Written as two ranges rather than one because a domain table whose
+    # patterns are tidier than the board is a domain table that will be wrong.
+    (r"^R82[0-6]$|^R82[89]$", DIGITAL, "USB termination, the VBUS divider, "
+                                       "the crystal drive resistor, RUN, "
+                                       "BOOTSEL and the MIDI OUT pair"),
+    (r"^R83[0-3]$", DIGITAL, "the tap and expression networks"),
+    (r"^R85[01]$", DIGITAL, "the switcher's feedback divider"),
+    (r"^J14$", DIGITAL, "USB, board-mounted -- see design.USB_CONN_REF"),
+    (r"^J16$|^J17$|^J18$|^J19$|^J20$", DIGITAL, "MIDI out, the panel jacks, "
+                                                "the boot header and SWD"),
+    # -- and the second barrier -------------------------------------------
+    (r"^U21$", BARRIER, "the MIDI opto: pins 1 and 3 belong to the sending "
+                        "device, 4 to 6 to this board. 5000 Vrms and 0.4 pF "
+                        "between them"),
+    (r"^C836$", BARRIER, "the MIDI IN shield capacitor -- the declared bridge "
+                         "across that barrier, and CA-033 requires it to be a "
+                         "capacitor rather than a wire"),
+    (r"^J15$", MIDI_LOOP, "the MIDI IN jack: DIN pins 4 and 5 are the "
+                          "transmitter's current loop"),
+    (r"^R827$", MIDI_LOOP, "the loop's series resistor -- see "
+                           "design.midi_loop()"),
+    (r"^D805$", MIDI_LOOP, "reverse protection across the opto's LED"),
     (r"^D[1-6]5[12]$", ANALOGUE, "envelope rectifier diodes -- inside A1's "
                                  "loop"),
     (r"^C[1-6]51$", ANALOGUE, "envelope one-pole, 4.7 ms"),
@@ -393,16 +454,28 @@ ZONES = (
      "faces C1. Note A_n is pin n+1 and Y_n is pin 19-n, so the channel order "
      "reverses across the package -- A1 and Y1 are diagonally opposite."),
 
-    ("D2", "controller and drive", DIGITAL,
-     "DEFERRED: RP2040, QSPI flash, crystal, USB, DIN MIDI, 2 x TPIC6B595, "
-     "the 74LVC1G123 one-shot, the fail-safe charge pump. Plus J12 and J13, "
-     "which are where the ADC's six logic signals leave the board for the "
-     "controller. **This entry used to place the envelope ADC itself here**, "
-     "'analogue and at the D2/A4 edge', which put an analogue part inside a "
-     "zone whose declared domain is MDGND -- a contradiction check_zones() "
-     "could not see, because it only walks per-channel columns. The ADC has "
-     "its own zone A6 now and it is north of the split.",
-     "South-east, one edge, with the star R902 at its corner nearest A3."),
+    ("D2", "the controller", DIGITAL,
+     "U19 and everything it needs: the QSPI flash at the package, the 12 MHz "
+     "crystal, USB, DIN MIDI in and out, the panel's two jacks, the boot and "
+     "debug headers, twelve decoupling capacitors and U22's 3.3 V switcher. "
+     "**Two things in here are not MDGND parts.** U21 and C836 are the MIDI "
+     "barrier and J15/R827/D805 sit on the far side of it, on the sending "
+     "device's ground -- the same relationship zone P has with the inlet. "
+     "And U22's input is VA_RAW, which arrives from P rather than from "
+     "anything in this zone.\n\n"
+     "**This entry used to place the envelope ADC here**, 'analogue and at "
+     "the D2/A4 edge', which put an analogue part inside a zone whose "
+     "declared domain is MDGND -- a contradiction check_zones() could not "
+     "see, because it only walks per-channel columns. The ADC has its own "
+     "zone A6 now and it is north of the split. The 2 x TPIC6B595 and the "
+     "74LVC1G123 this entry also named went with the coarse pad.",
+     "South-east, one edge, with the star R902 at its corner nearest A3. "
+     "Inside it, three placements are load-bearing rather than tidy: the "
+     "flash against U19's QSPI row ('short connections to maintain the "
+     "signal integrity'), the crystal and its two load capacitors against "
+     "XIN/XOUT with the tracks kept short ('the parasitic capacitance of the "
+     "PCB traces are a factor'), and U21's own bypass within 10 mm of its "
+     "pins, which its datasheet states as a distance."),
 
     # **This zone was declared for four passes with nothing in it, and the
     # empty declaration was the only place in the repo that said the converter
@@ -534,6 +607,24 @@ def check_isolation():
     fault whatever it is called, and the only way it can legitimately exist is
     through a component built to hold the two apart.
 
+    **There are two barriers now and this function said "the" barrier.** The
+    controller brought DIN MIDI, which is an opto-isolated current loop -- so
+    U21 is a second U15 and C836 is a second C810, with the same rule and a
+    different reason for it: the converter's barrier exists because a second
+    ground bond would break constraint 5.2, and MIDI's exists because CA-033
+    requires the receiver to break the loop. BARRIERS is the table; the check
+    is the same test run twice, which is what it should have been when there
+    was one.
+
+    **The geometric half is deliberately not extended to the second barrier.**
+    verify.check_isolation_gap() measures a region of the board because the
+    converter's primary is a 20 V node switching at half a megahertz across
+    50 pF, and what it is protecting is the audio ground bond.  U21's isolation
+    is 5000 Vrms and 0.4 pF *inside its own package*, and what the board has to
+    do is simply not join the two nets -- which is a netlist property and is
+    what this function tests. Saying so here rather than leaving the asymmetry
+    to be noticed.
+
     The geometric half is verify.check_isolation_gap(), which measures copper.
     Both are needed and neither implies the other: this one passes on a board
     where the two pours touch, and that one passes on a netlist where somebody
@@ -541,21 +632,19 @@ def check_isolation():
     gap is violated.
     """
     problems = []
-    for name, entries in sorted(design.NETS.items()):
-        refs = sorted({ref for ref, _ in entries})
-        domains = {domain_of(ref) for ref in refs}
-        if ISOLATED not in domains:
-            continue
-        bridges = {ref for ref in refs if domain_of(ref) == BARRIER}
-        others = domains - {ISOLATED, BARRIER}
-        if others:
-            problems.append(
-                f"{name} reaches the isolated primary and {sorted(others)} "
-                f"through {sorted(refs)} -- the barrier is not a boundary "
-                f"signals cross, and only {sorted(design.ISOLATION_BRIDGE)} "
-                f"and the converter may touch both sides")
-        elif not bridges and name != ISOLATED:
-            continue
+    for isolated, bridge, what in BARRIERS:
+        for name, entries in sorted(design.NETS.items()):
+            refs = sorted({ref for ref, _ in entries})
+            domains = {domain_of(ref) for ref in refs}
+            if isolated not in domains:
+                continue
+            others = domains - {isolated, BARRIER}
+            if others:
+                problems.append(
+                    f"{name} reaches {what} and {sorted(others)} through "
+                    f"{sorted(refs)} -- the barrier is not a boundary signals "
+                    f"cross, and only {sorted(bridge)} and the isolating part "
+                    f"itself may touch both sides")
     return problems
 
 
@@ -625,6 +714,11 @@ COURTYARD = {
     "TRACO_TMR-6-xxxxWI": 214.0,
     "L_CommonMode_Wuerth_WE-SL2": 66.0,
     "TSSOP-20": 55.0,
+    # The controller block. The QFN's number is its 7 x 7 body plus a
+    # courtyard; the rest are their own bodies.
+    "QFN-56-1EP_7x7mm": 64.0, "SO-6L": 44.0, "SOIC-8_5.3x5.3mm": 34.0,
+    "SOT-23-6": 13.0, "Crystal_SMD_3225": 10.0, "L_Bourns_SRN6045TA": 42.0,
+    "USB_Micro-B": 60.0,
 }
 
 # **What the pad was, kept as arithmetic because the saving is the result.** A

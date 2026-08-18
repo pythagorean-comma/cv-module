@@ -162,7 +162,37 @@ MEASURED = {
                    "output, so 3.3/12 x 52.1 = 14.3 mA against 35.4 mA of "
                    "+Vout headroom, and any efficiency above 40 % clears it. "
                    "Measuring this would size a part; it would not change the "
-                   "topology."),
+                   "topology. **Both halves of that held and the margin did "
+                   "not.** The switcher is fitted and mcu_supply() counts the "
+                   "rest of the rail -- the flash's 25 mA, the MIDI loop, the "
+                   "opto, the pedal -- so the 14.3 mA floor is 23.6 mA and "
+                   "the efficiency that clears it is 67 %, not 40. It still "
+                   "fits and it is the tightest margin on this board."),
+
+    # The one number the fitted switcher needs that its datasheet publishes
+    # only as a curve.
+    "mcu_dcdc_efficiency": Assumption(
+        value=0.85, units=" fractional, TPS560430XF at 12 V in, 3.3 V out",
+        low=0.75, high=0.92,
+        question="What does U22 draw from VA_RAW at this board's real 3.3 V "
+                 "load? SLVSE22B gives efficiency as figures rather than as a "
+                 "table -- section 7.8's curves at 8, 12, 24 and 36 V in -- "
+                 "and a number read off a plotted curve is not a reading. The "
+                 "measurement is one ammeter in series with the switcher's "
+                 "VIN pin.",
+        sets="how much of the converter's remaining 35.4 mA of +Vout the "
+             "controller costs, and that is the tightest budget on the board",
+        when_wrong="**Only in one direction, and the threshold is computed "
+                   "rather than assumed.** mcu_supply() states the efficiency "
+                   "at which the +Vout budget stops closing -- about 67 % -- "
+                   "and the range's floor is above it deliberately: a "
+                   "synchronous buck at a quarter of its rated current does "
+                   "not do worse than three quarters, and the FPWM version's "
+                   "own penalty at light load is inside that. If the "
+                   "measurement came back under 67 % the fix is not this "
+                   "part: it is the 92.7 mA of relay coil that V5 makes "
+                   "linearly from twelve volts, which is 37 % of +Vout and "
+                   "the only load on this board large enough to matter."),
 
     "servo_vos": Assumption(
         value=0.5e-3, units=" V, servo amplifier input offset",
@@ -1948,10 +1978,25 @@ def controller_asks():
     """What this board asks of a controller, counted rather than listed.
 
     **The signal count comes off the netlist and not off a table**, because a
-    table of what the connectors carry is a second copy of the connectors. J9
-    to J13 are where the controller lands -- five of the mixer's own 5-way
-    headers, grounds between the signals -- so what crosses is whatever those
-    parts carry that is not a ground.
+    table of what a part carries is a second copy of the part. That principle
+    is unchanged and what it counts has moved, which is worth recording rather
+    than quietly rewriting.
+
+    It used to walk J9 to J13 -- five 5-way headers that were where a deferred
+    off-board controller would have met this design -- and count what they
+    carried that was not a ground. Those headers are gone: the controller is on
+    this board, in zone D2, so the nets go to its pins. So this walks U19's own
+    GPIO pins instead, and **the number went up**, from 14 to 19. Four of the
+    five new ones are things the headers never carried because the block that
+    needed them was not drawn: two MIDI, the tap, the pedal and USB's VBUS
+    sense. GPIO margin falls from 2.14x to 1.58x and is still the tightest
+    countable row in controller_fit().
+
+    That is the shape of what drawing a deferred block does to a requirement
+    derived while it was deferred: the requirement was not wrong, it was
+    counted against an interface that stood in for the thing. The interface
+    carried what the *rest of the board* needed from a controller. The part
+    also needs pins for its own periphery.
 
     Everything else here is a figure some other function in this file derived,
     quoted rather than restated:
@@ -1964,15 +2009,18 @@ def controller_asks():
         is already derived *from this part's clock*, and is noted below as
         margin rather than as a reason.
     """
+    gpio_pins = {str(pin): gpio for gpio, pin in CONTROLLER_GPIO_PINS.items()}
     signals = sorted(
-        net for ref in CONTROLLER_HEADERS
-        for (owner, _), net in DESIGN.pin_owner().items()
-        if owner == ref and net not in ("MDGND", "MAGND"))
+        net for (ref, pin), net in DESIGN.pin_owner().items()
+        if ref == CONTROLLER_REF and pin in gpio_pins)
     return {
-        "headers": list(CONTROLLER_HEADERS),
         "signals": signals,
         "signal_count": len(set(signals)),
+        "gpio_used": sorted(gpio_pins[pin]
+                            for (ref, pin) in DESIGN.pin_owner()
+                            if ref == CONTROLLER_REF and pin in gpio_pins),
         "pwm": CHANNELS,
+        "pwm_slices": len(controller_slices()["used"]),
         "mclk_hz": envelope_adc_clock()["mclk_min"],
         "control_frame_hz": FRAME_RATE,
         "envelope_frame_hz": ENV_SAMPLE_HZ,
@@ -2005,11 +2053,19 @@ def controller_fit():
         conversions on a jittered clock. Seven divisors do: 7 through 13,
         17.86 MHz down to 9.615. CONTROLLER_MCLK_DIVIDE picks 12.
 
-    Every other row is between 2x and four orders of magnitude, which is the
+    Every other row is between 1.3x and four orders of magnitude, which is the
     shape of a part that is comfortably sufficient rather than one chosen
-    against the requirement. **The smallest countable margin is 2x, on the
-    UARTs and the SPI controllers**, and the row that would move first if this
-    board grew is GPIO at 2.14x -- 14 pins of 30.
+    against the requirement. **The tightest countable row is now the PWM
+    slices at 1.33x** -- six of eight, and see the note in the table about why
+    that is the right denominator -- with GPIO next at 1.58x, 19 pins of 30.
+
+    **Both of those moved when the block was drawn and neither moved because
+    anything was wrong.** GPIO went from 14 to 19 because the headers this used
+    to count carried what the rest of the board needed from a controller and
+    not what the controller needs for itself; the PWM row went from 6-of-16 to
+    6-of-8 because sixteen outputs was the wrong denominator for a requirement
+    about phase. The margins are smaller and the numbers are answers to the
+    question that was being asked.
 
     **PWM_CARRIER is in the table as margin and not as a reason**, and the
     distinction matters because it is the one place this board's arithmetic
@@ -2027,10 +2083,18 @@ def controller_fit():
                 and CONTROLLER_CLOCK_TYPICAL_HZ / d >= mclk]
     fitted = CONTROLLER_CLOCK_TYPICAL_HZ / CONTROLLER_MCLK_DIVIDE
     rows = [
-        ("signals across J9-J13", asks["signal_count"], CONTROLLER_GPIO,
+        ("signals on GPIO", asks["signal_count"], CONTROLLER_GPIO,
          "GPIO", "count"),
-        ("PWM outputs", asks["pwm"], CONTROLLER_PWM_OUTPUTS,
-         f"on {CONTROLLER_PWM_SLICES} slices", "count"),
+        # **Slices and not outputs, and the change is a correction.** This
+        # counted six PWM against the part's sixteen *outputs*, which is the
+        # wrong denominator for the thing spec section 4.2 asks for: a slice
+        # is one counter with two outputs, so two channels on one slice cannot
+        # be staggered against each other. Six of eight rather than six of
+        # sixteen, and the assignment in CONTROLLER_MAP spends six different
+        # slices for exactly this reason. controller_slices() is the check.
+        ("PWM carriers, one slice each", asks["pwm_slices"],
+         CONTROLLER_PWM_SLICES,
+         f"slices, {CONTROLLER_PWM_OUTPUTS} outputs", "count"),
         ("MCLK for the envelope ADC", mclk, fitted,
          f"125 MHz / {CONTROLLER_MCLK_DIVIDE}, one of "
          f"{len(divisors)} integer divides", "Hz"),
@@ -2202,16 +2266,49 @@ def controller_supply():
     section 6 of the spec forbids; the bound is stronger anyway, because it
     cannot be wrong.
 
-    **What it costs is a switching aggressor on VA+ and MDGND**, sharing both
-    with the audio domain -- which is why the requirement below is stated as
-    numbers rather than a part, exactly as supply_requirement() stated the
+    **What it costs is a switching aggressor on VA_RAW and MDGND**, sharing
+    both with the audio domain -- which is why the requirement below is stated
+    as numbers rather than a part, exactly as supply_requirement() stated the
     converter's before a part existed. supply_beat() is what has to price its
     frequency, and note what that function already found: the >= 300 kHz rule is
     a fundamental-only rule, so a second unit's frequency has to be checked
     against the mixer's pump harmonics *and* against this converter's own
     522-638 kHz band. Two switchers on one board beat with each other as well.
+
+    ------------------------------------------------------------------------
+    **The gate is closed and the part is U22, a TPS560430XF.** What this
+    function still does is state the requirement; MCU_DCDC and mcu_supply() are
+    the answer, mcu_dcdc_beat() prices the frequency, and mcu_dcdc_injection()
+    is what the aggressor is worth at the control port. Three things the
+    drawing changed in what is written above:
+
+      * **the input goes to VA_RAW and not to VA+**, one node ahead of R804 --
+        the same choice v5_regulator()'s input makes and for a sharper reason.
+        The switcher's input current is a pulse train, and taking it from
+        behind the rail filter would put that pulse train's own IR drop on the
+        rail the six channels share. In front of it, the filter that exists for
+        the TMR's 75 mVp-p attenuates this one's ripple too, at twice the
+        frequency and so about 6 dB harder;
+      * **the "any efficiency above 40 %" bound was computed for the MCU
+        alone.** The rail also carries the flash, the opto, the MIDI loop and
+        the pedal, and mcu_supply() counts them: the floor is 23.6 mA of +Vout
+        rather than 14.3, and the efficiency that clears it is about 67 %. The
+        bound is still one that cannot be wrong -- it is conservation of energy
+        divided by a headroom -- and it is no longer comfortable, which is the
+        honest description of a 250 mA converter delivering 246;
+      * **the switching frequency is a band and it had to be.** A part whose
+        frequency collapses with load -- any PFM buck -- was excluded by
+        mcu_dcdc_light_load() before any part was compared, for the reason
+        supply_beat() gives about the RCC-topology TMR 6.
     """
-    fit = supply_fit()
+    # **include_mcu=False, and getting this wrong is instructive.** With the
+    # block drawn, supply_fit()'s headroom already has the switcher's input
+    # current subtracted from it, so asking it here computes "the efficiency at
+    # which a switcher fits in what is left after the switcher" -- which came
+    # out as 432 % and printed itself into the report before anybody read it.
+    # The gate was argued from the budget *before* this block, and that is the
+    # question this function is still asking.
+    fit = supply_fit(include_mcu=False)
     head = fit["positive_headroom_ma"]
     low = sum(rail[1] for rail in CONTROLLER_USE_CASES["BOOTSEL idle"])
     high = sum(rail[1] for rail in CONTROLLER_USE_CASES["Popcorn"])
@@ -2237,6 +2334,1196 @@ def controller_supply():
             "beats_the_pump_at_khz": supply_beat()["worst_beat_khz"],
             "and_the_converter_at_khz": SUPPLY_KHZ,
         },
+        # The part that meets it, and the rail as drawn rather than as asked
+        # for. mcu_supply() counts the whole 3.3 V load; the two lines above
+        # are the MCU alone, kept because they are what the gate was argued
+        # from.
+        "part": MCU_DCDC,
+        "fitted": mcu_supply(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# The controller's pins, and which net lands on which one
+# ---------------------------------------------------------------------------
+# **Two tables and they do different jobs.** CONTROLLER_PINS is the package --
+# RP2040 datasheet section 5.5.2, tables 615 to 621, transcribed name by name
+# so that a wire lands on a number somebody read. CONTROLLER_GPIO_FUNCTIONS is
+# the multiplexer -- Table 2, "General Purpose Input/Output (GPIO) Bank 0
+# Functions" -- and it exists so that CONTROLLER_MAP's assignment of a net to a
+# GPIO can be *checked* rather than believed.
+#
+# That third table is the design decision and the other two are the datasheet.
+# controller_pin_map() joins them and Design.check_controller_functions()
+# refuses an assignment the part cannot honour -- which is the failure mode a
+# pin assignment has: every pin looks the same on a schematic, and "GPIO14 is
+# SPI0 SCK" is exactly as easy to write as the truth.
+CONTROLLER_IOVDD_ABS_MAX = 3.63        # Table 622, I/O supply voltage
+CONTROLLER_VIH = 2.0                   # Table 625, at IOVDD = 3.3 V
+CONTROLLER_VIL = 0.8
+CONTROLLER_VOL = 0.5                   # maximum, any drive strength
+CONTROLLER_VOH = 2.62                  # minimum, any drive strength
+CONTROLLER_VHYS = 0.2                  # Schmitt trigger, at 3.3 V
+CONTROLLER_PULL_KOHM = (50.0, 80.0)    # RPU / RPD
+CONTROLLER_ADC_RIN = 100_000.0         # Table 627, minimum
+CONTROLLER_ADC_ENOB = 8.7
+CONTROLLER_ADC_BITS = 12
+# Section 4.9.2: "The ADC input is capacitive, and when sampling, it places
+# about 1pF across the input", and "Capturing a sample takes 96 clock cycles
+# (96 x 1/48MHz) = 2us per sample".
+CONTROLLER_ADC_CSAMPLE = 1e-12
+CONTROLLER_ADC_CONVERSION_S = 2e-6
+# Section 2.9: "IOVDD should be decoupled with a 100nF capacitor close to each
+# of the chip's IOVDD pins", the same sentence for DVDD, USB_VDD and ADC_AVDD,
+# and "A 1uF capacitor should be connected between VREG_VIN and ground close to
+# the chip's VREG_VIN pin". The minimal design's section 2.1.3 adds the output:
+# "We must place 1uF capacitors close to both the input (VREG_IN) and the
+# output (VREG_OUT)".
+#
+# **The reference design does not do this and says why.** It shares one
+# capacitor between pins 48 and 49 "as there is not a lot of room on that side
+# of the device ... we have decreased the complexity and cost, at the expense
+# of having less decoupling capacitance". That is a two-layer board with parts
+# on one side; this is a four-layer board with a ground plane under the part,
+# so the vendor's own rule -- one per pin -- is what is drawn.
+CONTROLLER_DECOUPLE = "100n/50V X7R"
+CONTROLLER_VREG_C = "1u/16V X7R"
+CONTROLLER_VREG_C_FARADS = 1e-6
+CONTROLLER_RUN_PULLUP = "10k 1%"
+CONTROLLER_BOOT_SERIES = "1k 1%"
+
+# Section 5.5.2.2, tables 615-621. Every entry is a name and a number read off
+# the datasheet; the six IOVDD and two DVDD pins are lists because the part has
+# more than one of each and each one gets its own capacitor.
+CONTROLLER_PINS = {
+    "TESTEN": 19, "XIN": 20, "XOUT": 21, "SWCLK": 24, "SWDIO": 25, "RUN": 26,
+    "USB_DM": 46, "USB_DP": 47,
+    "QSPI_SD3": 51, "QSPI_SCLK": 52, "QSPI_SD0": 53, "QSPI_SD2": 54,
+    "QSPI_SD1": 55, "QSPI_SS": 56,
+    "ADC_AVDD": 43, "VREG_VIN": 44, "VREG_VOUT": 45, "USB_VDD": 48,
+    "GND": 57,
+}
+CONTROLLER_IOVDD_PINS = (1, 10, 22, 33, 42, 49)
+CONTROLLER_DVDD_PINS = (23, 50)
+CONTROLLER_GPIO_PINS = {
+    0: 2, 1: 3, 2: 4, 3: 5, 4: 6, 5: 7, 6: 8, 7: 9,
+    8: 11, 9: 12, 10: 13, 11: 14, 12: 15, 13: 16, 14: 17, 15: 18,
+    16: 27, 17: 28, 18: 29, 19: 30, 20: 31, 21: 32, 22: 34, 23: 35,
+    24: 36, 25: 37, 26: 38, 27: 39, 28: 40, 29: 41,
+}
+# The KiCad symbol names the four analogue-capable pins GPIO26/ADC0 and so on,
+# so the netlist has to as well. One place, here.
+CONTROLLER_ADC_GPIO = {26: "ADC0", 27: "ADC1", 28: "ADC2", 29: "ADC3"}
+
+# Table 2, columns F1 (SPI), F2 (UART), F4 (PWM), F8 (CLOCK) and F9 (USB).
+# F3 is I2C and F5-F7 are SIO and the two PIOs, which are on every pin -- Table
+# 3, "SIO ... must be selected for the processors to drive a GPIO" -- so a "SIO"
+# assignment below is checked against the pin existing rather than against this
+# table.
+CONTROLLER_GPIO_FUNCTIONS = {
+    0:  ("SPI0 RX",  "UART0 TX",  "PWM0 A", None,           "USB OVCUR DET"),
+    1:  ("SPI0 CSn", "UART0 RX",  "PWM0 B", None,           "USB VBUS DET"),
+    2:  ("SPI0 SCK", "UART0 CTS", "PWM1 A", None,           "USB VBUS EN"),
+    3:  ("SPI0 TX",  "UART0 RTS", "PWM1 B", None,           "USB OVCUR DET"),
+    4:  ("SPI0 RX",  "UART1 TX",  "PWM2 A", None,           "USB VBUS DET"),
+    5:  ("SPI0 CSn", "UART1 RX",  "PWM2 B", None,           "USB VBUS EN"),
+    6:  ("SPI0 SCK", "UART1 CTS", "PWM3 A", None,           "USB OVCUR DET"),
+    7:  ("SPI0 TX",  "UART1 RTS", "PWM3 B", None,           "USB VBUS DET"),
+    8:  ("SPI1 RX",  "UART1 TX",  "PWM4 A", None,           "USB VBUS EN"),
+    9:  ("SPI1 CSn", "UART1 RX",  "PWM4 B", None,           "USB OVCUR DET"),
+    10: ("SPI1 SCK", "UART1 CTS", "PWM5 A", None,           "USB VBUS DET"),
+    11: ("SPI1 TX",  "UART1 RTS", "PWM5 B", None,           "USB VBUS EN"),
+    12: ("SPI1 RX",  "UART0 TX",  "PWM6 A", None,           "USB OVCUR DET"),
+    13: ("SPI1 CSn", "UART0 RX",  "PWM6 B", None,           "USB VBUS DET"),
+    14: ("SPI1 SCK", "UART0 CTS", "PWM7 A", None,           "USB VBUS EN"),
+    15: ("SPI1 TX",  "UART0 RTS", "PWM7 B", None,           "USB OVCUR DET"),
+    16: ("SPI0 RX",  "UART0 TX",  "PWM0 A", None,           "USB VBUS DET"),
+    17: ("SPI0 CSn", "UART0 RX",  "PWM0 B", None,           "USB VBUS EN"),
+    18: ("SPI0 SCK", "UART0 CTS", "PWM1 A", None,           "USB OVCUR DET"),
+    19: ("SPI0 TX",  "UART0 RTS", "PWM1 B", None,           "USB VBUS DET"),
+    20: ("SPI0 RX",  "UART1 TX",  "PWM2 A", "CLOCK GPIN0",  "USB VBUS EN"),
+    21: ("SPI0 CSn", "UART1 RX",  "PWM2 B", "CLOCK GPOUT0", "USB OVCUR DET"),
+    22: ("SPI0 SCK", "UART1 CTS", "PWM3 A", "CLOCK GPIN1",  "USB VBUS DET"),
+    23: ("SPI0 TX",  "UART1 RTS", "PWM3 B", "CLOCK GPOUT1", "USB VBUS EN"),
+    24: ("SPI1 RX",  "UART1 TX",  "PWM4 A", "CLOCK GPOUT2", "USB OVCUR DET"),
+    25: ("SPI1 CSn", "UART1 RX",  "PWM4 B", "CLOCK GPOUT3", "USB VBUS DET"),
+    26: ("SPI1 SCK", "UART1 CTS", "PWM5 A", None,           "USB VBUS EN"),
+    27: ("SPI1 TX",  "UART1 RTS", "PWM5 B", None,           "USB OVCUR DET"),
+    28: ("SPI1 RX",  "UART0 TX",  "PWM6 A", None,           "USB VBUS DET"),
+    29: ("SPI1 CSn", "UART0 RX",  "PWM6 B", None,           "USB VBUS EN"),
+}
+
+# **The assignment, and every row of it is answerable.** Net, GPIO, and the
+# function that pin has to provide -- checked against the table above.
+#
+# Three rows are not free and the rest are:
+#
+#   * **the six PWM are on six different slices**, which is what spec section
+#     4.2's "phase-stagger the six slices so the buffer transients don't hit
+#     the reference together" requires: a slice is one counter, so two channels
+#     on one slice share a phase. Six A channels of slices 0 to 5, and
+#     controller_fit() counts the slices rather than the outputs for the same
+#     reason;
+#   * **MCLK has to be a CLOCK GPOUT**, because envelope_adc_clock() needs an
+#     *integer* divide of the system clock and a bit-banged or PWM-derived
+#     clock is neither integer nor jitter-free. Table 3: "CLOCK GPOUTx ...
+#     Can drive a number of internal clocks (including PLL outputs) onto GPIOs,
+#     with optional integer divide." Four pins on the part can do it and this
+#     takes the first;
+#   * **VBUSD has to be a USB VBUS DET pin**, for usb_vbus_divider()'s
+#     reason.
+#
+# The four SPI signals are one peripheral's four pins, which is a constraint
+# the table enforces rather than a preference: SPI0's RX, CSn, SCK and TX are
+# fixed relative to each other, so choosing MISO chooses the other three.
+#
+# **FSDRV is a plain GPIO and that is load-bearing.** The fail-safe's whole
+# mechanism is that *any* stuck state collapses the pump -- fail_states() and
+# pump_timing() -- and a PWM peripheral output is precisely a source of square
+# waves that survives the processor stopping. So FSDRV is toggled in software
+# from the control loop, and putting it on a pin whose PWM function is
+# available anyway is not the point: the point is that firmware must not use
+# it. Recorded here because it is a hardware-shaped constraint on firmware, the
+# same kind of record ENV_ADC_CHANNEL is.
+CONTROLLER_MAP = {
+    "PWM1": (0, "PWM0 A"),
+    "PWM2": (2, "PWM1 A"),
+    "PWM3": (4, "PWM2 A"),
+    "PWM4": (6, "PWM3 A"),
+    "PWM5": (8, "PWM4 A"),
+    "PWM6": (10, "PWM5 A"),
+    "MIDI_TX": (12, "UART0 TX"),
+    "MIDI_RX": (13, "UART0 RX"),
+    "OE": (14, "SIO"),
+    "FSDRV": (15, "SIO"),
+    "MISO": (16, "SPI0 RX"),
+    "CS": (17, "SPI0 CSn"),
+    "SCLK": (18, "SPI0 SCK"),
+    "MOSI": (19, "SPI0 TX"),
+    "IRQ": (20, "SIO"),
+    "MCLK": (21, "CLOCK GPOUT0"),
+    "TAP": (22, "SIO"),
+    "VBUSD": (25, "USB VBUS DET"),
+    "EXPR": (26, "ADC0"),
+}
+
+
+def usb_ground_loop(current_ma=None):
+    """What a USB cable does to constraint 5.2, and it is not a violation of it.
+
+    **The hazard this block introduces, priced rather than mentioned.** DIN
+    MIDI is opto-isolated because CA-033 requires it, and the reason CA-033
+    requires it is a ground loop between two mains-powered boxes. USB has no
+    such isolation: plugging this module into a computer ties MDGND to that
+    computer's ground, and from there the loop closes through R902, R901, the
+    mixer's own AGND and whatever cable carries the mixer's output back.
+
+    **Constraint 5.2 still holds and that is exactly the point.** The rule is
+    "exactly one bond between module audio ground and board AGND", and there is
+    still one: R901. What a USB cable adds is a path to a *third* ground, and
+    the constraint has nothing to say about it -- which is worth writing down,
+    because a rule that holds while the thing it defends against happens is a
+    rule somebody will quote as protection.
+
+    What the loop injects into the audio is the current times the impedance of
+    the segment it shares with the audio return, which is the bond:
+
+        v = I x BOND_R_OHMS                 at 50 Hz, where the bond is
+                                            resistance and nothing else
+
+    The current is a property of the *installation* -- two appliances, their
+    safety earths, and the difference between them -- and nothing in this repo
+    can measure it, so this takes it as a parameter and reports the answer
+    against the mixer's own noise floor rather than inventing a value. At a
+    milliamp, which is the order a mains ground loop between two earthed boxes
+    reaches, it is 40 uV against a 144 uV floor: **11 dB down, at 50 Hz, where
+    the ear is not forgiving**. That is not a fault the board can fix and it is
+    not nothing.
+
+    Three answers exist and none of them is free, so none is drawn:
+
+      * **a USB isolator** -- an ADuM3160 class part, a second isolated 3.3 V
+        supply for its far side, and a barrier this file would then have to
+        model. It is the honest fix and it is a block of its own;
+      * **unplug it.** USB here is for firmware and configuration; the
+        instrument does not need it while it is being played, and MIDI's own
+        DIN pair is isolated by construction;
+      * **accept it**, which is what every bus-powered USB-MIDI interface in
+        the world does.
+
+    Recorded so that the second one is a decision somebody took rather than a
+    habit, and so that the first one is costed if the measurement says it is
+    needed.
+    """
+    current = (1.0 if current_ma is None else current_ma) * 1e-3
+    volts = current * BOND_R_OHMS
+    floor = MEASURED["noise_floor"].value
+    return {
+        "current_ma": current * 1e3,
+        "bond_ohms": BOND_R_OHMS,
+        "volts": volts,
+        "floor_v": floor,
+        "below_floor_db": 20 * math.log10(floor / volts) if volts else math.inf,
+        "hz": 50.0,
+        # The one bond is still one bond: this is a path to a third ground, not
+        # a second path to the mixer's.
+        "bonds_to_mixer": 1,
+    }
+
+
+def controller_pin_map():
+    """Net -> GPIO -> package pin -> the datasheet function that allows it.
+
+    The join, done once, so that every consumer -- the netlist, the schematic,
+    verify.py and the report -- reads the same table rather than repeating the
+    assignment. Returns one row per net, in GPIO order.
+    """
+    rows = []
+    for net, (gpio, function) in sorted(CONTROLLER_MAP.items(),
+                                        key=lambda kv: kv[1][0]):
+        pin = CONTROLLER_GPIO_PINS[gpio]
+        name = f"GPIO{gpio}"
+        if gpio in CONTROLLER_ADC_GPIO:
+            name = f"GPIO{gpio}/{CONTROLLER_ADC_GPIO[gpio]}"
+        rows.append({"net": net, "gpio": gpio, "pin": pin, "name": name,
+                     "function": function,
+                     "available": CONTROLLER_GPIO_FUNCTIONS[gpio]})
+    return rows
+
+
+def controller_slices():
+    """Which PWM slice each channel's carrier comes out of, and whether they
+    are distinct.
+
+    Spec section 4.2 asks for the six carriers to be phase-staggered. A slice
+    is one counter with two outputs, so two channels sharing a slice share a
+    phase and the stagger is unavailable to them -- which makes "six slices"
+    the requirement rather than "six outputs". This is what controller_fit()
+    counts.
+    """
+    slices = {}
+    for n in range(1, CHANNELS + 1):
+        gpio, function = CONTROLLER_MAP[f"PWM{n}"]
+        slices[f"PWM{n}"] = (int(function.split()[0][3:]), function.split()[1])
+    used = sorted({index for index, _ in slices.values()})
+    return {
+        "slices": slices,
+        "distinct": len(used) == CHANNELS,
+        "used": used,
+        "available": CONTROLLER_PWM_SLICES,
+        "carrier_hz": PWM_CARRIER,
+        "stagger_deg": 360.0 / CHANNELS,
+    }
+
+
+# ---------------------------------------------------------------------------
+# The controller's own 3.3 V rail -- gate 2, and it is a part decision
+# ---------------------------------------------------------------------------
+# **controller_supply() derived the requirement and this is the part that meets
+# it.** The requirement, unchanged: V3V3 is an MCP1700 off V5 off VA+, so a
+# milliamp of 3.3 V is a milliamp of *twelve* at the converter's pin, and
+# supply_fit() leaves 35.4 mA of +Vout against an RP2040 whose own measured
+# range is 19.2 to 52.1 mA. A switcher from VA_RAW is the only topology with
+# room, and conservation of energy puts its input current at 3.3/12 of its
+# output whatever the part.
+#
+# Texas Instruments TPS560430, SLVSE22B (September 2017, revised June 2018),
+# read first-hand. Every figure below is from it with the table named.
+#
+# **Three properties chose this part and the first is the one nobody would
+# think of.**
+#
+#   * **it is the FPWM version, and that is load-bearing rather than tidy.**
+#     A buck that drops into pulse-frequency modulation at light load has a
+#     switching frequency proportional to load -- it stops being a frequency at
+#     all and becomes a rate. mcu_dcdc_light_load() computes where the boundary
+#     is for the fitted inductor and this board sits below it whenever the MCU
+#     is not busy, so a PFM part would spend most of its life pulse-skipping at
+#     a rate that sweeps *through the audio band*, on a rail this module's own
+#     amplifiers share. That is the same objection supply_beat() records
+#     against the RCC-topology TMR 6 -- "a frequency that wanders cannot be
+#     designed against at all" -- arriving at a second part for the same
+#     reason. Section 8.4.5: "For FPWM version, TPS560430 is locked in PWM mode
+#     at full load range";
+#   * **the frequency is a stated band and not a typical.** Section 7.7 gives
+#     the 1.1 MHz version as 0.935 to 1.265 MHz, so mcu_dcdc_beat() has
+#     something to compute with. The 2.1 MHz version exists and is not fitted:
+#     it costs switching loss on the one rail whose input current comes out of
+#     35 mA of headroom;
+#   * **Table 1 gives L, C_OUT and the divider for 1.1 MHz at 3.3 V.** 12 uH,
+#     22 uF, 51 k and 22.1 k. Nothing here is chosen by this repo, which is
+#     what section 6 of the spec asks for, and mcu_dcdc_output() checks the
+#     divider's arithmetic against equation 7 rather than trusting the table.
+#
+# **The fixed-output sibling exists and is deliberately not fitted.** The
+# TPS560430X3F is the same die with a 3.3 V reference and no divider -- two
+# fewer parts on the board -- and its FB pin's connection is nowhere stated in
+# the datasheet. The electrical table's "Fixed 3.3-V output, VFB = 3.96 V" and
+# the recommended-conditions line "FB 0 to 4.5 V" only *imply* that FB goes
+# straight to VOUT. An inferred connection on the pin that sets a rail is not
+# worth two resistors, and this repo's rule is that a source is read rather
+# than deduced from.
+MCU_DCDC = "TPS560430XF"
+MCU_DCDC_REF = "U22"
+MCU_DCDC_MPN = "TPS560430XFDBVR"
+MCU_DCDC_DATASHEET = "https://www.ti.com/lit/ds/symlink/tps560430.pdf"
+MCU_DCDC_REVISION = "SLVSE22B, September 2017, revised June 2018"
+# Section 6, DBV package, 6-pin SOT-23-6.
+MCU_DCDC_PINS = {"CB": 1, "GND": 2, "FB": 3, "EN": 4, "VIN": 5, "SW": 6}
+MCU_DCDC_VIN = (4.0, 36.0)             # section 7.3, recommended operating
+MCU_DCDC_IOUT_MAX_MA = 600.0
+MCU_DCDC_KHZ = (935.0, 1265.0)         # section 7.7, 1.1-MHz version
+MCU_DCDC_KHZ_TYP = 1100.0
+MCU_DCDC_VREF = 1.0                    # section 7.5, FB reference
+MCU_DCDC_VREF_RANGE = (0.985, 1.015)   # over -40 to 125 degC
+MCU_DCDC_IQ_MA = 0.120                 # non-switching, maximum
+MCU_DCDC_ILIM_A = (0.8, 1.1, 1.4)      # peak inductor current limit
+MCU_DCDC_THETA_JA = 173.0              # section 7.4, and see mcu_dcdc_fit()
+# Table 1, "L and COUT Typical Values", the 1.1 MHz / 3.3 V row.
+MCU_DCDC_L_HENRIES = 12e-6
+MCU_DCDC_RFBT_OHMS = 51_000.0
+MCU_DCDC_RFBB_OHMS = 22_100.0
+MCU_DCDC_L = "12u 20%"
+MCU_DCDC_RFBT = "51k 1%"
+MCU_DCDC_RFBB = "22k1 1%"
+MCU_DCDC_COUT = "22u/16V X5R"
+MCU_DCDC_COUT_FARADS = 22e-6
+# Section 9.2.2.6: "The typical recommended value for the high frequency
+# decoupling capacitor is 2.2 uF or higher ... Include a capacitor with a value
+# of 0.1 uF for high-frequency filtering and place it as close as possible to
+# the device pins." Both are fitted; the 2.2 uF is at 50 V because the same
+# section asks for "a voltage rating of twice the maximum input voltage" and
+# the input is twelve.
+MCU_DCDC_CIN = "2u2/50V X7R"
+MCU_DCDC_CIN_FARADS = 2.2e-6
+MCU_DCDC_CIN_HF = "100n/50V X7R"
+# Section 9.2.2.7: "The recommended bootstrap capacitor is 0.1 uF and rated at
+# 16 V or higher ... high-quality ceramic type with X7R or X5R grade".
+MCU_DCDC_CBOOT = "100n/50V X7R"
+# Bourns SRN6045TA-120M, datasheet read first-hand: 12 uH +/-20 %, DCR 65 mohm,
+# Irms 3.00 A, Isat 4.00 A, SRF 22 MHz, 6.0 x 6.0 x 4.5 mm shielded. The
+# datasheet's own selection rule is section 9.2.2.4's last line -- "The inductor
+# current rating should be a bit higher than current limit" -- and the current
+# limit is 1.4 A maximum, so Isat clears it by 2.9x rather than by a hair.
+MCU_DCDC_L_MPN = "SRN6045TA-120M"
+MCU_DCDC_L_DCR = 0.065
+MCU_DCDC_L_ISAT_A = 4.0
+MCU_DCDC_L_IRMS_A = 3.0
+MCU_DCDC_L_DATASHEET = ("https://www.bourns.com/docs/Product-Datasheets/"
+                        "SRN6045TA.pdf")
+
+
+def mcu_dcdc_output(rfbt=None, rfbb=None):
+    """The divider, checked against the datasheet's own equation rather than
+    read off its table.
+
+    Equation 7 is `RFBT = (VOUT - VREF) / VREF x RFBB`, and Table 1's 3.3 V row
+    gives 51 k and 22.1 k. Those are not the exact solution -- the exact one is
+    50.83 k -- so what this returns is the rail the *fitted* pair produces and
+    the error against 3.3 V, which is the number that matters to a part whose
+    absolute maximum on IOVDD is 3.63 V.
+
+    The reference's own tolerance is wider than the divider's: +/-1.5 % over
+    temperature against 1 % resistors, and both are in the total below.
+    """
+    rfbt = MCU_DCDC_RFBT_OHMS if rfbt is None else rfbt
+    rfbb = MCU_DCDC_RFBB_OHMS if rfbb is None else rfbb
+    ratio = 1.0 + rfbt / rfbb
+    nominal = MCU_DCDC_VREF * ratio
+    low = MCU_DCDC_VREF_RANGE[0] * (1.0 + rfbt * 0.99 / (rfbb * 1.01))
+    high = MCU_DCDC_VREF_RANGE[1] * (1.0 + rfbt * 1.01 / (rfbb * 0.99))
+    return {
+        "rfbt": rfbt, "rfbb": rfbb,
+        "volts": nominal,
+        "exact_rfbt": (V3V3_VOLTS - MCU_DCDC_VREF) / MCU_DCDC_VREF * rfbb,
+        "error": nominal / V3V3_VOLTS - 1.0,
+        "worst": (low, high),
+        # IOVDD's absolute maximum, RP2040 Table 622. What the rail may not
+        # reach, as opposed to what it should be.
+        "iovdd_abs_max": CONTROLLER_IOVDD_ABS_MAX,
+        "fits": high < CONTROLLER_IOVDD_ABS_MAX,
+        # The static current the divider itself draws from the rail, which is
+        # counted in mcu_supply() rather than ignored.
+        "divider_ma": 1e3 * V3V3_VOLTS / (rfbt + rfbb),
+    }
+
+
+def mcu_dcdc_light_load(l_henries=None, vin=None):
+    """Where a PFM part would stop being a fixed frequency, and it is above
+    every load this board presents.
+
+    **This is the argument for the F suffix and it is arithmetic.** A buck in
+    discontinuous conduction skips pulses, and the load at which that starts is
+    the boundary between continuous and discontinuous conduction: half the
+    inductor's own ripple current,
+
+        dI = VOUT x (VIN - VOUT) / (VIN x L x fSW)     datasheet equation 8
+        I_boundary = dI / 2
+
+    With Table 1's own 12 uH at 1.1 MHz that boundary is **91 mA**, and
+    mcu_rail_load() puts this board's *maximum* 3.3 V draw at 87. So a PFM part
+    would be in discontinuous conduction not at idle but always, and its
+    switching frequency would be
+
+        f = I_load / q,   q = dI / (2 x fSW)
+
+    -- the load divided by the charge one pulse delivers, which is the triangle
+    of height dI and base 1/fSW. That is proportional to load, and the two
+    numbers it passes through are the ones this project already has rules
+    about:
+
+      * **at the board's own idle draw it is under 300 kHz**, which is the
+        threshold spec section 1.1 sets and supply-decision.md argues for. A
+        part that fails the rule at idle fails it during most of the music;
+      * **below a couple of milliamps it is inside the audio band outright.**
+        That is not this firmware -- the RP2040's own BOOTSEL idle is 19 mA --
+        but it is one `wfi` away, and a sleep mode that makes the box quieter
+        electrically and noisier acoustically is exactly the kind of trap a
+        hardware choice should take off the table.
+
+    So the frequency of a PFM part here is not a number but a function of what
+    the processor happens to be doing, which is the objection supply_beat()
+    records against the RCC-topology TMR 6 -- "a frequency that wanders cannot
+    be designed against at all" -- arriving at a second part, for the same
+    reason, from the other end. The FPWM version is locked in PWM at every
+    load: section 8.4.5, "For FPWM version, TPS560430 is locked in PWM mode at
+    full load range."
+
+    What the F suffix costs is efficiency at light load, because the inductor
+    current is allowed to go negative -- ILS_NEG is -0.5 A typical. That cost
+    is inside MEASURED["mcu_dcdc_efficiency"], which is what supply_fit()
+    spends.
+    """
+    l_henries = l_henries or MCU_DCDC_L_HENRIES
+    vin = vin or SUPPLY_VOUT
+    f_hz = MCU_DCDC_KHZ_TYP * 1e3
+    ripple_a = V3V3_VOLTS * (vin - V3V3_VOLTS) / (vin * l_henries * f_hz)
+    load = mcu_rail_load()
+    charge = ripple_a / (2 * f_hz)
+
+    def pfm_hz(load_ma):
+        """What a PFM part's repetition rate would be at this load."""
+        return min(load_ma * 1e-3 / charge, f_hz)
+
+    return {
+        "ripple_a": ripple_a,
+        "boundary_ma": ripple_a / 2 * 1e3,
+        "load_ma": load["load_ma"],
+        "idle_ma": load["idle_ma"],
+        "charge_c": charge,
+        "always_discontinuous": load["load_ma"] < ripple_a / 2 * 1e3,
+        "pfm_hz_at_load": pfm_hz(load["load_ma"]),
+        "pfm_hz_at_idle": pfm_hz(load["idle_ma"]),
+        # The two loads that matter, solved rather than swept: where a PFM
+        # part would cross the spec's own 300 kHz rule and where it would
+        # enter the audio band.
+        "pfm_under_rule_below_ma": SUPPLY_MIN_KHZ * 1e3 * charge * 1e3,
+        "pfm_in_band_below_ma": BANDWIDTH * charge * 1e3,
+        "idle_breaks_rule": pfm_hz(load["idle_ma"]) < SUPPLY_MIN_KHZ * 1e3,
+        "fpwm": True,
+    }
+
+
+def mcu_dcdc_beat(f_khz=None):
+    """This board's second switcher, against the first and against the pump.
+
+    supply_beat() already found that the ">= 300 kHz" rule is a fundamental-only
+    rule for a mechanism that is not, and nothing here overturns that. What is
+    new is that there are now **two** switchers on one board, so there are three
+    products to price rather than one:
+
+      * against the mixer's 45 kHz pump and its harmonics -- supply_beat() does
+        this for any frequency and the answer for 1.1 MHz is the same shape:
+        somewhere in the stated band a harmonic lands on it exactly;
+      * against the TMR's own 522-638 kHz band, and its harmonics. The second
+        harmonic of the TMR reaches 1276 kHz and this part's band starts at
+        935, so those two overlap as well;
+      * and the two-unit case, which is not a case here: there is one of each.
+
+    **The conclusion is the same and the reason is different, which is worth
+    being exact about.** For the pump, what makes the product harmless is that
+    this module shares no rail with the mixer -- the isolation barrier. That
+    argument is *not* available for this converter, because VA_RAW is shared
+    with the audio domain by construction. What is available instead is
+    mcu_dcdc_injection(): the same R804/C811 pole that the TMR's own ripple goes
+    through, at twice the frequency, and the product is second order in two
+    quantities that are both already tiny.
+    """
+    f_khz = f_khz or MCU_DCDC_KHZ_TYP
+    against_pump = supply_beat(f_khz)
+    # Against the converter's own band, at every harmonic of each that can
+    # reach the other. The beat is |n x f1 - m x f2| minimised over the band,
+    # and the band is what makes it zero: two ranges that overlap contain a
+    # coincident pair.
+    overlaps = []
+    for n in range(1, 4):
+        for m in range(1, 4):
+            lo = abs(n * MCU_DCDC_KHZ[0] - m * SUPPLY_KHZ[1])
+            hi = abs(n * MCU_DCDC_KHZ[1] - m * SUPPLY_KHZ[0])
+            if (n * MCU_DCDC_KHZ[0] <= m * SUPPLY_KHZ[1]
+                    and m * SUPPLY_KHZ[0] <= n * MCU_DCDC_KHZ[1]):
+                overlaps.append((n, m, 0.0))
+            else:
+                overlaps.append((n, m, min(lo, hi)))
+    worst = min(overlaps, key=lambda row: row[2])
+    return {
+        "f_khz": f_khz,
+        "band_khz": MCU_DCDC_KHZ,
+        "against_pump": against_pump,
+        "against_converter": overlaps,
+        "worst_pair": worst[:2],
+        "worst_beat_khz": worst[2],
+        "rule_holds": abs(f_khz - socket.PUMP_FREQUENCY / 1e3) > 20.0,
+        "above_rule": f_khz >= SUPPLY_MIN_KHZ,
+    }
+
+
+def mcu_dcdc_injection(f_khz=None):
+    """What the second switcher puts on the rail the audio domain shares.
+
+    **The reason the input side is where this is computed.** The converter's
+    output ripple stays on VMCU and MDGND, which is the digital domain and the
+    controller's own problem. What reaches the audio is the *input* current: a
+    buck draws a pulse train from its supply, and its supply here is VA_RAW,
+    which feeds R804 into VA+ and U16 into V5.
+
+    The input ripple current of a buck is the switch current minus its own
+    average, so its RMS is the standard
+
+        I_rms = I_out x sqrt(D x (1 - D))        D = VOUT / VIN
+
+    and what it develops is that current across the impedance of VA_RAW at the
+    switching frequency, which is C813's 10 uF in parallel with the converter's
+    own output impedance. C813 alone is the pessimistic reading and is what is
+    used: giving the flyback credit for its impedance at a megahertz would be
+    inventing a figure the datasheet does not give.
+
+    Then R804/C811 -- the pole rail_filter() already computes for the TMR's own
+    75 mVp-p -- stands between VA_RAW and VA+, at twice the frequency it was
+    designed against, so it is worth about 6 dB more.
+    """
+    f_hz = (f_khz or MCU_DCDC_KHZ[0]) * 1e3
+    supply = mcu_supply()
+    duty = V3V3_VOLTS / SUPPLY_VOUT
+    i_rms = supply["load_ma"] * 1e-3 * math.sqrt(duty * (1 - duty))
+    z_bulk = 1.0 / (2 * math.pi * f_hz * PRIMARY_BULK_C_FARADS)
+    on_raw = i_rms * z_bulk
+    # The same pole as rail_filter(), evaluated here rather than there because
+    # the frequency is this part's and not the TMR's.
+    corner = 1.0 / (2 * math.pi * RAIL_FILTER_R_OHMS * RAIL_FILTER_C_FARADS)
+    attenuation = math.sqrt(1 + (f_hz / corner) ** 2)
+    residual = on_raw / attenuation
+    return {
+        "f_khz": f_hz / 1e3,
+        "duty": duty,
+        "input_rms_ma": i_rms * 1e3,
+        "z_bulk": z_bulk,
+        "on_va_raw_v": on_raw,
+        "attenuation_db": 20 * math.log10(attenuation),
+        "residual_v": residual,
+        "am": ripple_am(residual),
+        # Against the TMR's own residual on the same node, which is what
+        # rail_filter() reports: the two add on the rail and multiply at the
+        # control port.
+        "converter_residual_v": rail_filter()["residual_vpp"] / 2,
+    }
+
+
+def mcu_rail_load():
+    """Every milliamp on VMCU, and where each figure was read.
+
+    Separated from mcu_supply() for one reason and it is a real one: supply_
+    load() has to know this rail's current, mcu_supply() has to know what the
+    converter has left *before* this rail, and supply_fit() computes the second
+    from the first. Three functions in a ring unless the counting is its own
+    function, which it now is.
+    """
+    owner = DESIGN.pin_owner() if "DESIGN" in globals() else {}
+    on_rail = sorted({ref for (ref, _), net in owner.items() if net == "VMCU"})
+    terms = {
+        CONTROLLER_REF: sum(rail[1] for rail in CONTROLLER_USE_CASES["Popcorn"]),
+        FLASH_REF: FLASH_ICC_MA["program"][1],
+        MIDI_OPTO_REF: MIDI_OPTO_ICC_MA,
+        "MIDI out loop": midi_loop()["out_ma"],
+        "expression pedal": expression_input()["short_ma"],
+        "tap pull-up": tap_debounce()["closed_ma"],
+        "FB divider": mcu_dcdc_output()["divider_ma"],
+    }
+    idle_terms = {
+        CONTROLLER_REF: sum(rail[1]
+                            for rail in CONTROLLER_USE_CASES["BOOTSEL idle"]),
+        FLASH_REF: FLASH_ICC_MA["standby"][1],
+        MIDI_OPTO_REF: MIDI_OPTO_ICC_MA,
+        "FB divider": mcu_dcdc_output()["divider_ma"],
+    }
+    typical = {
+        CONTROLLER_REF: sum(rail[0] for rail in CONTROLLER_USE_CASES["Popcorn"]),
+        FLASH_REF: FLASH_ICC_MA["read_104"][0],
+        MIDI_OPTO_REF: MIDI_OPTO_ICC_MA,
+        "FB divider": mcu_dcdc_output()["divider_ma"],
+    }
+    return {
+        "parts": on_rail,
+        "terms": terms,
+        "load_ma": sum(terms.values()),
+        "idle_ma": sum(idle_terms.values()),
+        "typ_ma": sum(typical.values()),
+        "watts": V3V3_VOLTS * sum(terms.values()) * 1e-3,
+    }
+
+
+def mcu_supply():
+    """The 3.3 V load, counted off the netlist, and what it costs the converter.
+
+    **Counted rather than listed, for supply_load()'s own reason**: a table of
+    what hangs on a rail is a second copy of the rail. Every term below is a
+    datasheet maximum read first-hand:
+
+      * the RP2040 at 52.1 mA -- Table 637's heaviest use case, summed across
+        DVDD, IOVDD and USB_VDD, because DVDD is made from IOVDD's own supply
+        by an on-chip *linear* regulator and a linear regulator passes its
+        output current through;
+      * the flash at 25 mA -- W25Q128JV section 9.4, ICC5 page-program maximum,
+        which is larger than the 20 mA of ICC3 read at 104 MHz;
+      * the opto at 1.0 mA -- TLP2761 ICCH/ICCL maximum;
+      * the MIDI out loop, the expression pedal's divider, the tap pull-up and
+        the switcher's own feedback divider, each computed by the function that
+        owns it.
+
+    **The pedal term is a fault current and it is counted anyway.** A TS plug
+    in a TRS socket shorts ring to sleeve, which is VMCU to ground through
+    R832 alone -- see expression_input(). It is 3 mA, it is a state a musician
+    reaches by plugging in the wrong lead, and a supply budget that excludes
+    the states the panel can be put into is a budget about the good case.
+    """
+    load = mcu_rail_load()
+    efficiency = MEASURED["mcu_dcdc_efficiency"]
+    watts = load["watts"]
+    # **The headroom *before* the controller**, which is the 35.4 mA
+    # controller_supply() argued the gate from. Asking supply_fit() for the
+    # figure with this block already in it would be asking a question whose
+    # answer contains its own subject; the parameter is what keeps one copy of
+    # the arithmetic and two questions.
+    head = supply_fit(include_mcu=False)["positive_headroom_ma"]
+    return {
+        "parts": load["parts"],
+        "terms": load["terms"],
+        "load_ma": load["load_ma"],
+        "idle_ma": load["idle_ma"],
+        "watts": watts,
+        # Conservation of energy, and then the part. The floor cannot be wrong;
+        # the second is the floor divided by an assumption with a range.
+        "floor_ma": watts / SUPPLY_VOUT * 1e3,
+        "input_ma": watts / (efficiency.low * SUPPLY_VOUT) * 1e3
+                    + MCU_DCDC_IQ_MA,
+        "input_ma_typical": watts / (efficiency.value * SUPPLY_VOUT) * 1e3
+                            + MCU_DCDC_IQ_MA,
+        "min_efficiency": watts / SUPPLY_VOUT * 1e3 / head,
+        "headroom_before_ma": head,
+        "iout_limit_ma": MCU_DCDC_IOUT_MAX_MA,
+        "iout_margin": MCU_DCDC_IOUT_MAX_MA / load["load_ma"],
+        # What is left of +Vout once this block is on it. The number the whole
+        # gate was about, answered.
+        "headroom_after_ma": head - (watts / (efficiency.low * SUPPLY_VOUT)
+                                     * 1e3 + MCU_DCDC_IQ_MA),
+        # The part's own dissipation, which is not what limits it: the loss is
+        # the difference between what it takes and what it delivers.
+        "watts_lost": watts / efficiency.low - watts,
+        "rise_c": (watts / efficiency.low - watts) * MCU_DCDC_THETA_JA,
+    }
+
+
+# ---------------------------------------------------------------------------
+# What hangs off the controller: flash, crystal, USB, MIDI, pedal, footswitch
+# ---------------------------------------------------------------------------
+# Everything in this section comes from one of two documents read first-hand:
+# the RP2040 datasheet (build-date 2024-11-05) and **Hardware design with
+# RP2040** (RP-008279-DS, chapter 2, "Minimal design example"), which is the
+# vendor's own reference design and the place every value below with an RP
+# section number against it comes from. The MIDI half comes from CA-033, the
+# MMA/AMEI "MIDI 1.0 Electrical Specification Update [2014]", also read.
+#
+# **The rule this section follows, because it is the one section 6 of the spec
+# is about:** where the vendor's reference design states a value, that value is
+# used and the reasoning is quoted rather than re-derived. Where it states a
+# *range* or leaves the choice to the application -- the MIDI receiver's
+# resistor, the pedal's series resistor, the VBUS divider -- a function here
+# derives it and says against what.
+
+# -- the QSPI flash --------------------------------------------------------
+#
+# W25Q128JVSIQ, Winbond datasheet revision G (8 April 2019), read first-hand.
+# It is the part the vendor's own minimal design fits -- "The device chosen
+# here is an W25Q128JVS device (U2 ...), which is a 128Mbit chip (16MB). This
+# is the largest memory size that RP2040 can support."
+#
+# **The size is not derived and saying so is the honest state.** Nothing in
+# this project sizes the firmware: the pattern engine is `hexengine.c` and it
+# is kilobytes. What the size *does* decide is nothing electrical -- the
+# smaller siblings are the same die family in the same 8-pin SOIC with the same
+# supply current class -- so this follows the reference design rather than
+# inventing a requirement to justify a smaller part. If cost matters later,
+# W25Q16JV is pin-compatible and changes no value on this board.
+FLASH = "W25Q128JV"
+FLASH_REF = "U20"
+FLASH_MPN = "W25Q128JVSIQ"
+FLASH_DATASHEET = "https://docs.rs-online.com/7d70/0900766b81703faf.pdf"
+FLASH_REVISION = "Revision G, 8 April 2019"
+# Section 10.1, 8-Pin SOIC 208-mil, package code S.
+FLASH_PINS = {"CS": 1, "DO_IO1": 2, "WP_IO2": 3, "GND": 4,
+              "DI_IO0": 5, "CLK": 6, "HOLD_IO3": 7, "VCC": 8}
+FLASH_VCC = (2.7, 3.6)
+# Section 9.4, DC electrical characteristics: (typical, maximum) milliamps.
+FLASH_ICC_MA = {
+    "standby": (0.010, 0.060),
+    "read_104": (12.0, 20.0),
+    "program": (20.0, 25.0),
+}
+FLASH_LOCAL = "100n/50V X7R"
+
+
+# -- the crystal -----------------------------------------------------------
+#
+# **12 MHz is a value and not a choice.** RP2040 section 1.4.2, XIN/XOUT: "The
+# USB bootloader requires a 12MHz crystal or 12MHz clock input." The part is
+# the one the vendor names twice -- minimal design section 2.3 and section
+# 2.3.1, "For original designs using RP2040 we recommend using the Abracon
+# ABM8-272-T3" -- with Table 1's own parameters: CL 10 pF, ESR 50 ohm maximum,
+# C0 3.0 pF, drive level 200 uW maximum, +/-30 ppm.
+#
+# The two accompanying values are the vendor's as well and both carry a
+# mechanism worth keeping:
+#
+#   * **15 pF each side**, because two equal capacitors in series across the
+#     crystal are C/2 and the board adds its own stray: "we'll assume a value
+#     of 3pF for this ... to give us a total load capacitance of 10.5pF, which
+#     is close enough to the target of 10pF." crystal_load() is that arithmetic
+#     and it is here so that a different crystal can be asked the question;
+#   * **1 kohm in series with XOUT**, because the drive has to be limited or
+#     the crystal is over-driven: "We've opted for a device with a maximum of
+#     50 ohm, as we've found that this, along with a 1k ohm series resistor
+#     (R5), is a good value to prevent the crystal being over-driven and being
+#     damaged when using an IOVDD level of 3.3V." The same paragraph says the
+#     value is tied to IOVDD being 3.3 V, which it is here.
+CRYSTAL = "12MHz 30ppm"
+CRYSTAL_REF = "Y801"
+CRYSTAL_MPN = "ABM8-272-T3"
+CRYSTAL_DATASHEET = "https://abracon.com/Resonators/abm8.pdf"
+CRYSTAL_HZ = CONTROLLER_XTAL_HZ
+CRYSTAL_CL_FARADS = 10e-12
+CRYSTAL_C0_FARADS = 3.0e-12
+CRYSTAL_ESR_MAX = 50.0
+CRYSTAL_DRIVE_MAX_W = 200e-6
+CRYSTAL_PPM = 30.0
+CRYSTAL_LOAD_C = "15p/50V C0G"
+CRYSTAL_LOAD_C_FARADS = 15e-12
+CRYSTAL_SERIES_R = "1k 1%"
+CRYSTAL_SERIES_R_OHMS = 1_000.0
+# What the reference design assumes the board adds. It is an assumption in the
+# vendor's document rather than in this one -- "We'll assume a value of 3pF for
+# this" -- and it is quoted as theirs.
+CRYSTAL_STRAY_FARADS = 3e-12
+# Crystal_GND24: pins 1 and 3 are the terminals, 2 and 4 are the case.
+CRYSTAL_PINS = {"XIN": 1, "XOUT": 3, "CASE_A": 2, "CASE_B": 4}
+
+
+def crystal_load(c_farads=None, stray=None, target=None):
+    """Two equal capacitors and the board, against the crystal's own CL.
+
+    The load a crystal sees is the series combination of the two shunt
+    capacitors -- C/2 when they are equal -- plus whatever the pins and tracks
+    add in parallel. The vendor's own worked example is reproduced here so that
+    changing the crystal changes the answer:
+
+        C_load = C / 2 + C_stray = 15 / 2 + 3 = 10.5 pF   against CL = 10 pF
+
+    A load capacitance above CL pulls the frequency *down*, and **this function
+    deliberately does not say by how much.** The pulling formula is
+
+        df/f  =  C1 / (2 x (C0 + CL))
+
+    with C1 the *motional* capacitance -- femtofarads, and the ABM8's datasheet
+    does not publish it. It gives C0 (3.0 pF maximum), the ESR, the load and
+    the tolerance, and nothing else. A first attempt here used C0 in C1's place
+    and reported **4273 ppm** for half a picofarad, which is two orders of
+    magnitude wrong and would have been quoted; the arithmetic was right and
+    the quantity was not.
+
+    So what is returned is the load error in picofarads and the two figures it
+    has to be small against: the crystal's own +/-30 ppm tolerance, and USB full
+    speed's +/-2500 ppm. The vendor accepts this exact arrangement in the
+    document the values come from -- "10.5pF, which is close enough to the
+    target of 10pF" -- and 0.5 pF against a 3 pF assumed stray is inside the
+    stray's own uncertainty anyway.
+    """
+    c_farads = c_farads or CRYSTAL_LOAD_C_FARADS
+    stray = CRYSTAL_STRAY_FARADS if stray is None else stray
+    target = target or CRYSTAL_CL_FARADS
+    load = c_farads / 2 + stray
+    return {
+        "c_each": c_farads,
+        "stray": stray,
+        "load": load,
+        "target": target,
+        "error_pf": (load - target) * 1e12,
+        "error_fraction": load / target - 1.0,
+        "tolerance_ppm": CRYSTAL_PPM,
+        # USB 2.0 full speed is 12 Mb/s +/- 0.25 %, which is the loosest
+        # requirement this clock has and the one section 1.4.1 exists for.
+        "usb_ppm": 2500.0,
+    }
+
+
+# -- USB ------------------------------------------------------------------
+#
+# The connector is a board-mounted micro-B and the two series resistors are the
+# datasheet's: RP2040 Table 620, "USB Data +ve. 27 ohm series resistor required
+# for USB operation", and minimal design section 2.4.1 repeats it with the
+# reason -- "in order to meet the USB impedance specification" -- and asks for
+# them "placed close to the chip".
+#
+# **Board-mounted rather than a header, and it is the one connector on this
+# board that is.** Every other panel part here reaches the board through one of
+# the mixer's own headers, because the enclosure is out of scope and a header
+# decides nothing mechanical. USB is different for a computable reason: it is
+# the only signal on this board above 10 MHz, it wants a 90 ohm differential
+# pair over unbroken ground, and a pigtail to a panel socket is an
+# uncontrolled-impedance stub on exactly that pair. The trade is a panel
+# cut-out this repo cannot check, and it is written down here rather than
+# discovered at assembly.
+#
+# **USB-C was the alternative and it is refused for the reason section 6
+# gives.** A type-C receptacle needs two 5.1 kohm CC pull-downs to be
+# recognised as a device, and that value comes from the USB Type-C
+# specification, which this session has not read. Micro-B needs no such
+# resistor and is what the vendor's own reference design fits.
+USB_CONN_REF = "J14"
+USB_CONN = "USB_B_Micro"
+USB_CONN_MPN = "105017-0001"
+USB_SERIES_R = "27R 1%"
+USB_SERIES_R_OHMS = 27.0
+USB_VBUS_VOLTS = (4.75, 5.25)
+# Table 626, USB IO characteristics, for the pins themselves.
+USB_VOH = 2.8
+USB_PULLUP_KOHM = (0.873, 1.548)
+# The VBUS divider, and it is two equal resistors -- see usb_vbus_divider(),
+# where the obvious unequal pair is the one that fails. 22 k is a value the
+# board already buys.
+USB_VBUS_TOP = "22k 1%"
+USB_VBUS_TOP_OHMS = 22_000.0
+USB_VBUS_BOT = "22k 1%"
+USB_VBUS_BOT_OHMS = 22_000.0
+
+
+def usb_vbus_divider(top=None, bottom=None):
+    """Why a self-powered device has to see VBUS, and what the divider must do.
+
+    **The mechanism first, because it is the reason there is a divider at
+    all.** This board has its own supply, so it can be powered while the host
+    is not. RP2040's USB pull-up on DP is inside the chip and powered from
+    USB_VDD; if it is enabled with the host off, the device drives current into
+    an unpowered bus. The part provides the input that prevents it -- Table 2,
+    function F9, "USB VBUS DET" -- and it needs the 5 V bus rail brought to a
+    GPIO that may not exceed IOVDD + 0.3 (Table 622).
+
+    So the divider has two ends and both are hard limits rather than
+    preferences:
+
+        5.25 V x k  <=  3.3 V, and well under IOVDD + 0.3 = 3.63 (Table 622)
+        4.75 V x k  >=  VIH = 2.0 V           (Table 625, IOVDD = 3.3 V)
+
+    which is `k` between 0.421 and 0.629 -- a window barely wider than 3:2, on
+    a divider most designs write down without arithmetic. **The obvious pair
+    fails both ways round.** 22 k over 10 k is k = 0.3125 and delivers 1.48 V
+    at the bottom of the bus range, under VIH; inverted, 10 k over 22 k is
+    0.6875 and delivers 3.61 V at the top, over the rail and 20 mV inside an
+    absolute maximum.
+
+    **Two equal resistors is k = 0.5**, which is the middle of the window: 2.38
+    to 2.63 V, 19 % above VIH at the worst end and 0.67 V under the rail at the
+    other. It is also the divider nobody has to look up.
+    """
+    top = USB_VBUS_TOP_OHMS if top is None else top
+    bottom = USB_VBUS_BOT_OHMS if bottom is None else bottom
+    ratio = bottom / (top + bottom)
+    low, high = USB_VBUS_VOLTS
+    return {
+        "top": top, "bottom": bottom, "ratio": ratio,
+        "at_low": low * ratio,
+        "at_high": high * ratio,
+        "vih": CONTROLLER_VIH,
+        "abs_max": CONTROLLER_IOVDD_ABS_MAX,
+        "reads_high": low * ratio >= CONTROLLER_VIH,
+        "within_rating": high * ratio <= V3V3_VOLTS,
+        "current_ma": high / (top + bottom) * 1e3,
+    }
+
+
+# -- DIN MIDI --------------------------------------------------------------
+#
+# CA-033, "MIDI 1.0 Electrical Specification Update [2014]", MMA/AMEI, read
+# first-hand. The interface is "31.25 (+/- 1%) Kbaud, asynchronous, with a
+# start bit, 8 data bits (D0 to D7), and a stop bit ... a total of 10 bits for
+# a period of 320 microseconds per serial byte", and "The MIDI circuit is a 5mA
+# current loop; logical 0 is current ON."
+#
+# The transmitter's two resistors are the specification's own, in its 3.3 V
+# column: "RA 33 ohm 5% 0.5W" from the supply and "RC 10 ohm 5% 0.25W" from the
+# driver. Nothing is derived there; they are a table entry.
+#
+# **The receiver's resistor is not a table entry and that is where the work
+# is.** CA-033 draws RB as 220 ohm and says of the pull-up RD only that its
+# "Value ... depends on opto-isolator and VRX". Two things follow. RD does not
+# exist here at all -- the TLP2761 has a totem-pole output, so there is nothing
+# to pull up, which is one part and one node fewer than the 6N138 the
+# specification names. And RB has to be *computed*, because this receiver may
+# be driven by either a 5 V transmitter (220 + 220 ohm) or a 3.3 V one
+# (33 + 10), and those two differ by a factor of six in source resistance
+# against an opto whose recommended input current spans 2 to 6 mA.
+# midi_loop() is that arithmetic and 220 ohm does not survive it.
+MIDI_BAUD = 31_250.0
+MIDI_BIT_S = 1.0 / 31_250.0
+MIDI_LOOP_MA = 5.0
+MIDI_RISE_MAX_S = 2e-6                 # "Rise and fall times should be less
+                                       # than 2 microseconds"
+# The transmitter, CA-033 Figure 1's 3.3 V column.
+MIDI_OUT_RA = "33R 5%"
+MIDI_OUT_RA_OHMS = 33.0
+MIDI_OUT_RC = "10R 5%"
+MIDI_OUT_RC_OHMS = 10.0
+# The receiver's own series resistor, derived by midi_loop().
+MIDI_IN_RB = "390R 1%"
+MIDI_IN_RB_OHMS = 390.0
+# CA-033 Figure 2's "Reverse voltage protection for opto-isolator", drawn as a
+# 1N914. The board already buys the 1N4148W, which is the same junction in a
+# SOD-123, so this adds no BOM line.
+MIDI_IN_DIODE = ENV_DIODE
+# The optional 0.1 uF from the MIDI IN jack's pin 2 and shield to local ground:
+# "Pin 2 of the MIDI In connector shall not have any DC path to the receiver's
+# ground. However, a connection through a small capacitor (0.1uF typical) to
+# ground is optional for improved high-frequency (RF) shielding." Fitted,
+# because it is the only thing on this board that grounds a shield the audio
+# domain does not own, and a capacitor is what keeps that true at DC.
+MIDI_IN_SHIELD_C = "100n/50V X7R"
+#
+# Toshiba TLP2761, datasheet rev 10.0 (2026-05-11), read first-hand. **The
+# specification names PC-900V and 6N138 and both are 5 V parts**; this board's
+# logic rail is 3.3 V and the RP2040's inputs are not 5 V tolerant, so the
+# receiver has to be a part specified at 3.3 V. CA-033 allows exactly that --
+# "Other high-speed opto-isolators may be satisfactory. The receiver must
+# require less than 5 mA to turn on. Rise and fall times should be less than 2
+# microseconds" -- and every one of those three is a number this part states:
+# 2.7 to 5.5 V supply, 1.6 mA threshold input current at 125 degC, 49 ns
+# typical propagation delay against a 2 us requirement.
+MIDI_OPTO = "TLP2761"
+MIDI_OPTO_REF = "U21"
+MIDI_OPTO_MPN = "TLP2761(TP,E)"
+MIDI_OPTO_DATASHEET = ("https://toshiba.semicon-storage.com/info/docget.jsp"
+                       "?did=28819&prodName=TLP2761")
+MIDI_OPTO_REVISION = "Rev 10.0, 2026-05-11"
+MIDI_OPTO_PINS = {"A": 1, "NC": 2, "K": 3, "GND": 4, "VO": 5, "VCC": 6}
+MIDI_OPTO_IF_ON_MA = (2.0, 6.0)        # section 9, recommended operating
+MIDI_OPTO_IF_ABS_MAX_MA = 10.0         # section 8, absolute maximum
+MIDI_OPTO_IFHL_MA = 1.6                # threshold input current, -40 to 125 C
+MIDI_OPTO_VF = (1.35, 1.65)            # at IF = 2 mA, 25 degC
+MIDI_OPTO_ICC_MA = 1.0                 # ICCH/ICCL maximum
+MIDI_OPTO_TPD_S = 80e-9                # maximum, either direction
+MIDI_OPTO_SKEW_S = 25e-9               # pulse width distortion, maximum
+MIDI_OPTO_VCC = (2.7, 5.5)
+# "A ceramic capacitor (0.1 uF) should be connected between pin 6 and pin 4 to
+# stabilize the operation of a high-gain linear amplifier. Otherwise, this
+# photocoupler may not switch properly. The bypass capacitor should be placed
+# within 1 cm of each pin." Not decoupling in the usual sense -- a condition of
+# operation, with a distance attached, which is why placement.py has to know.
+MIDI_OPTO_LOCAL = "100n/50V X7R"
+MIDI_OPTO_LOCAL_MM = 10.0
+
+
+def midi_loop(rb=None):
+    """The receiver's series resistor, against both kinds of transmitter.
+
+    **The one value in the MIDI block this repo has to choose, and CA-033's own
+    220 ohm does not survive the arithmetic.** The loop is a series circuit:
+    the transmitter's supply, its two resistors, the cable, this board's RB and
+    the opto's LED. The specification gives two transmitters:
+
+        5 V   RA 220 + RC 220 = 440 ohm      the original circuit
+        3.3 V RA  33 + RC  10 =  43 ohm      CA-033's update
+
+    and this receiver may be plugged into either, because both are current
+    standards and a MIDI cable does not say which is on the other end. So RB
+    has to hold the LED current inside the TLP2761's recommended 2 to 6 mA at
+    *both* ends, with the LED's own forward voltage at its own extremes:
+
+        I = (VTX - VF - VOL) / (R_TX + RB)
+
+    **CA-033's own 220 ohm does not fail this and 390 is not a rescue** -- a
+    claim written here first and corrected by running the arithmetic rather
+    than by reading it. At 220 ohm the four corners are 4.32 to 5.51 mA: inside
+    the recommended range, and 9 % under its ceiling with the 3.3 V
+    transmitter. That is a working receiver with the margin all on one side.
+
+    **390 ohm centres it**: 2.66 to 3.80 mA, which is 1.66x above the threshold
+    current at the worst corner and 1.58x under the recommended ceiling at the
+    best. The choice is between margin that is 2.7x one way and 1.09x the
+    other, and margin that is 1.66x and 1.58x -- and what makes the balanced
+    one right here is that neither end of the spread is knowable: the
+    transmitter is somebody else's box, and VF is quoted at 2 mA rather than at
+    the current the loop actually delivers.
+
+    The driver's own VOL is the RP2040's, Table 625: 0.5 V maximum at any drive
+    strength. It is in the arithmetic because at 3.3 V it is a sixth of the
+    voltage the loop has to work with.
+    """
+    rb = MIDI_IN_RB_OHMS if rb is None else rb
+    transmitters = {
+        "5V (220 + 220)": (5.0, 440.0),
+        "3V3 (33 + 10)": (V3V3_VOLTS, MIDI_OUT_RA_OHMS + MIDI_OUT_RC_OHMS),
+    }
+    corners = {}
+    for name, (volts, r_tx) in transmitters.items():
+        for vf, label in ((MIDI_OPTO_VF[0], "VF min"),
+                          (MIDI_OPTO_VF[1], "VF max")):
+            corners[f"{name}, {label}"] = (
+                (volts - vf - CONTROLLER_VOL) / (r_tx + rb) * 1e3)
+    low, high = min(corners.values()), max(corners.values())
+    return {
+        "rb": rb,
+        "corners": corners,
+        "low_ma": low,
+        "high_ma": high,
+        "recommended": MIDI_OPTO_IF_ON_MA,
+        "inside": (low >= MIDI_OPTO_IF_ON_MA[0]
+                   and high <= MIDI_OPTO_IF_ON_MA[1]),
+        "threshold_margin": low / MIDI_OPTO_IFHL_MA,
+        "abs_margin": MIDI_OPTO_IF_ABS_MAX_MA / high,
+        # What this board's own transmitter draws from VMCU when it is sending
+        # a zero, into the 220 ohm receiver CA-033 draws.
+        "out_ma": (V3V3_VOLTS - MIDI_OPTO_VF[0] - CONTROLLER_VOL)
+                  / (MIDI_OUT_RA_OHMS + MIDI_OUT_RC_OHMS + 220.0) * 1e3,
+        # The timing, which is the other half of "may be satisfactory".
+        "bit_s": MIDI_BIT_S,
+        "delay_fraction": MIDI_OPTO_TPD_S / MIDI_BIT_S,
+        "skew_fraction": MIDI_OPTO_SKEW_S / MIDI_BIT_S,
+        "rise_requirement_s": MIDI_RISE_MAX_S,
+    }
+
+
+# -- the tap footswitch and the expression pedal ---------------------------
+#
+# Both are panel jacks on the far end of a lead somebody stands on, so both get
+# the same two things: a defined impedance at the pin and a series resistor
+# between the outside world and the die. Neither value is in any datasheet --
+# they are this board's -- so both are derived below.
+TAP_PULLUP = "10k 1%"
+TAP_PULLUP_OHMS = 10_000.0
+TAP_SERIES = "1k 1%"
+TAP_SERIES_OHMS = 1_000.0
+TAP_C = "100n/50V X7R"
+TAP_C_FARADS = 100e-9
+EXPR_TOP = "1k 1%"
+EXPR_TOP_OHMS = 1_000.0
+EXPR_SERIES = "1k 1%"
+EXPR_SERIES_OHMS = 1_000.0
+EXPR_C = "100n/50V X7R"
+EXPR_C_FARADS = 100e-9
+# What a standard expression pedal is: a potentiometer wired tip = wiper,
+# ring = supply, sleeve = ground. **The element value is not standardised** --
+# 10 k and 25 k are both common -- and expression_input() shows why that does
+# not have to be settled here.
+EXPR_POT_OHMS = (10_000.0, 25_000.0)
+
+
+def tap_debounce():
+    """The footswitch's pull-up, its series resistor and where bounce is dealt
+    with.
+
+    **Bounce is not dealt with here and that is deliberate**, in the same shape
+    as envelope_filter(): the hardware sets an impedance and a rate, and the
+    musical constant is a firmware one at the frame rate. FRAME_RATE is 8 kHz,
+    so firmware sees this pin 125 us apart and a contact that bounces for
+    milliseconds is tens of samples -- a debounce anybody would write in three
+    lines. Sizing the RC to swallow a 10 ms bounce instead would need 1 uF at
+    the pin and would put a 3.3 mA discharge spike through the switch.
+
+    So the two resistors do the jobs a firmware constant cannot:
+
+      * the 10 k pull-up gives the pin a **defined impedance from reset**. The
+        part's own pull-up is 50 to 80 kohm (Table 625) and its reset state on
+        a plain GPIO is pull-*down* (Table 615), so without this the node's
+        state before firmware runs is a range rather than a level;
+      * the 1 k series resistor is what a lead going out of the enclosure gets
+        between it and the die. At the absolute maximum on an IO pin -- IOVDD
+        + 0.5 -- it holds any injected current to well under a milliamp, and
+        with the 100 nF it slows the edge to a time constant the part's own
+        Schmitt trigger (VHYS 0.2 V at 3.3 V) is specified to clean up.
+    """
+    tau_open = TAP_PULLUP_OHMS * TAP_C_FARADS
+    tau_closed = TAP_SERIES_OHMS * TAP_C_FARADS
+    return {
+        "pullup": TAP_PULLUP_OHMS,
+        "series": TAP_SERIES_OHMS,
+        "c": TAP_C_FARADS,
+        "tau_open_s": tau_open,
+        "tau_closed_s": tau_closed,
+        "frame_s": 1.0 / FRAME_RATE,
+        "frames_per_tau": tau_open * FRAME_RATE,
+        "closed_ma": V3V3_VOLTS / TAP_PULLUP_OHMS * 1e3,
+        "internal_pullup_kohm": CONTROLLER_PULL_KOHM,
+        "hysteresis_v": CONTROLLER_VHYS,
+    }
+
+
+def expression_input(series=None, top=None):
+    """The pedal's series resistor, and what a mono plug in a stereo socket
+    costs.
+
+    **The failure this exists for is mechanical.** An expression pedal is a
+    potentiometer on a TRS lead -- ring to the supply, wiper to the tip, sleeve
+    to ground -- and a TS plug pushed into a TRS socket shorts the ring to the
+    sleeve. That is the supply to ground through whatever is in series with the
+    ring, and it happens every time somebody reaches for the wrong lead in the
+    dark. R832 is the whole of the protection:
+
+        short current = VMCU / R_top
+
+    at 1 k that is 3.3 mA, which mcu_supply() counts as load rather than as a
+    fault, so the supply budget is right in the state the panel can be put
+    into.
+
+    What it costs is full scale, and the cost depends on a pot value nobody
+    specifies: the top of the range is `Rpot / (Rpot + R_top)` of the rail, so
+    91 % with a 10 k pedal and 96 % with a 25 k one. **That is not a problem
+    the hardware has to solve.** An expression input is calibrated at its
+    extremes by firmware -- heel down and toe down -- because pedals differ in
+    taper and travel anyway, so what the hardware must deliver is monotonic and
+    bounded, and it does.
+
+    The ADC end needs no buffer and the datasheet says so directly: "The
+    effective impedance, even when sampling at 500ksps, is over 100kohm, and
+    for DC measurements there should be no need to buffer" (section 4.9.2).
+    The series resistor and capacitor at the pin settle in nanoseconds against
+    a 2 us conversion.
+    """
+    series = EXPR_SERIES_OHMS if series is None else series
+    top = EXPR_TOP_OHMS if top is None else top
+    spans = {pot: pot / (pot + top) for pot in EXPR_POT_OHMS}
+    # Source impedance seen by the ADC: the pot's Thevenin resistance is worst
+    # at mid-travel, a quarter of its value, plus the series resistor.
+    worst_source = max(EXPR_POT_OHMS) / 4 + series
+    return {
+        "top": top,
+        "series": series,
+        "short_ma": V3V3_VOLTS / top * 1e3,
+        "spans": spans,
+        "full_scale_v": {pot: V3V3_VOLTS * span for pot, span in spans.items()},
+        "worst_source_ohms": worst_source,
+        "adc_rin_ohms": CONTROLLER_ADC_RIN,
+        "settling_s": worst_source * CONTROLLER_ADC_CSAMPLE * 10,
+        "conversion_s": CONTROLLER_ADC_CONVERSION_S,
+        "anti_alias_hz": 1.0 / (2 * math.pi * series * EXPR_C_FARADS),
+        "lsb_v": V3V3_VOLTS / 2 ** 12,
+        "enob": CONTROLLER_ADC_ENOB,
     }
 
 
@@ -2925,6 +4212,7 @@ def supply_load():
     def quads(rail, refs):
         return sorted(r for r in on_rail.get(rail, ()) if r in refs)
 
+    mcu = mcu_rail_load()
     opamps = quads("VA+", set(OPAMP_PACKAGES_REFS))
     envs = quads("VA+", set(ENV_PACKAGES_REFS))
     vcas = quads("VA+", set(VCA_PACKAGES_REFS))
@@ -2969,6 +4257,21 @@ def supply_load():
         # passes with no net.
         "V3V3": {"typ_ma": v3v3_typ, "max_ma": v3v3_max,
                  "volts": RAILS["V3V3"], "parts": adc, "source": "V5"},
+        # The controller's rail. Its source is None for the same reason V5's
+        # is: it is a rail this module dissipates power on, and what it costs
+        # the *converter* is a different question, asked one function down in
+        # supply_fit() -- where the switcher's efficiency turns 3.3 V of load
+        # into twelve volts of draw. mcu_rail_load() counts the parts on it.
+        "VMCU": {"typ_ma": mcu["typ_ma"], "max_ma": mcu["load_ma"],
+                 "volts": RAILS["VMCU"], "parts": mcu["parts"],
+                 "source": None},
+        # The RP2040's core, made inside the part by its own regulator and
+        # brought out to its DVDD pins off-chip. It is a rail with a net and a
+        # load, so check_rails_are_drawn() can see it, and its current is
+        # already inside the RP2040's own line above -- an on-chip *linear*
+        # regulator passes its output current through from VMCU.
+        "VCORE": {"typ_ma": 0.0, "max_ma": 0.0, "volts": RAILS["VCORE"],
+                  "parts": [CONTROLLER_REF], "source": "VMCU"},
     }
 
 
@@ -3032,8 +4335,19 @@ def supply_requirement():
 # zone list, gen_sch.py draws the header -- and the two claims cannot both be
 # true. Nothing in the repo compares a zone's declared contents against the
 # parts that exist, because until now every zone except P and D2 had some.
-# `floorplan.check_zone_occupancy()` is the instrument that would have said so
-# and it is new here.
+#
+# **This paragraph named `floorplan.check_zone_occupancy()` as "the instrument
+# that would have said so", and it did not exist.** A named check, in a comment
+# about two artefacts disagreeing because nothing compared them -- which is the
+# same failure one level further out, and it survived two passes because a
+# comment naming a function is not a call to it. It exists now as
+# `placement.check_zone_occupancy()`: there rather than in floorplan.py because
+# floorplan.py cannot import placement.py -- the dependency runs the other way,
+# for the domain table -- and the question is "what is placed where", which is
+# placement's own subject. It reads a zone-to-parts table that had to be
+# written down for the first time, which is itself the point: until the last
+# zone was drawn, "the parts in zone P" was not a thing any file could be
+# asked for.
 #
 # **The converter comes onto this board**, and zone P is the older and the
 # derived claim of the two:
@@ -3122,6 +4436,14 @@ SUPPLY_REF = "U15"
 # claim and the copper claim are different claims: floorplan.check_isolation()
 # reads this one and verify.check_isolation_gap() reads the other.
 ISOLATION_BRIDGE = ("C810",)
+# **The second barrier's bridge, and it is the same shape one board along.**
+# CA-033 forbids a DC path from the MIDI IN jack's pin 2 or its shield to this
+# board's ground and offers a capacitor as the way to have an RF one anyway --
+# "a connection through a small capacitor (0.1uF typical) to ground is optional
+# for improved high-frequency (RF) shielding". C836 is that capacitor, and it
+# is declared here for the reason C810 is: a part that crosses a barrier is
+# either the barrier or a fault, and the only way a check can tell is a list.
+MIDI_BRIDGE = ("C836",)
 # Everything on the isolated primary, by reference. Declared here rather than
 # written out in verify.check_supply(), which is where the list used to live
 # as a set literal: a part added to the primary and not to that literal is a
@@ -3267,7 +4589,7 @@ INLET_CHOKE_DATASHEET = ("https://www.we-online.com/components/products/"
 INLET_CHOKE_PINS = {"L1_IN": 1, "L2_IN": 2, "L2_OUT": 3, "L1_OUT": 4}
 
 
-def supply_fit():
+def supply_fit(include_mcu=True):
     """The converter's two outputs against what the board actually draws.
 
     **supply_requirement() states 3.10 W and the converter has to deliver
@@ -3289,11 +4611,24 @@ def supply_fit():
     """
     load = supply_load()
     v5_ma = load["V5"]["max_ma"] + V5_IQ_MA[1]
-    positive = load["VA+"]["max_ma"] + v5_ma
+    # **The controller's rail arrives here as an input current and not as a
+    # load**, which is the whole difference between a switcher and the linear
+    # rail beside it. V5's 95 mA leaves the converter as 95 mA; VMCU's 86 mA
+    # leaves it as 3.3/12 of that, divided by an efficiency with a range. The
+    # pessimistic end of MEASURED["mcu_dcdc_efficiency"] is what is spent,
+    # because this is the arithmetic that decides whether a 250 mA part is
+    # inside its rating.
+    mcu_ma = 0.0
+    if include_mcu:
+        mcu_ma = (load["VMCU"]["max_ma"] * RAILS["VMCU"]
+                  / (MEASURED["mcu_dcdc_efficiency"].low * SUPPLY_VOUT)
+                  + MCU_DCDC_IQ_MA)
+    positive = load["VA+"]["max_ma"] + v5_ma + mcu_ma
     negative = load["VA-"]["max_ma"]
     watts = SUPPLY_VOUT * (positive + negative) * 1e-3
     return {
         "positive_ma": positive,
+        "mcu_ma": mcu_ma,
         "negative_ma": negative,
         "limit_ma": SUPPLY_IOUT_MA,
         "positive_headroom_ma": SUPPLY_IOUT_MA - positive,
@@ -3355,13 +4690,21 @@ def supply_beat(f_khz=None):
     """
     f_khz = f_khz or SUPPLY_KHZ_TYP
     pump_khz = socket.PUMP_FREQUENCY / 1e3
-    orders = []
-    for n in range(1, 21):
-        orders.append((abs(f_khz - n * pump_khz), n))
+    # **How far up the harmonics to look is a function of the frequency and it
+    # used to be the literal 20.** That was right for the only caller this had
+    # -- 580 kHz is the pump's 12.9th -- and wrong the moment mcu_dcdc_beat()
+    # asked it about 1.1 MHz, which is the 24th: the search stopped at 900 kHz
+    # and reported a 200 kHz beat against the 20th, when the real answer is
+    # 20 kHz against the 24th. Nothing was wrong with the arithmetic; the
+    # constant was a fact about one caller written where it looked like a fact
+    # about sawtooths. The report printed the wrong number once.
+    orders_needed = int(f_khz / pump_khz) + 2
+    orders = [(abs(f_khz - n * pump_khz), n)
+              for n in range(1, orders_needed + 1)]
     beat_khz, order = min(orders)
     # The whole stated band, not the typical: the part is not trimmed and two
     # units are not the same frequency.
-    reachable = [n for n in range(1, 21)
+    reachable = [n for n in range(1, orders_needed + 1)
                  if SUPPLY_KHZ[0] <= n * pump_khz <= SUPPLY_KHZ[1]]
     return {
         "f_khz": f_khz,
@@ -4217,6 +5560,29 @@ LIBS = {
     # supply current instead of across it, and it draws identically.
     "cv:744222": ("cv", "Filter", "Choke_CommonMode_FerriteCore_1423",
                   "744222"),
+    # The controller and its periphery. Four of these are stock symbols under
+    # their own names, which is the cheapest kind of entry in this table:
+    # nothing is renamed, so nothing can be renamed wrongly.
+    "MCU_RaspberryPi:RP2040": ("MCU_RaspberryPi", "MCU_RaspberryPi",
+                               "RP2040", None),
+    "Memory_Flash:W25Q128JVS": ("Memory_Flash", "Memory_Flash",
+                                "W25Q128JVS", None),
+    "Isolator:TLP2761": ("Isolator", "Isolator", "TLP2761", None),
+    "Connector:USB_B_Micro": ("Connector", "Connector", "USB_B_Micro", None),
+    # Pins 1 and 3 are the crystal's terminals and 2 and 4 are the case, which
+    # is the 3225 package's own arrangement and the footprint's.
+    "Device:Crystal_GND24": ("Device", "Device", "Crystal_GND24", None),
+    "Device:L": ("Device", "Device", "L", None),
+    # The 3.3 V switcher, borrowed from the LMR50410 -- **and the borrowing is
+    # a pin map rather than a resemblance.** Both are TI SOT-23-6 buck
+    # converters whose pinout is 1 CB, 2 GND, 3 FB, 4 EN, 5 VIN, 6 SW; the
+    # TPS560430's section 6 gives exactly that and nothing is renumbered. The
+    # same argument as the TMR 6WI's borrowing of its four-watt sibling's
+    # symbol, and the same limit: a symbol carries a pin map and a body, so
+    # what separated these two parts -- FPWM, and a frequency stated as a band
+    # -- lives in neither and is in MCU_DCDC's comment instead.
+    "cv:TPS560430XF": ("cv", "Regulator_Switching", "LMR50410",
+                       "TPS560430XF"),
     "power:GNDA": ("power", "power", "GNDA", None),
     "power:GNDD": ("power", "power", "GNDD", None),
     "power:PWR_FLAG": ("power", "power", "PWR_FLAG", None),
@@ -4363,6 +5729,25 @@ def patch_symbol(lib_id, definition):
         _set_property(definition, "Datasheet", V3V3_DATASHEET)
         _set_property(definition, "Description",
                       "3.3 V 250 mA LDO, 1.6 uA quiescent, SOT-23")
+    elif lib_id.endswith(":USB_B_Micro"):
+        # **The connector's GND is not a power source and ERC said so.** KiCad
+        # draws a USB receptacle's VBUS and GND as `power_out`, which is right
+        # for a board that takes its supply from the bus. This one does not:
+        # it has an isolated converter, and what arrives on J14's shell is a
+        # *reference* -- the host's ground, tied to MDGND so that the data
+        # pair has one. Left as an output it is a second power source on a net
+        # the converter's Com already drives, which ERC reported as two power
+        # outputs connected, and no flag or exemption makes that statement
+        # true. `passive` is what the pin is here.
+        #
+        # VBUS keeps its type deliberately: it *is* a source, it is the only
+        # thing on this board that comes from outside the module's own supply,
+        # and usb_vbus_divider() is a divider hanging off a 5 V rail nobody
+        # here regulates. Saying so is worth the asymmetry.
+        _set_property(definition, "Description",
+                      "USB 2.0 micro-B receptacle, device end. Self-powered: "
+                      "VBUS is sensed and not consumed")
+        _repin(definition, 5, "passive", name="GND")
     elif lib_id.endswith(":Relay"):
         # **The generic symbol is IEC-numbered and the chosen relay is not.**
         # KiCad's Relay_DPDT carries A1/A2 and 11/12/14, 21/22/24, which was
@@ -4447,6 +5832,36 @@ SUPPLY_FP = "cv:TRACO_TMR-6-xxxxWI_Dual_THT"
 # DPAK, and see v5_regulator(): 0.77 W against the SOT-223's own 160 C/W is
 # what puts it here.
 DPAK_FP = "Package_TO_SOT_SMD:TO-252-2"
+# The controller's own packages. The QFN is the only one RP2040 is made in --
+# section 5.1, 7x7 mm, 0.40 mm pitch, 3.2 x 3.2 mm exposed pad -- and
+# controller_package() is why the board is at 0.09/0.09 mm.
+# **The ThermalVias variant, and it is the exposed pad that asks for it.** Pin
+# 57 is a 3.2 x 3.2 mm ground pad in the middle of the package, and the way a
+# QFN's ground reaches an inner plane is through vias inside that pad -- this
+# variant carries four, at +/-1.35 mm, 0.5 mm pads on a 0.2 mm drill. The plain
+# variant does not, and gen_pcb.stitch_grounds() cannot help: its rule is to
+# put a via *beyond* a pad along the pad's own long axis, which for a pad in
+# the middle of a 56-pin package is inside the pin rows on every side. It said
+# so and stopped the build, which is the right failure.
+QFN56_FP = ("Package_DFN_QFN:"
+            "QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm_ThermalVias")
+# 8-pin SOIC 208-mil, the flash's package code S: D and E are 5.28 mm nominal
+# in its own section 10.1, which is this land.
+SOIC8_208_FP = "Package_SO:SOIC-8_5.3x5.3mm_P1.27mm"
+SOT23_6_FP = "Package_TO_SOT_SMD:SOT-23-6"
+SO6L_FP = "Package_SO:SO-6L_10x3.84mm_P1.27mm"
+# **The generic 3225 land and not Abracon's own.** KiCad ships
+# Crystal_SMD_Abracon_ABM8G-4Pin_3.2x2.5mm, and ABM8G is a different series
+# from the ABM8 the vendor recommends. Its pads are identical -- 1.4 x 1.2 mm
+# at +/-1.1, +/-0.85 -- so the borrow would work and would also be a claim
+# about a drawing this session did not read: the ABM8 datasheet gives its land
+# pattern as a figure, which pdftotext does not extract. The generic 3.2 x 2.5
+# 4-pad land makes the same geometry a statement about the *package*, which is
+# what a footprint is.
+CRYSTAL_FP = "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm"
+# 6.0 x 6.0 x 4.5 mm shielded, the SRN6045TA's own body.
+INDUCTOR_FP = "Inductor_SMD:L_Bourns_SRN6045TA"
+USB_MICROB_FP = "Connector_USB:USB_Micro-B_Molex-105017-0001"
 SMA_FP = "Diode_SMD:D_SMA"
 LOOM_FP = socket.CHANNEL_POT_FP          # the mixer's own 1x03, mirrored
 PAD_FP = "TestPoint:TestPoint_Pad_D2.0mm"
@@ -4483,6 +5898,28 @@ ORDER_CODES = {
     ENV_DIODE:        "1N4148WS-7-F",
     "10k 1%":         "RC0805FR-0710KL",
     "4k99 1%":        "RC0805FR-074K99L",
+    # The controller block. The four ICs, the crystal, the inductor and the
+    # connector are order codes read off the datasheet or the vendor's own
+    # ordering table; the passives follow Yageo's and Murata's published
+    # numbering, which is the same rule the rest of this table runs on.
+    CONTROLLER:       CONTROLLER_MPN,
+    FLASH:            FLASH_MPN,
+    MIDI_OPTO:        MIDI_OPTO_MPN,
+    MCU_DCDC:         MCU_DCDC_MPN,
+    CRYSTAL:          CRYSTAL_MPN,
+    MCU_DCDC_L:       MCU_DCDC_L_MPN,
+    USB_CONN:         USB_CONN_MPN,
+    "51k 1%":         "RC0805FR-0751KL",
+    "22k1 1%":        "RC0805FR-0722K1L",
+    "27R 1%":         "RC0805FR-0727RL",
+    "33R 5%":         "RC0805JR-0733RL",
+    "10R 5%":         "RC0805JR-0710RL",
+    "390R 1%":        "RC0805FR-07390RL",
+    "1k 1%":          "RC0805FR-071KL",
+    "15p/50V C0G":    "GRM2165C1H150JA01D",
+    "1u/16V X7R":     "GRM21BR71C105KA01L",
+    "2u2/50V X7R":    "GRM21BR71H225KA73L",
+    "22u/16V X5R":    "GRM21BR61C226ME44L",
     "470n/50V X7R":   "GRM21BR71H474KA88L",
     VCA:              "SSI2164S-RT",
     LOGIC:            "SN74AHC541DWR",
@@ -4537,7 +5974,21 @@ UNSPECIFIED = {}
 # Pins deliberately left unconnected, declared beside the circuit rather than
 # buried in the checker -- the mixer's NO_CONNECT, same argument.
 REF_REF = "U12"
+# The GPIO pins nothing is wired to. **Flagged rather than left silent**, for
+# the reason no_connects() gives in gen_sch.py: a pin the sheet has not been
+# asked about is indistinguishable from a forgotten wire, and this part has
+# eleven of them. They are safe open -- Table 615 gives every GPIO's reset
+# state as pull-down, so a spare pin is held at a level by the part itself
+# rather than floating -- and they are the margin controller_fit()'s GPIO row
+# counts: 19 used of 30.
+CONTROLLER_SPARE_GPIO = tuple(
+    gpio for gpio in sorted(CONTROLLER_GPIO_PINS)
+    if gpio not in {row[0] for row in CONTROLLER_MAP.values()})
+
 NO_CONNECT = tuple(
+    (CONTROLLER_REF, str(CONTROLLER_GPIO_PINS[gpio]))
+    for gpio in CONTROLLER_SPARE_GPIO
+) + tuple(
     (REF_REF, str(REF_PINS[name])) for name in ("IC1", "IC2")
 ) + tuple(
     # The '541's two unused *outputs*. Its unused inputs are held at MAGND
@@ -4553,6 +6004,14 @@ NO_CONNECT = tuple(
     # reason the '541's two unused outputs are: an open pin the sheet has not
     # been asked about is indistinguishable from a forgotten wire.
     (SUPPLY_REF, str(SUPPLY_PINS["NC"])),
+) + (
+    # The micro-B's ID pin. **Open is what makes this a device**: USB OTG
+    # reads ID grounded as "A", the host end, and floating as "B". A micro-B
+    # receptacle on a self-powered device wants B, so the pin is left open on
+    # purpose and that purpose is worth a flag rather than a gap.
+    (USB_CONN_REF, "4"),
+    # The opto's pin 2, "N.C." in its own pin assignment.
+    (MIDI_OPTO_REF, str(MIDI_OPTO_PINS["NC"])),
 ) + tuple(
     # MODE open is Class AB -- SSI2164 page 3, and it is a decision, not an
     # omission. The spare cell's control pin may float: page 5, "Control pins
@@ -4605,81 +6064,49 @@ NO_CONNECT = tuple(
 # subtraction rather than by choosing a side**, and the coil supply rail that
 # RAILS never had is not needed after all.
 DEFERRED_PINS = {}
-DEFERRED = {
-    # **"envelope rectifier" was here through two passes and it is drawn.** Its
-    # reason read "the smoothing time constant is not derivable -- spec section
-    # 4.4 gives a sampling rate and no attack/release target", which was true of
-    # an asymmetric detector and false of the symmetric one this instrument
-    # wants: envelope_filter() bounds tau above by the picked transient and
-    # below by ripple, and there is no release bound at all. Twelve op-amp
-    # sections, twelve diodes, thirty resistors and six capacitors later, the
-    # only thing still deferred about it is the ADC it feeds.
-    # **The reason changed, and the change is the result of this pass.** It
-    # read "shared block, and the scope statement puts shared blocks after one
-    # channel is complete", which was a scope statement rather than a finding
-    # -- true of every shared block, and by now the only one it was still true
-    # of. Deriving what the block asks for turned it into two computed gates,
-    # and both are decisions above a drawing:
-    #
-    #   * **the package -- CLOSED, and by a fabrication decision rather than a
-    #     drawing one.** controller_package(): RP2040 ships only in a 7x7
-    #     QFN-56 at 0.40 mm pitch, and rules.fan_out_class() put that off the
-    #     bottom of its ladder on all three counts at the class that was then
-    #     fitted. rules.coarsest_class_for() solved for what would clear it --
-    #     0.12/0.12 mm or finer, which is below the 2 oz floor -- and the
-    #     board is at 0.09/0.09 on 1 oz now. The package is reachable with no
-    #     escape needed at all. See docs/fabrication-class.md;
-    #   * **the supply.** controller_supply(): supply_fit() leaves 35.4 mA of
-    #     +Vout, V3V3 is two linear rails below it, and a milliamp of 3.3 V is
-    #     a milliamp of twelve at the converter's pin. The part's own measured
-    #     range is 19.2 to 52.1 mA and neither end leaves room for the flash
-    #     and the MIDI. A switcher from VA+ clears it at any efficiency above
-    #     40 %, and is a new aggressor supply_beat() has to price.
-    #
-    # What is *not* open is the part, the case for it, or the package:
-    # controller_fit() is the derived table, every row read off the RP2040's
-    # own datasheet, and 00-current-state.md's entry 9 is marked as not relied
-    # upon. See CONTROLLER.
-    "controller": "RP2040, and the part is settled -- controller_fit() is the "
-                  "derived case for it. One of the two gates is closed: "
-                  "controller_package() reports the 0.40 mm QFN-56 reachable "
-                  "now, with no fan-out escape needed, because the "
-                  "fabrication class moved to 0.09/0.09 on 1 oz -- see "
-                  "docs/fabrication-class.md. What is left is "
-                  "controller_supply(): the linear V3V3 chain cannot carry it "
-                  "out of 35.4 mA of +Vout, and the switcher that can is a "
-                  "part nobody has chosen.",
-    # **"envelope ADC" was here and it is drawn.** Its reason read
-    # "ADS131M08 or MCP3564, undecided in spec section 4.4", and what settled
-    # it was neither channel count nor price: the ADS131M08's external
-    # reference input tops out at 1.3 V, so its full scale at unity gain is
-    # 1.20 V against socket.clipping_peak()'s 1.233 -- it clips 0.24 dB below
-    # the level it exists to measure. See ENV_ADC.
-    #
-    # Deferral had hidden four disagreements about a block nobody had drawn:
-    # which domain it is in, whether this board has a 3.3 V rail, how many
-    # signals cross, and whether "only SPI" was four things or six. That is
-    # the same lesson zone P taught about the converter, and this time it was
-    # looked for first.
-    # "relay drive" was here -- 2 x TPIC6B595 and the 74LVC1G123 one-shot,
-    # section 4.5. It existed only to drive the coarse pad's coils and goes
-    # with it. Section 4.5 calls the one-shot's absence "the
-    # highest-probability field failure in the design", which was true and is
-    # now a failure this board cannot have.
-    # "bypass relay and fail-safe" was here and is drawn: the pump, the sink,
-    # three non-latching DPDT and the clamp on the inverted reference. What is
-    # not chosen is the relay and the MOSFET, and both are in UNSPECIFIED with
-    # the property that filters them rather than a guess -- which is a
-    # different state from deferred and check_pin_numbers() keeps them apart.
-    # **"supply" was here and it is drawn.** Its reason read "the topology is
-    # decided and the part is not", which was true and hid a second question
-    # nobody had noticed was open: *where* the converter goes. floorplan.py
-    # had a zone P on this board and design.py had J8 taking a secondary from
-    # somewhere else, and a block being deferred is what let both survive --
-    # a deferred block is not drawn, so nothing forces its two descriptions to
-    # agree. See supply(), and the note above SUPPLY_PART for why no check
-    # would have found it.
-}
+# **Empty, and it is the end of a list that had six entries.** What each one
+# was, and what closed it, because the pattern is the useful part:
+#
+#   * **"supply"** -- "the topology is decided and the part is not", which was
+#     true and hid a second question nobody had noticed was open: *where* the
+#     converter goes. floorplan.py had a zone P on this board and design.py had
+#     J8 taking a secondary from somewhere else, and a block being deferred is
+#     what let both survive -- a deferred block is not drawn, so nothing forces
+#     its two descriptions to agree. See supply();
+#   * **"envelope ADC"** -- "ADS131M08 or MCP3564, undecided in spec section
+#     4.4". Settled by neither channel count nor price: the ADS131M08's
+#     external reference input tops out at 1.3 V, so its full scale at unity
+#     gain is 1.20 V against socket.clipping_peak()'s 1.233. Deferral had
+#     hidden four disagreements about a block nobody had drawn -- which domain
+#     it is in, whether this board has a 3.3 V rail, how many signals cross,
+#     and whether "only SPI" was four things or six;
+#   * **"envelope rectifier"** -- "the smoothing time constant is not derivable
+#     -- spec section 4.4 gives a sampling rate and no attack/release target",
+#     which was true of an asymmetric detector and false of the symmetric one
+#     this instrument wants. envelope_filter() bounds tau above by the picked
+#     transient and below by ripple, and there is no release bound at all;
+#   * **"bypass relay and fail-safe"** -- drawn, with the part left in
+#     UNSPECIFIED until a number chose it;
+#   * **"relay drive"** -- 2 x TPIC6B595 and a 74LVC1G123 one-shot, section
+#     4.5. **Deleted rather than drawn**, with the coarse pad they existed to
+#     drive: section 4.5 calls the one-shot's absence "the highest-probability
+#     field failure in the design", which was true and is now a failure this
+#     board cannot have;
+#   * **"controller"** -- and its reason changed kind twice. It read "shared
+#     block, and the scope statement puts shared blocks after one channel is
+#     complete", which was a scope statement rather than a finding -- true of
+#     every shared block and by then the only one it was still true of.
+#     Deriving what the block asks for turned it into two computed gates, and
+#     both are now closed: controller_package() by the fabrication class moving
+#     to 0.09/0.09 on 1 oz, controller_supply() by MCU_DCDC. See controller().
+#
+# **The general lesson is zone P's and it is worth keeping at the top of an
+# empty dict.** A deferred block suspends every instrument at once: nothing is
+# drawn, so nothing can be checked for where it lives, what it draws or what it
+# contradicts. Three of the six hid a disagreement that only surfaced when
+# somebody drew the thing. That is an argument for drawing blocks early and
+# badly rather than late and well.
+DEFERRED = {}
 
 
 # ---------------------------------------------------------------------------
@@ -4741,6 +6168,7 @@ class Design:
         self.check_rails_are_drawn()
         self.check_pin_numbers()
         self.check_orderable()
+        self.check_controller_functions()
 
     def check_rails_are_drawn(self):
         """Every rail RAILS declares is a net some part is on.
@@ -4773,6 +6201,70 @@ class Design:
                 f"{'them' if len(undrawn) > 1 else 'it'} -- either draw the "
                 f"rail or stop declaring it. A rail that exists only in RAILS "
                 f"is a claim no check can reach")
+
+    def check_controller_functions(self):
+        """Every net on a GPIO asks that pin for a function the part has.
+
+        **The failure this exists for is that every pin looks the same.** A
+        schematic that puts SCLK on GPIO14 is exactly as legible as one that
+        puts it on GPIO18, and only one of them is a pin SPI0's clock can come
+        out of. Nothing downstream can tell: ERC sees two bidirectional pins,
+        DRC sees copper, and verify.py's netlist comparison proves the board
+        matches design.py -- which is the same relationship DIODE_PINS records
+        being wrong about D801 for the whole life of that design.
+
+        So the datasheet's own multiplexer table is transcribed
+        (CONTROLLER_GPIO_FUNCTIONS, Table 2) and the assignment
+        (CONTROLLER_MAP) is checked against it. Three things it catches:
+
+          * a function on a pin that does not offer it -- the plain mistake;
+          * two nets on one GPIO, which the netlist would otherwise merge into
+            one net without complaint;
+          * an assignment that names a *net* nothing is wired to, which is how
+            a rename half-lands.
+
+        "SIO" and the four ADC names are checked differently and deliberately:
+        SIO is on every pin (Table 3, "SIO ... must be selected for the
+        processors to drive a GPIO"), so what is checked is that the pin
+        exists; ADC0-3 are pin identities rather than mux functions, so they
+        are checked against CONTROLLER_ADC_GPIO.
+        """
+        seen = {}
+        for net, (gpio, function) in sorted(CONTROLLER_MAP.items()):
+            if gpio not in CONTROLLER_GPIO_PINS:
+                raise AssertionError(
+                    f"{net} is assigned to GPIO{gpio}, which this part does "
+                    f"not have -- CONTROLLER_GPIO_PINS is Table 615")
+            if gpio in seen:
+                raise AssertionError(
+                    f"GPIO{gpio} carries both {seen[gpio]} and {net} -- two "
+                    f"nets on one pin is one net")
+            seen[gpio] = net
+            if function == "SIO":
+                pass
+            elif function in CONTROLLER_ADC_GPIO.values():
+                if CONTROLLER_ADC_GPIO.get(gpio) != function:
+                    raise AssertionError(
+                        f"{net} asks GPIO{gpio} for {function}, and the "
+                        f"analogue inputs are {CONTROLLER_ADC_GPIO}")
+            elif function not in CONTROLLER_GPIO_FUNCTIONS[gpio]:
+                raise AssertionError(
+                    f"{net} asks GPIO{gpio} for '{function}', which Table 2 "
+                    f"does not give it: "
+                    f"{[f for f in CONTROLLER_GPIO_FUNCTIONS[gpio] if f]}")
+            pin = str(CONTROLLER_GPIO_PINS[gpio])
+            if self.pin_owner().get((CONTROLLER_REF, pin)) != net:
+                raise AssertionError(
+                    f"CONTROLLER_MAP puts {net} on GPIO{gpio} (pin {pin}) and "
+                    f"the netlist has "
+                    f"{self.pin_owner().get((CONTROLLER_REF, pin))} there")
+        # The six carriers have to be on six different slices, because a slice
+        # is one counter and spec section 4.2 asks for the phases to differ.
+        if not controller_slices()["distinct"]:
+            raise AssertionError(
+                f"the six PWM carriers share slices "
+                f"{controller_slices()['slices']} -- two channels on one slice "
+                f"cannot be phase-staggered against each other")
 
     def check_net_potentials(self):
         """Every net declares what DC potential it sits at.
@@ -4936,7 +6428,22 @@ def package_part(ref):
 # The audio nets are 0 V by construction and that is the whole of constraint 3
 # stated as data: SIN{n} appears here as 0.0 and check_sin_dc() in verify.py is
 # what holds it.
-RAILS = {"VA+": MODULE_RAIL, "VA-": -MODULE_RAIL, "V5": 5.0, "V3V3": 3.3}
+# **Two 3.3 V rails, and they are deliberately not one net.** V3V3 is the
+# MCP1700's, on V5, and it exists because the envelope ADC's AVDD is the supply
+# pin of a 24-bit converter -- envelope_adc_reference() is what it is protecting.
+# VMCU is the TPS560430XF's, on VA_RAW, and it is a switching rail feeding a
+# processor. Joining them would put 1.1 MHz on the ADC's own supply to save one
+# regulator that costs 4 uA and one line of BOM, which is the trade
+# supply-decision.md's whole argument is against.
+#
+# The two meet nowhere: every signal that crosses between them is logic, and
+# both parts' VOL/VOH are specified against their own rails. VCORE is the
+# RP2040's own 1.1 V, made inside the part and brought out at VREG_VOUT so that
+# its DVDD pins can be fed off-chip -- section 2.9.2, "The connection between
+# the output pin of the on-chip regulator (VREG_VOUT) and the DVDD supply pins
+# is made off-chip".
+RAILS = {"VA+": MODULE_RAIL, "VA-": -MODULE_RAIL, "V5": 5.0, "V3V3": 3.3,
+         "VMCU": 3.3, "VCORE": 1.1}
 NET_DC = {
     "MAGND": 0.0, "MDGND": 0.0, socket.AGND: 0.0,
     "VREF": VREF, "VREFN": -VREF,
@@ -4993,6 +6500,67 @@ NET_DC["IGND_J"] = 0.0
 # them is a datasheet maximum, and VA+/VA- are what is left after rail_filter().
 NET_DC["VA_RAW"] = MODULE_RAIL
 NET_DC["VN_RAW"] = -MODULE_RAIL
+
+# ---- the controller block -------------------------------------------------
+#
+# The 3.3 V switcher's three private nets. MSW is a square wave between the
+# rails it switches, so its declared range is the whole of VA_RAW; MCB sits a
+# bootstrap diode above MSW, which is why its top is higher than any other net
+# on the secondary side; MFB is a feedback node held at the part's own
+# reference by the loop, exactly as RINV is held at MAGND.
+NET_DC["MSW"] = (0.0, MODULE_RAIL)
+NET_DC["MCB"] = (0.0, MODULE_RAIL + 5.5)
+NET_DC["MFB"] = MCU_DCDC_VREF
+# The crystal. XTAL is the far side of the drive resistor, which is a node and
+# not a name for XOUT: 1 kohm is in between and that is the whole of the
+# over-drive protection minimal design section 2.3 asks for.
+NET_DC["XIN"] = (0.0, 3.3)
+NET_DC["XOUT"] = (0.0, 3.3)
+NET_DC["XTAL"] = (0.0, 3.3)
+# The QSPI bus, and the RP2040's own reset states are on it: QSCS is pulled up
+# inside the part (Table 616) and the rest are pulled down.
+for _name in ("QSD0", "QSD1", "QSD2", "QSD3", "QSCK", "QSCS"):
+    NET_DC[_name] = (0.0, 3.3)
+# USB. The two pairs are the chip side and the connector side of the 27 ohm
+# series resistors, which have to be separate nets because the resistors are
+# parts between them -- the same reason VIN_J exists across the choke. VBUS is
+# the host's 5 V and is the only net on the secondary side above 3.3 V that is
+# not a rail.
+for _name in ("UDP", "UDM", "UDPJ", "UDMJ"):
+    NET_DC[_name] = (0.0, 3.3)
+NET_DC["VBUS"] = (0.0, USB_VBUS_VOLTS[1])
+NET_DC["VBUSD"] = (0.0, 3.3)
+# The MCU's own pins that are not GPIO: reset, the boot strap and the two debug
+# lines, all pulled up inside the part except BOOT, which is QSPI_SS reaching
+# the header through 1 kohm.
+for _name in ("RUN", "BOOT", "SWCLK", "SWDIO"):
+    NET_DC[_name] = (0.0, 3.3)
+# The panel: the footswitch's jack node and the pedal's three.
+NET_DC["TAPJ"] = (0.0, 3.3)
+NET_DC["TAP"] = (0.0, 3.3)
+NET_DC["EXPRV"] = (0.0, 3.3)
+NET_DC["EXPRW"] = (0.0, 3.3)
+NET_DC["EXPR"] = (0.0, 3.3)
+# The two UART nets, on this side of the barrier: MIDI_RX is the opto's own
+# totem-pole output and MIDI_TX is a GPIO.
+NET_DC["MIDI_RX"] = (0.0, 3.3)
+NET_DC["MIDI_TX"] = (0.0, 3.3)
+# MIDI out: the supply leg and the driven leg of CA-033's own transmitter.
+NET_DC["MOUTV"] = (0.0, 3.3)
+NET_DC["MOUTD"] = (0.0, 3.3)
+# **MIDI in, and these three are the second isolation barrier on this board.**
+# Like the converter's primary side, they are referenced to somebody else's
+# ground -- the transmitting device's -- and this module touches that node
+# nowhere else. CA-033 is explicit that it must stay that way: "Pin 2 of the
+# MIDI In connector shall not have any DC path to the receiver's ground", and
+# the shield's own capacitor is what keeps the RF connection without making a
+# DC one. The potentials below are the loop's, against the sender's ground:
+# 5 V is the older transmitter's rail, which is the larger of the two CA-033
+# allows.
+NET_DC["MINJ"] = (0.0, 5.0)
+NET_DC["MINA"] = (0.0, 5.0)
+NET_DC["MINK"] = (0.0, 5.0)
+NET_DC["MINSH"] = (0.0, 5.0)
 
 # The reference inverter's virtual earth, held at MAGND by feedback.
 NET_DC["RINV"] = 0.0
@@ -5491,28 +7059,13 @@ def envelope_adc(design):
                              "envelope_adc_reference()")):
         _capacitor(design, ref, ENV_ADC_LOCAL, net, "MAGND", description=note)
 
-    # -- out to the deferred controller ------------------------------------
-    #
-    # Two more of the mixer's own 5-way headers, with a ground between the
-    # signals that need one, exactly as J9-J11. The order is not arbitrary:
-    # the two clocks sit in the *middle* of their connectors so that each has
-    # a ground on both sides, and the three that are static or slow take the
-    # ends.
-    design.add(Part("J12", "SPI", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
-                    description="To the RP2040 (DEFERRED): 1=MOSI, 3=SCLK, "
-                                "5=MISO, grounds between. SCLK is in the "
-                                "middle because it is the fast one"))
-    for pin, net in ((1, "MOSI"), (2, "MDGND"), (3, "SCLK"),
-                     (4, "MDGND"), (5, "MISO")):
-        design.connect(net, ("J12", pin))
-    design.add(Part("J13", "SPI2", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
-                    description="To the RP2040 (DEFERRED): 1=CS, 3=MCLK, "
-                                "5=IRQ. MCLK is the continuous clock this "
-                                "board asks the controller for -- see "
-                                "envelope_adc_clock()"))
-    for pin, net in ((1, "CS"), (2, "MDGND"), (3, "MCLK"),
-                     (4, "MDGND"), (5, "IRQ")):
-        design.connect(net, ("J13", pin))
+    # **J12 and J13 were here and they are gone with the deferral.** Two more
+    # of the mixer's own 5-way headers, carrying the six logic signals out to
+    # a controller on some other board, with the two clocks in the middle of
+    # their connectors so each had a ground on both sides. The controller is
+    # on this board now and controller() wires those six to its pins; what
+    # replaces the ground-between-signals rule is floorplan.CROSSINGS and the
+    # router.
 
 
 def shared(design):
@@ -5679,35 +7232,19 @@ def shared(design):
     for n in (7, 8):
         design.connect("MAGND", (LOGIC_REF, LOGIC_A[n]))
 
-    # Where the deferred blocks meet this one. Not placeholders: these are the
-    # real interfaces, and declaring them is what lets check() insist every net
-    # has two ends while the controller and the supply are still DEFERRED. When
-    # those blocks land they replace these headers rather than joining them.
-    design.add(Part("J9", "CTRL", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
-                    description="From the RP2040 (DEFERRED): 6 x PWM, OE, and "
-                                "MDGND between every pair -- the same "
-                                "GND-between-signals rule design.LINK_FP "
-                                "makes upstream"))
-    # Nine ways would be needed for a ground between every pair; two 5-way
-    # connectors keep the mixer's own part. Pins alternate signal and ground.
-    for pin, net in ((1, "MDGND"), (2, "PWM1"), (3, "MDGND"),
-                     (4, "PWM2"), (5, "MDGND")):
-        design.connect(net, ("J9", pin))
-    design.add(Part("J10", "CTRL2", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
-                    description="From the RP2040 (DEFERRED), continued"))
-    for pin, net in ((1, "PWM3"), (2, "MDGND"), (3, "PWM4"),
-                     (4, "MDGND"), (5, "PWM5")):
-        design.connect(net, ("J10", pin))
-    # Five ways rather than three: the fail-safe's 10 kHz needs a pin, and it
-    # gets a ground either side of it like everything else on this connector.
-    # A 30 kHz-class square wave next to OE would be the one aggressor on a
-    # connector otherwise carrying static levels and slow PWM.
-    design.add(Part("J11", "CTRL3", socket.CONN_FP[5], mpn=socket.CONN_MPN[5],
-                    description="From the RP2040 (DEFERRED), continued: "
-                                "1=PWM6, 3=OE, 5=FSDRV, grounds between"))
-    for pin, net in ((1, "PWM6"), (2, "MDGND"), (3, "OE"),
-                     (4, "MDGND"), (5, "FSDRV")):
-        design.connect(net, ("J11", pin))
+    # **J9 to J13 were here and they are gone.** Five of the mixer's own 5-way
+    # headers, carrying six PWM, OE, FSDRV and the ADC's six logic signals out
+    # to a controller on some other board -- with the note that "when those
+    # blocks land they replace these headers rather than joining them", which
+    # is what has happened. The controller is in zone D2 and controller() wires
+    # those fourteen nets to its pins.
+    #
+    # Worth recording rather than deleting silently, because the headers were
+    # carrying an argument as well as fourteen nets: their pinouts put a ground
+    # between every pair of signals and the two clocks in the middle of their
+    # connectors, which was the right rule for a ribbon and has no meaning on a
+    # board. What replaces it is floorplan.CROSSINGS and the router, and
+    # neither of those is a pin order.
 
     # The two stars. R901 is the one bridge constraint 2 allows; R902 is the
     # module's own analogue/digital join, entirely inside the module and not a
@@ -5905,6 +7442,311 @@ def supply(design):
                description="NCP1117 output capacitor, 10 uF")
 
 
+def controller(design):
+    """The RP2040, its flash, its crystal, USB, DIN MIDI, the panel and the
+    3.3 V switcher.
+
+    **The block J9 to J13 were standing in for.** Those five headers were "where
+    the deferred blocks meet this one", with design.py's own note that "when
+    those blocks land they replace these headers rather than joining them" --
+    so they are gone and the fourteen nets they carried land on U19's pins.
+
+    What is drawn here follows the vendor's own reference design wherever that
+    document states a value, and the constants above carry the quotation. What
+    it does not follow is its decoupling compromise: the minimal design shares
+    one capacitor between pins 48 and 49 because it is a two-layer board with
+    parts on one side, and says so; this is four layers with a plane under the
+    part, so every supply pin gets its own.
+    """
+    P = CONTROLLER_PINS
+    design.add(Part(CONTROLLER_REF, CONTROLLER, QFN56_FP, mpn=CONTROLLER_MPN,
+                    description="Dual Cortex-M0+ at 125 MHz. Six PWM "
+                                "carriers, SPI to the envelope ADC, MCLK by "
+                                "integer divide, USB and DIN MIDI -- see "
+                                "controller_fit()"))
+
+    # -- supplies ----------------------------------------------------------
+    #
+    # IOVDD, VREG_VIN, USB_VDD and ADC_AVDD are all VMCU: section 2.9.7.1, the
+    # single 3.3 V supply, which is the scheme the part is built around. The
+    # core is the exception and is not a choice -- VREG_VOUT reaches the DVDD
+    # pins off-chip and nowhere else.
+    for index, pin in enumerate(CONTROLLER_IOVDD_PINS):
+        design.connect("VMCU", (CONTROLLER_REF, pin))
+        _capacitor(design, f"C{820 + index}", CONTROLLER_DECOUPLE,
+                   "VMCU", "MDGND",
+                   description=f"U19 IOVDD decoupling at pin {pin} -- one per "
+                               f"supply pin, RP2040 section 2.9.1")
+    for index, pin in enumerate(CONTROLLER_DVDD_PINS):
+        design.connect("VCORE", (CONTROLLER_REF, pin))
+        _capacitor(design, f"C{826 + index}", CONTROLLER_DECOUPLE,
+                   "VCORE", "MDGND",
+                   description=f"U19 DVDD decoupling at pin {pin}, "
+                               f"section 2.9.2")
+    design.connect("VMCU", (CONTROLLER_REF, P["VREG_VIN"]))
+    design.connect("VCORE", (CONTROLLER_REF, P["VREG_VOUT"]))
+    design.connect("VMCU", (CONTROLLER_REF, P["USB_VDD"]))
+    design.connect("VMCU", (CONTROLLER_REF, P["ADC_AVDD"]))
+    design.connect("MDGND", (CONTROLLER_REF, P["GND"]))
+    # "Tie to GND" -- Table 619, and it is the pin's whole description.
+    design.connect("MDGND", (CONTROLLER_REF, P["TESTEN"]))
+    _capacitor(design, "C828", CONTROLLER_VREG_C, "VMCU", "MDGND",
+               description="U19 VREG_VIN, 1 uF: section 2.9.3's own value, "
+                           "and the pin that powers the brown-out detector")
+    _capacitor(design, "C829", CONTROLLER_VREG_C, "VCORE", "MDGND",
+               description="U19 VREG_VOUT, 1 uF -- minimal design 2.1.3, "
+                           "'1uF capacitors close to both the input and the "
+                           "output'")
+    _capacitor(design, "C830", CONTROLLER_DECOUPLE, "VMCU", "MDGND",
+               description="U19 USB_VDD decoupling, section 2.9.4")
+    _capacitor(design, "C831", CONTROLLER_DECOUPLE, "VMCU", "MDGND",
+               description="U19 ADC_AVDD decoupling, section 2.9.5")
+
+    # -- reset, boot and debug ---------------------------------------------
+    #
+    # One 3-way header does both jumper jobs: 1-2 pulls QSPI_SS down through
+    # R826 and is BOOTSEL, 2-3 pulls RUN down and is reset. That is the
+    # reference design's J2 and a reset button in one part, and it is the
+    # cheapest way to have both inside an enclosure.
+    design.connect("RUN", (CONTROLLER_REF, P["RUN"]))
+    _resistor(design, "R825", CONTROLLER_RUN_PULLUP, "VMCU", "RUN",
+              description="RUN pull-up -- the part's own is 50-80 kohm "
+                          "(Table 625), which is a range rather than a "
+                          "figure, and this node leaves the board")
+    _resistor(design, "R826", CONTROLLER_BOOT_SERIES, "QSCS", "BOOT",
+              description="BOOTSEL series resistor, 1 kohm -- minimal design "
+                          "2.2, so shorting the header cannot fight the "
+                          "flash's chip select")
+    design.add(Part("J19", "BOOT", socket.CONN_FP[3], mpn=socket.CONN_MPN[3],
+                    description="1-2 = BOOTSEL, 2-3 = reset. Jumper, not a "
+                                "button: minimal design 2.2's own J2, plus "
+                                "the RUN toggle that sentence requires"))
+    for pin, net in ((1, "BOOT"), (2, "MDGND"), (3, "RUN")):
+        design.connect(net, ("J19", pin))
+    # **SWD is here because the other two ways in both depend on something.**
+    # USB BOOTSEL needs a working USB and a working flash; running firmware
+    # needs firmware. Serial wire debug needs neither, and it is three pins.
+    design.connect("SWCLK", (CONTROLLER_REF, P["SWCLK"]))
+    design.connect("SWDIO", (CONTROLLER_REF, P["SWDIO"]))
+    design.add(Part("J20", "SWD", socket.CONN_FP[3], mpn=socket.CONN_MPN[3],
+                    description="Serial wire debug: 1=SWCLK, 2=MDGND, "
+                                "3=SWDIO. Both lines are pulled up inside the "
+                                "part (Table 618)"))
+    for pin, net in ((1, "SWCLK"), (2, "MDGND"), (3, "SWDIO")):
+        design.connect(net, ("J20", pin))
+
+    # -- the crystal -------------------------------------------------------
+    design.connect("XIN", (CONTROLLER_REF, P["XIN"]))
+    design.connect("XOUT", (CONTROLLER_REF, P["XOUT"]))
+    design.add(Part(CRYSTAL_REF, CRYSTAL, CRYSTAL_FP, mpn=CRYSTAL_MPN,
+                    description="12 MHz, CL 10 pF, ESR 50 ohm max. The USB "
+                                "bootloader requires exactly 12 MHz -- "
+                                "RP2040 section 1.4.1"))
+    design.connect("XIN", (CRYSTAL_REF, CRYSTAL_PINS["XIN"]))
+    design.connect("XTAL", (CRYSTAL_REF, CRYSTAL_PINS["XOUT"]))
+    design.connect("MDGND", (CRYSTAL_REF, CRYSTAL_PINS["CASE_A"]),
+                   (CRYSTAL_REF, CRYSTAL_PINS["CASE_B"]))
+    _resistor(design, "R824", CRYSTAL_SERIES_R, "XOUT", "XTAL",
+              description="Crystal drive limit, 1 kohm at IOVDD = 3.3 V -- "
+                          "minimal design 2.3, and the value is tied to that "
+                          "rail voltage by the same paragraph")
+    _capacitor(design, "C832", CRYSTAL_LOAD_C, "XIN", "MDGND",
+               description="Crystal load, 15 pF -- see crystal_load(): two of "
+                           "these in series with 3 pF of board stray is "
+                           "10.5 pF against a 10 pF part")
+    _capacitor(design, "C833", CRYSTAL_LOAD_C, "XTAL", "MDGND",
+               description="Crystal load, 15 pF, on the driven side of R824")
+
+    # -- the QSPI flash ----------------------------------------------------
+    #
+    # Wired straight across, shortest possible: "the QSPI pins of RP2040 should
+    # be wired directly to the flash, using short connections to maintain the
+    # signal integrity, and to also reduce crosstalk in surrounding circuits."
+    # That is a placement statement as much as a netlist one -- see
+    # placement.py.
+    #
+    # **The pull-up the reference design draws is deliberately not fitted.**
+    # R2 in minimal design 2.2 is a 10 kohm from QSPI_SS to 3.3 V and is
+    # "marked as DNF (Do Not Fit) on the schematic, as we have found that with
+    # this particular flash device, the external pull-up is unnecessary". This
+    # is that flash device. Fitting it anyway would be adding a part against
+    # the advice of the document the rest of this block follows.
+    design.add(Part(FLASH_REF, FLASH, SOIC8_208_FP, mpn=FLASH_MPN,
+                    description="QSPI flash, 128 Mbit. The size is the "
+                                "reference design's rather than derived -- "
+                                "see FLASH"))
+    for net, name in (("QSCS", "CS"), ("QSD1", "DO_IO1"), ("QSD2", "WP_IO2"),
+                      ("QSD0", "DI_IO0"), ("QSCK", "CLK"), ("QSD3", "HOLD_IO3")):
+        design.connect(net, (FLASH_REF, FLASH_PINS[name]))
+    design.connect("VMCU", (FLASH_REF, FLASH_PINS["VCC"]))
+    design.connect("MDGND", (FLASH_REF, FLASH_PINS["GND"]))
+    _capacitor(design, "C834", FLASH_LOCAL, "VMCU", "MDGND",
+               description="U20 decoupling, at the package")
+    for net, name in (("QSD3", "QSPI_SD3"), ("QSCK", "QSPI_SCLK"),
+                      ("QSD0", "QSPI_SD0"), ("QSD2", "QSPI_SD2"),
+                      ("QSD1", "QSPI_SD1"), ("QSCS", "QSPI_SS")):
+        design.connect(net, (CONTROLLER_REF, P[name]))
+
+    # -- USB ---------------------------------------------------------------
+    design.connect("UDM", (CONTROLLER_REF, P["USB_DM"]))
+    design.connect("UDP", (CONTROLLER_REF, P["USB_DP"]))
+    _resistor(design, "R820", USB_SERIES_R, "UDM", "UDMJ",
+              description="USB_DM series termination, 27 ohm -- Table 620, "
+                          "'required for USB operation', and minimal design "
+                          "2.4.1 asks for it close to the chip")
+    _resistor(design, "R821", USB_SERIES_R, "UDP", "UDPJ",
+              description="USB_DP series termination, 27 ohm")
+    design.add(Part(USB_CONN_REF, USB_CONN, USB_MICROB_FP, mpn=USB_CONN_MPN,
+                    description="USB 1.1 device, micro-B. The one panel part "
+                                "on the board rather than on a header -- see "
+                                "USB_CONN_REF's comment"))
+    design.connect("VBUS", (USB_CONN_REF, 1))
+    design.connect("UDMJ", (USB_CONN_REF, 2))
+    design.connect("UDPJ", (USB_CONN_REF, 3))
+    design.connect("MDGND", (USB_CONN_REF, 5), (USB_CONN_REF, "SH"))
+    _resistor(design, "R822", USB_VBUS_TOP, "VBUS", "VBUSD",
+              description="VBUS sense divider, upper -- see "
+                          "usb_vbus_divider(): equal resistors, because the "
+                          "window between VIH and the rail is 3:2 wide")
+    _resistor(design, "R823", USB_VBUS_BOT, "VBUSD", "MDGND",
+              description="VBUS sense divider, lower")
+
+    # -- DIN MIDI ----------------------------------------------------------
+    #
+    # In: CA-033 Figure 2, with RD deleted because the TLP2761's output is
+    # totem pole. Out: Figure 1's 3.3 V column, unchanged.
+    design.add(Part(MIDI_OPTO_REF, MIDI_OPTO, SO6L_FP, mpn=MIDI_OPTO_MPN,
+                    description="MIDI IN opto-isolator. 2.7-5.5 V supply and "
+                                "1.6 mA of threshold current, which is what "
+                                "makes a 3.3 V receiver possible at all"))
+    design.connect("MINA", (MIDI_OPTO_REF, MIDI_OPTO_PINS["A"]))
+    design.connect("MINK", (MIDI_OPTO_REF, MIDI_OPTO_PINS["K"]))
+    design.connect("VMCU", (MIDI_OPTO_REF, MIDI_OPTO_PINS["VCC"]))
+    design.connect("MDGND", (MIDI_OPTO_REF, MIDI_OPTO_PINS["GND"]))
+    design.connect("MIDI_RX", (MIDI_OPTO_REF, MIDI_OPTO_PINS["VO"]))
+    _capacitor(design, "C835", MIDI_OPTO_LOCAL, "VMCU", "MDGND",
+               description="U21 bypass, 100 nF. Not decoupling: its datasheet "
+                           "makes it a condition of operation -- 'otherwise, "
+                           "this photocoupler may not switch properly' -- and "
+                           "gives it a distance, within 1 cm of each pin")
+    _resistor(design, "R827", MIDI_IN_RB, "MINJ", "MINA",
+              description="MIDI IN loop resistor -- 390 ohm and not CA-033's "
+                          "220, because this receiver may face either a 5 V "
+                          "or a 3.3 V transmitter. See midi_loop()")
+    design.add(Part("D805", MIDI_IN_DIODE, SOD123_FP,
+                    description="Reverse voltage protection for the opto's "
+                                "LED -- CA-033 Figure 2's own 1N914, in the "
+                                "SOD-123 this board already buys"))
+    design.connect("MINA", ("D805", DIODE_PINS["K"]))
+    design.connect("MINK", ("D805", DIODE_PINS["A"]))
+    design.add(Part("J15", "MIDIIN", socket.CONN_FP[3], mpn=socket.CONN_MPN[3],
+                    description="To the panel's MIDI IN socket: 1 = DIN pin "
+                                "4, 2 = DIN pin 2 and the shield, 3 = DIN pin "
+                                "5. Pins 1 and 3 of the DIN are unused"))
+    for pin, net in ((1, "MINJ"), (2, "MINSH"), (3, "MINK")):
+        design.connect(net, ("J15", pin))
+    # "a connection through a small capacitor (0.1uF typical) to ground is
+    # optional for improved high-frequency (RF) shielding" -- and a capacitor
+    # is the only thing that can do it, because CA-033 forbids the DC path in
+    # the sentence before.
+    _capacitor(design, "C836", MIDI_IN_SHIELD_C, "MINSH", "MDGND",
+               description="MIDI IN shield and DIN pin 2 to local ground at "
+                           "RF only -- CA-033's optional capacitor, and the "
+                           "specification forbids any DC path here")
+    design.add(Part("J16", "MIDIOUT", socket.CONN_FP[3], mpn=socket.CONN_MPN[3],
+                    description="To the panel's MIDI OUT socket: 1 = DIN pin "
+                                "4, 2 = DIN pin 2 to ground, 3 = DIN pin 5"))
+    for pin, net in ((1, "MOUTV"), (2, "MDGND"), (3, "MOUTD")):
+        design.connect(net, ("J16", pin))
+    _resistor(design, "R828", MIDI_OUT_RA, "VMCU", "MOUTV",
+              description="MIDI OUT RA -- CA-033's 3.3 V column, 33 ohm")
+    _resistor(design, "R829", MIDI_OUT_RC, "MIDI_TX", "MOUTD",
+              description="MIDI OUT RC -- CA-033's 3.3 V column, 10 ohm")
+
+    # -- the panel: tap and expression -------------------------------------
+    design.add(Part("J17", "TAP", socket.CONN_FP[2], mpn=socket.CONN_MPN[2],
+                    description="Tap footswitch jack: 1 = tip, 2 = sleeve. "
+                                "Momentary to ground; bounce is a firmware "
+                                "constant at the 8 kHz frame -- see "
+                                "tap_debounce()"))
+    design.connect("TAPJ", ("J17", 1))
+    design.connect("MDGND", ("J17", 2))
+    _resistor(design, "R830", TAP_PULLUP, "VMCU", "TAPJ",
+              description="Tap pull-up -- the pin's reset state is pull-DOWN "
+                          "(Table 615), so without this the level before "
+                          "firmware runs is undefined")
+    _resistor(design, "R831", TAP_SERIES, "TAPJ", "TAP",
+              description="Tap series resistor: what a lead leaving the "
+                          "enclosure gets between it and the die")
+    _capacitor(design, "C837", TAP_C, "TAP", "MDGND",
+               description="Tap RC, into the pin's own Schmitt trigger "
+                           "(VHYS 0.2 V at 3.3 V)")
+    design.add(Part("J18", "EXPR", socket.CONN_FP[3], mpn=socket.CONN_MPN[3],
+                    description="Expression pedal jack: 1 = tip (wiper), 2 = "
+                                "ring (supply), 3 = sleeve. A TS plug shorts "
+                                "2 to 3 -- see expression_input()"))
+    for pin, net in ((1, "EXPRW"), (2, "EXPRV"), (3, "MDGND")):
+        design.connect(net, ("J18", pin))
+    _resistor(design, "R832", EXPR_TOP, "VMCU", "EXPRV",
+              description="Expression pedal supply resistor -- the only thing "
+                          "between VMCU and a mono plug in a stereo socket")
+    _resistor(design, "R833", EXPR_SERIES, "EXPRW", "EXPR",
+              description="Expression wiper series resistor")
+    _capacitor(design, "C838", EXPR_C, "EXPR", "MDGND",
+               description="Expression anti-alias and ESD, at the pin")
+
+    # -- what lands on which GPIO ------------------------------------------
+    #
+    # CONTROLLER_MAP is the assignment and controller_pin_map() is the join;
+    # this is the only place either is turned into copper, so the check in
+    # Design.check_controller_functions() covers the netlist rather than a
+    # table beside it.
+    for row in controller_pin_map():
+        design.connect(row["net"], (CONTROLLER_REF, row["pin"]))
+
+    # -- the 3.3 V switcher ------------------------------------------------
+    #
+    # Input from VA_RAW, one node ahead of the rail filter, so that its pulse
+    # train is on the same side of R804 as the converter's own ripple. See
+    # controller_supply() and mcu_dcdc_injection().
+    Q = MCU_DCDC_PINS
+    design.add(Part(MCU_DCDC_REF, MCU_DCDC, SOT23_6_FP, mpn=MCU_DCDC_MPN,
+                    description="3.3 V for the controller: 1.1 MHz, forced "
+                                "PWM at every load, 12 V in. See "
+                                "mcu_dcdc_light_load() for why the F suffix "
+                                "is load-bearing"))
+    design.connect("VA_RAW", (MCU_DCDC_REF, Q["VIN"]), (MCU_DCDC_REF, Q["EN"]))
+    design.connect("MDGND", (MCU_DCDC_REF, Q["GND"]))
+    design.connect("MSW", (MCU_DCDC_REF, Q["SW"]))
+    design.connect("MCB", (MCU_DCDC_REF, Q["CB"]))
+    design.connect("MFB", (MCU_DCDC_REF, Q["FB"]))
+    _capacitor(design, "C840", MCU_DCDC_CIN, "VA_RAW", "MDGND",
+               footprint=C_FILM_FP,
+               description="U22 input capacitor, 2.2 uF at 50 V -- section "
+                           "9.2.2.6, which asks for twice the maximum input "
+                           "voltage of rating")
+    _capacitor(design, "C841", MCU_DCDC_CIN_HF, "VA_RAW", "MDGND",
+               description="U22 high-frequency input capacitor, 100 nF, at "
+                           "the pins -- the same section's second sentence")
+    _capacitor(design, "C842", MCU_DCDC_CBOOT, "MCB", "MSW",
+               description="U22 bootstrap capacitor, 100 nF -- section 9.2.2.7")
+    design.add(Part("L802", MCU_DCDC_L, INDUCTOR_FP, mpn=MCU_DCDC_L_MPN,
+                    description="12 uH, Isat 4.0 A against a 1.4 A peak "
+                                "current limit -- Table 1's own value for "
+                                "1.1 MHz at 3.3 V"))
+    design.connect("MSW", ("L802", 1))
+    design.connect("VMCU", ("L802", 2))
+    _capacitor(design, "C843", MCU_DCDC_COUT, "VMCU", "MDGND",
+               footprint=C_FILM_FP,
+               description="U22 output capacitor, 22 uF -- Table 1")
+    _resistor(design, "R850", MCU_DCDC_RFBT, "VMCU", "MFB",
+              description="U22 feedback divider, upper. 51k/22k1 is Table 1's "
+                          "pair and mcu_dcdc_output() is the equation-7 check "
+                          "on it")
+    _resistor(design, "R851", MCU_DCDC_RFBB, "MFB", "MDGND",
+              description="U22 feedback divider, lower")
+
+
 def build():
     design = Design()
     shared(design)
@@ -5916,6 +7758,9 @@ def build():
     # After the six, because it hangs off all of them: ENV{n} has to exist
     # before the divider that reads it.
     envelope_adc(design)
+    # Last, because it is the block every other one was waiting for: its own
+    # nets are the ones J9-J13 used to carry.
+    controller(design)
     design.check()
     return design
 
@@ -6259,8 +8104,96 @@ def _report():
           f"{sup['switcher_floor_ma'][1]:.1f} mA, so it clears at any "
           f"efficiency over {sup['switcher_min_efficiency'] * 100:.0f} % -- "
           f"no efficiency figure needed, and none invented")
-    print(f"  -> the package gate is closed by the fabrication class; what "
-          f"keeps this block in DEFERRED is the supply, and it wants a part")
+    print(f"  -> both gates are closed: the package by the fabrication class, "
+          f"the supply by U22. DEFERRED is empty")
+    print()
+
+    print(f"the controller's own rail -- {MCU_DCDC}, {MCU_DCDC_KHZ[0]:.0f}-"
+          f"{MCU_DCDC_KHZ[1]:.0f} kHz forced PWM, from VA_RAW")
+    mcu = mcu_supply()
+    for name, milliamps in sorted(mcu["terms"].items(),
+                                  key=lambda kv: -kv[1]):
+        print(f"    {name:<22}{milliamps:>7.2f} mA")
+    print(f"    {'total on VMCU':<22}{mcu['load_ma']:>7.2f} mA   "
+          f"({mcu['watts'] * 1e3:.0f} mW; idle {mcu['idle_ma']:.1f})")
+    print(f"  costs +Vout           {mcu['input_ma']:>7.2f} mA at the "
+          f"assumption's pessimistic {MEASURED['mcu_dcdc_efficiency'].low:.2f}"
+          f", against {mcu['floor_ma']:.1f} mA at 100 %")
+    print(f"  headroom              {mcu['headroom_before_ma']:>7.2f} mA "
+          f"before, {mcu['headroom_after_ma']:.2f} after -- the tightest "
+          f"margin on this board")
+    print(f"  fits at any efficiency over "
+          f"{mcu['min_efficiency'] * 100:.0f} %, and the assumed range starts "
+          f"at {MEASURED['mcu_dcdc_efficiency'].low * 100:.0f} %")
+    light = mcu_dcdc_light_load()
+    print(f"  the F suffix           boundary {light['boundary_ma']:.0f} mA "
+          f"against a {light['load_ma']:.0f} mA maximum load, so a PFM part "
+          f"would never be continuous")
+    print(f"    its rate would be    {light['pfm_hz_at_idle'] / 1e3:.0f} kHz "
+          f"at this board's idle -- under the {SUPPLY_MIN_KHZ:.0f} kHz rule "
+          f"-- and in the audio band below "
+          f"{light['pfm_in_band_below_ma']:.1f} mA")
+    beat = mcu_dcdc_beat()
+    inject = mcu_dcdc_injection()
+    print(f"  beats                  {beat['worst_beat_khz']:.0f} kHz against "
+          f"the TMR at harmonics {beat['worst_pair'][0]}:"
+          f"{beat['worst_pair'][1]}, and "
+          f"{beat['against_pump']['worst_beat_khz']:.0f} kHz against the "
+          f"pump's {beat['against_pump']['worst_order']}th -- second order, "
+          f"as supply_beat() says")
+    print(f"  injection              {inject['input_rms_ma']:.1f} mA rms of "
+          f"input ripple over {inject['z_bulk'] * 1e3:.0f} mohm is "
+          f"{inject['on_va_raw_v'] * 1e6:.0f} uV on VA_RAW, "
+          f"{inject['residual_v'] * 1e9:.0f} nV on VA+ after R804 "
+          f"({inject['am']['am_db']:.0f} dB of AM)")
+    out = mcu_dcdc_output()
+    print(f"  rail                   {out['volts']:.3f} V from "
+          f"{out['rfbt'] / 1e3:.0f}k/{out['rfbb'] / 1e3:.1f}k, "
+          f"{out['worst'][0]:.2f}-{out['worst'][1]:.2f} V at every tolerance, "
+          f"against {out['iovdd_abs_max']:.2f} V absolute")
+    print()
+
+    print("the controller's pins -- CONTROLLER_MAP against the datasheet's own "
+          "Table 2")
+    for row in controller_pin_map():
+        print(f"  {row['net']:<8} {row['name']:<12} pin {row['pin']:<3} "
+              f"{row['function']}")
+    print()
+
+    loop = usb_ground_loop()
+    print(f"  USB ground   a {loop['current_ma']:.0f} mA installation loop "
+          f"puts {loop['volts'] * 1e6:.0f} uV of "
+          f"{loop['hz']:.0f} Hz across the bond -- "
+          f"{loop['below_floor_db']:.0f} dB under the mixer's noise floor, "
+          f"and constraint 5.2 still holds. See usb_ground_loop()")
+    print()
+
+    print("what hangs off it")
+    x = crystal_load()
+    print(f"  crystal      {CRYSTAL_MPN}: {x['c_each'] * 1e12:.0f} pF each "
+          f"side + {x['stray'] * 1e12:.0f} pF stray = "
+          f"{x['load'] * 1e12:.1f} pF against CL {x['target'] * 1e12:.0f}, "
+          f"{x['error_pf']:+.1f} pF. In ppm: not computed, see crystal_load()")
+    m = midi_loop()
+    print(f"  MIDI in      {m['rb']:.0f} ohm gives {m['low_ma']:.2f}-"
+          f"{m['high_ma']:.2f} mA into the opto over both transmitters, "
+          f"inside its {m['recommended'][0]:.0f}-{m['recommended'][1]:.0f} mA "
+          f"and {m['threshold_margin']:.2f}x over threshold")
+    print(f"               the opto costs {m['delay_fraction'] * 100:.2f} % of "
+          f"a bit in delay and {m['skew_fraction'] * 100:.2f} % in distortion")
+    u = usb_vbus_divider()
+    print(f"  USB          VBUS divides to {u['at_low']:.2f}-{u['at_high']:.2f}"
+          f" V against VIH {u['vih']:.1f} and a {V3V3_VOLTS:.1f} V rail")
+    e = expression_input()
+    print(f"  pedal        a mono plug shorts {e['short_ma']:.1f} mA; full "
+          f"scale is "
+          + " and ".join(f"{v:.2f} V on {int(k / 1000)}k"
+                         for k, v in sorted(e['full_scale_v'].items()))
+          + ", and firmware calibrates the ends")
+    t = tap_debounce()
+    print(f"  footswitch   {t['tau_open_s'] * 1e3:.1f} ms of RC against a "
+          f"{t['frame_s'] * 1e6:.0f} us frame: bounce is firmware's, the "
+          f"impedance is the board's")
     print()
 
     print(f"the envelope ADC -- {ENV_ADC}, and the full scale chose it")

@@ -602,6 +602,97 @@ def _(nets, values, open_pins, violations, drc, board):
                   {"description": "Pad 1 of C101"}]})
 
 
+# -- the controller -------------------------------------------------------
+#
+# **Five checks and nine faults, and the shape of them is the shape of the
+# block.** Everything in the controller is either a pin assignment nobody can
+# see is wrong or a value somebody would helpfully correct back to the wrong
+# one -- so the faults are a wire on a plausible pin, a part that quietly
+# stops being counted, and two values that are the number a datasheet or a
+# specification actually prints.
+
+@case("the RP2040's core rail is tied to its IO rail",
+      verify.check_controller)
+def _(nets, values, open_pins, violations, drc, board):
+    # VREG_VOUT is an *output*. On VMCU it is a 1.1 V regulator driving into
+    # 3.3, which works until the part is warm.
+    nets["VCORE"].discard((design.CONTROLLER_REF,
+                           str(design.CONTROLLER_PINS["VREG_VOUT"])))
+    nets["VMCU"].add((design.CONTROLLER_REF,
+                      str(design.CONTROLLER_PINS["VREG_VOUT"])))
+
+
+@case("a supply pin loses its own decoupling capacitor",
+      verify.check_controller)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["VMCU"].discard(("C823", "1"))
+
+
+@case("MCLK moves to a pin with no clock output on it",
+      verify.check_controller)
+def _(nets, values, open_pins, violations, drc, board):
+    ref = design.CONTROLLER_REF
+    nets["MCLK"].discard((ref, str(design.CONTROLLER_GPIO_PINS[21])))
+    nets["MCLK"].add((ref, str(design.CONTROLLER_GPIO_PINS[27])))
+
+
+@case("a pull-up creeps onto QSPI_SS", verify.check_controller_periphery)
+def _(nets, values, open_pins, violations, drc, board):
+    # The reference design's own R2, which that document marks DNF for this
+    # exact flash. A part added for luck is still a stub on the fastest bus
+    # here.
+    nets["QSCS"].add(("R999", "1"))
+
+
+@case("the crystal's load capacitors stop being equal",
+      verify.check_controller_periphery)
+def _(nets, values, open_pins, violations, drc, board):
+    values["C833"] = "22p/50V C0G"
+
+
+@case("the crystal loses its drive resistor",
+      verify.check_controller_periphery)
+def _(nets, values, open_pins, violations, drc, board):
+    ref = design.CRYSTAL_REF
+    nets["XTAL"].discard((ref, str(design.CRYSTAL_PINS["XOUT"])))
+    nets["XOUT"].add((ref, str(design.CRYSTAL_PINS["XOUT"])))
+
+
+@case("the switcher is fed from behind the rail filter",
+      verify.check_mcu_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    pin = str(design.MCU_DCDC_PINS["VIN"])
+    nets["VA_RAW"].discard((design.MCU_DCDC_REF, pin))
+    nets["VA+"].add((design.MCU_DCDC_REF, pin))
+
+
+@case("the feedback divider is swapped end for end",
+      verify.check_mcu_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    values["R850"], values["R851"] = values["R851"], values["R850"]
+
+
+@case("the MIDI IN shield gets a DC path to ground", verify.check_midi)
+def _(nets, values, open_pins, violations, drc, board):
+    nets["MDGND"].add(("J15", "2"))
+
+
+# **This case was "corrected back to CA-033's 220 ohm" and that fault was not
+# one.** The claim it was planted from -- that the specification's own value
+# delivers 6.6 mA into this opto, over its recommended maximum -- came from an
+# arithmetic slip: it used 0.2 V for the driver's VOL where the RP2040's table
+# says 0.5. At 220 ohm the real spread is 4.32 to 5.51 mA, inside the
+# recommended range, so check_midi() passed and the case would have reported
+# MISSED. Found by printing the numbers, which is the cheapest instrument in
+# this repo and the one that keeps finding things. What is planted instead is a
+# value that does leave the range, and the direction is the plausible one:
+# somebody worrying the LED is under-driven and halving the resistor.
+@case("the MIDI loop resistor is halved and overdrives the LED",
+      verify.check_midi)
+def _(nets, values, open_pins, violations, drc, board):
+    values["R827"] = "100R 1%"
+
+
 # The router's own invariant, checked without KiCad: two nets on one point.
 # gen_pcb.py runs this on every build and refuses to save if it fails, so what
 # is planted here is the check itself rather than a board.
@@ -707,6 +798,22 @@ def main():
         finally:
             _placement.ISOLATION_X = original_x
         report(label, found)
+
+    # **U21's bypass distance, planted by moving the requirement.** This is
+    # the one case in the file where the fault is in the threshold rather than
+    # in the artefact, and the reason is that the artefact is a routed board:
+    # check_midi_bypass() measures two pads on it, and the only way to make
+    # that measurement fail is to move a part and re-route -- which is a
+    # different board, not a planted fault. Moving the number is the same
+    # move ISOLATION_X's two cases above make, and it proves the same thing:
+    # the check reads the board and reports what it finds there.
+    original_mm = design.MIDI_OPTO_LOCAL_MM
+    design.MIDI_OPTO_LOCAL_MM = 0.5
+    try:
+        found = verify.check_midi_bypass(verify.PCB)
+    finally:
+        design.MIDI_OPTO_LOCAL_MM = original_mm
+    report("U21's bypass is further away than its datasheet allows", found)
 
     # The router's own invariant, which is not a verify.py check and so cannot
     # be planted through CASES: gen_pcb.py runs it before it saves and refuses

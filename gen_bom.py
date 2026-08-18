@@ -280,6 +280,82 @@ PRICES = {
         "characterised at 1.8 V is what made this part rather than another "
         "that meets it."),
 
+    # -- the controller block ----------------------------------------------
+    #
+    # **Every line here is a band and not a read, and that is a statement
+    # rather than an omission.** The four actives were chosen from datasheets
+    # read first-hand this session; no distributor page was fetched for any of
+    # them, so what is quoted is a class figure with the reasoning attached.
+    # STYLE.md rule 10's point is that a citation is a thing somebody followed,
+    # and `band` is this file's word for "not this session".
+    design.CONTROLLER: band(
+        0.80, 1.80, "GBP", 10,
+        "RP2040, 7x7 QFN-56. Raspberry Pi sell it directly and it is the "
+        "cheapest active on this board by an order of magnitude against the "
+        "converter -- which is worth seeing, because the controller is the "
+        "block that took the longest to close and it is not the expensive "
+        "one. What it *did* cost is the fabrication class: 0.40 mm pitch is "
+        "why the board is 0.09/0.09 on 1 oz. See docs/fabrication-class.md."),
+
+    design.FLASH: band(
+        1.00, 2.50, "GBP", 10,
+        "W25Q128JVSIQ, 8-pin SOIC 208-mil, 128 Mbit. The reference design's "
+        "own part. **The size is not derived** -- nothing in this project "
+        "sizes the firmware -- so the smaller siblings are the obvious saving "
+        "and they are pin-compatible: W25Q16JV is a quarter of this and "
+        "changes no value on the board. See design.FLASH."),
+
+    design.MIDI_OPTO: band(
+        1.00, 2.20, "GBP", 10,
+        "Toshiba TLP2761, SO6L. It is dearer than the 6N138 CA-033 names and "
+        "the reason is the whole of design.MIDI_OPTO: 2.7 V of supply and "
+        "1.6 mA of threshold current, which is what makes a receiver possible "
+        "on a board whose only logic rail is 3.3 V."),
+
+    design.MCU_DCDC: band(
+        0.70, 1.60, "GBP", 10,
+        "TPS560430XFDBVR, SOT-23-6. **The F suffix is the price of this "
+        "line**: the PFM version is the same die and a few pence cheaper, and "
+        "design.mcu_dcdc_light_load() shows its switching frequency would "
+        "fall to 246 kHz at this board's idle load -- under the >= 300 kHz "
+        "rule spec section 1.1 sets, on a rail the audio domain shares."),
+
+    design.CRYSTAL: band(
+        0.40, 1.20, "GBP", 10,
+        "Abracon ABM8-272-T3, 3.2 x 2.5 mm. Named twice by the vendor's own "
+        "hardware-design document -- 'For original designs using RP2040 we "
+        "recommend using the Abracon ABM8-272-T3' -- and its Table 1 is where "
+        "CL, ESR and the drive level in design.CRYSTAL come from."),
+
+    design.MCU_DCDC_L: band(
+        0.30, 0.90, "GBP", 25,
+        "Bourns SRN6045TA-120M, 12 uH, 6.0 x 6.0 mm shielded. Table 1 of the "
+        "switcher's datasheet gives the inductance; what the part is chosen "
+        "against is its own datasheet's Isat of 4.0 A against a 1.4 A peak "
+        "current limit, which is section 9.2.2.4's rule and 2.9x of it."),
+
+    design.USB_CONN: band(
+        0.40, 1.20, "GBP", 10,
+        "Molex 105017-0001, micro-B receptacle. **The one panel part on the "
+        "board rather than on a header**, and placement.EDGE_PARTS is what "
+        "keeps it at the edge where a plug can reach it."),
+
+    # The passives the block adds. Same classes as everything above them.
+    "51k 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
+    "22k1 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
+    "1k 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
+    "27R 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
+    "390R 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
+    # CA-033's own tolerances, and the wattage is the reason the 33 ohm is
+    # called out: "RA 33 ohm 5% 0.5W". An 0805 is 0.125 W and the loop puts
+    # 33 x 5.5 mA squared = 1 mW through it, so the specification's figure is
+    # about a *shorted* output rather than about this current.
+    "33R 5%": band(0.01, 0.05, "GBP", 100, "0805 5%"),
+    "10R 5%": band(0.01, 0.05, "GBP", 100, "0805 5%"),
+    "15p/50V C0G": band(0.02, 0.08, "GBP", 100, "0805 C0G"),
+    "2u2/50V X7R": band(0.05, 0.20, "GBP", 25, "1210 X7R at 50 V"),
+    "22u/16V X5R": band(0.08, 0.30, "GBP", 25, "1210 X5R"),
+
     # -- not chosen --------------------------------------------------------
     None: NONE,
 }
@@ -288,21 +364,33 @@ PRICES = {
 # is what the silkscreen says. The mixer does the same thing -- its J11/J13/J15
 # read "TO JACKS 1/2", "3/4", "5/6" -- and a builder reading CH1..CH6 off six
 # identical headers is the point of them. One part, one price, six labels.
-# **The 1x03 line is gone and that is a real change, not tidying.** It was the
-# mixer's own CONN_MPN[3] on J11, and J11 grew to five ways when the fail-safe
-# needed a pin for its 10 kHz drive with a ground either side. Every connector
-# on this board is now 1x02 or 1x05. The check that noticed is the stale-entry
-# half of check(): a price for a part nobody fits is a BOM line that cannot be
-# ordered wrong because it will never be ordered at all, and it hides the fact
-# that a connector changed.
+# **The 1x03 line went and came back, and both moves were the check working.**
+# It was the mixer's own CONN_MPN[3] on J11; J11 grew to five ways when the
+# fail-safe needed a pin for its 10 kHz drive with a ground either side, and
+# the stale-entry half of check() said so -- a price for a part nobody fits is
+# a line that will never be ordered and hides the fact that a connector
+# changed. The controller brings five of them back: MIDI in and out, the
+# expression pedal, the boot header and SWD are all three-conductor.
+#
+# **And the 1x05 line has gone the same way, in the same run.** J9 to J13 were
+# five of them, standing in for a controller on another board; the controller
+# is on this one and nothing here is five ways any more. The entry was left in
+# for a moment on the argument that an unused price is what makes an absence
+# visible -- and check() refused it in the same breath, which is the better
+# answer: the record of a part leaving belongs in a sentence like this one,
+# and the table is for parts somebody is going to buy.
 PRICES_BY_MPN = {
+    "61300311121": band(0.30, 0.75, "GBP", 10,
+                        "Wurth WR-PHD 1x03 vertical, gold-plated: "
+                        "CONN_MPN[3]. Five on this board, all of them the "
+                        "controller's: MIDI in and out, the expression "
+                        "pedal, boot/reset and SWD. Three conductors is what "
+                        "a TRS jack and a DIN's two used pins both want."),
     "61300211121": band(0.25, 0.60, "GBP", 10,
                         "Wurth WR-PHD 1x02 vertical, gold-plated: CONN_MPN[2]. "
                         "Two ways because the loom is a shielded pair -- the "
                         "shield lands at the mixer end only, so it has no pin "
                         "here. See design.FRONT_R."),
-    "61300511121": band(0.40, 0.90, "GBP", 10,
-                        "Wurth WR-PHD 1x05 vertical, gold-plated: CONN_MPN[5]."),
 }
 
 

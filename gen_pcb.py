@@ -298,10 +298,26 @@ class Board:
                 right = pcbnew.ToMM(box.GetRight())
                 bottom = pcbnew.ToMM(box.GetBottom())
                 # A through-hole pad is copper on every layer; an SMD pad is
-                # copper on one. The router needs to know which, because it is
-                # what decides whether reaching that pad costs a via.
-                layers = (route.LAYERS if pad.GetDrillSize().x > 0
-                          else (route.FRONT,))
+                # copper on whichever layers it is *on*. The router needs to
+                # know which, because it is what decides whether reaching that
+                # pad costs a via -- and, for the QFN, whether the back side is
+                # free.
+                #
+                # **This asked the drill and assumed the rest, and a QFN's
+                # thermal pad is the case where that is wrong.** KiCad's
+                # _ThermalVias variants put the exposed pad on F.Cu *and* on
+                # B.Cu, so pad 57 of U19 is 3.2 mm square of ground on the back
+                # of the board -- and declared as front-only it was invisible
+                # to the router, which laid IRQ straight across it. DRC found
+                # it 64 times. The pad knows what layers it is on; asking it is
+                # both shorter and true of parts nobody has fitted yet.
+                if pad.GetDrillSize().x > 0:
+                    layers = route.LAYERS
+                else:
+                    layers = tuple(
+                        side for side, copper in ((route.FRONT, pcbnew.F_Cu),
+                                                  (route.BACK, pcbnew.B_Cu))
+                        if pad.IsOnLayer(copper))
                 boxes.setdefault(self._owner.get(key, ""), []).append(
                     ((left + right) / 2, (top + bottom) / 2,
                      (right - left) / 2, (bottom - top) / 2, layers))
@@ -359,6 +375,31 @@ class Board:
         which is a ground pin connected to the wrong ground.
         """
         placed, obstacles = 0, []
+        # **A pad with a barrel *inside its own copper* is already stitched,
+        # and this is the QFN's exposed pad.** The rule below skips a drilled
+        # pad because its barrel crosses every layer; a QFN's thermal pad is an
+        # SMD pad with drilled pads sitting inside it -- KiCad's _ThermalVias
+        # variants are built exactly that way -- so the same argument applies
+        # to it. Without this the build stops on U19.57, correctly: there is
+        # nowhere beyond a 3.2 mm pad in the middle of a 56-pin package that is
+        # not inside a pin row.
+        #
+        # **The test is overlap and not the pad number, and the difference is a
+        # USB connector.** The first version of this asked whether any drilled
+        # pad shared the number -- true of a thermal pad, and also true of the
+        # micro-B's shield, which has four through-hole pegs and five SMD tabs
+        # all numbered "SH" in different places. Two of those tabs then got no
+        # stitch and no copper, and DRC reported J14's shield as unconnected to
+        # itself. Same number is not same copper; overlapping boxes are.
+        barrels = {}
+        for ref, footprint in self.footprints.items():
+            for pad in footprint.Pads():
+                if pad.GetDrillSize().x > 0:
+                    barrels.setdefault(ref, []).append(pad.GetBoundingBox())
+
+        def has_barrel(ref, pad):
+            box = pad.GetBoundingBox()
+            return any(box.Intersects(other) for other in barrels.get(ref, ()))
         boxes = [(x, y, half_w, half_h)
                  for entries in self.pad_boxes().values()
                  for x, y, half_w, half_h, _ in entries]
@@ -373,7 +414,7 @@ class Board:
                 # crosses every layer, so the plane connects to it natively and
                 # a via beside it is a second hole 0.8 mm from the first --
                 # which is a hole-to-hole violation, not a connection.
-                if pad.GetDrillSize().x > 0:
+                if pad.GetDrillSize().x > 0 or has_barrel(ref, pad):
                     continue
                 position = pad.GetPosition()
                 box = pad.GetBoundingBox()
@@ -595,9 +636,13 @@ def build():
         raise SystemExit("placement.SIZE disagrees with KiCad's footprints:\n  "
                          + "\n  ".join(mismatched[:8]))
 
-    rectangle = placement.extents([
-        ((left + right) / 2, (top + bottom) / 2, right - left, bottom - top)
-        for _, left, top, right, bottom in board.courtyards])
+    # **The refs go with the boxes, because placement.EDGE_PARTS needs them.**
+    # A connector that mates with a cable contributes to the outline without
+    # the margin every other part gets, and without the reference this call
+    # cannot tell which is which -- which is exactly the bug it had: a board
+    # 5 mm wider than placement.py's own report, with the USB receptacle
+    # 5 mm inside an edge it is supposed to be flush with.
+    rectangle = placement.extents(board.courtyards)
     board.outline(rectangle)
 
     # The two grounds, on both inner layers, with placement.GROUND_GAP between

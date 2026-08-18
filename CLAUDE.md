@@ -97,6 +97,15 @@ BAT54 there is 5.5 dB over the mixer's headroom. `clamp_gain()` computes the
 drop from the fitted part's own datasheet now. An assumption that names the
 wrong *operating point* is invisible to every check that consumes its result.
 
+**And `design.DEFERRED` is empty now.** The controller was the last entry; the
+converter, the envelope ADC, the envelope rectifier and the fail-safe went
+before it, and the relay drive was deleted rather than drawn. What follows from
+that is worth knowing before it is discovered: `gen_plots.orderable()` reads
+`DEFERRED` and `UNSPECIFIED`, both are empty, and every part has a footprint —
+so **nothing stops a fabrication package being written any more**, and
+`gen_plots.py` still deliberately writes none. Gerbers are a decision, not an
+oversight; see the open list in `README.md`.
+
 1. **Do not invent values.** If something is not in `docs/hardware-spec-v0.md` and
    cannot be *derived* from it, stop and ask. A schematic full of plausible values
    is worse than an incomplete one, because it looks finished. §6 of the spec lists
@@ -477,135 +486,161 @@ fires on one is 1.6 mm of pointless copper on every SOT-23.
 
 ---
 
-## The controller: the part is settled and the block is still not drawn
+## The controller: drawn, and `DEFERRED` is empty
 
-**`design.DEFERRED` is not empty and its one entry changed kind.** It read
-*"shared block, and the scope statement puts shared blocks after one channel is
-complete"* — a scope statement, true of every shared block and by then the only
-one it was still true of. Deriving what the block asks for turned it into two
-computed gates, and **both are decisions above a drawing.**
+**Both gates closed and the block is on the board.** The package gate closed by
+moving the fabrication class — `docs/fabrication-class.md`, and the RP2040 is
+what asked the question. The supply gate closed by choosing a part.
+`docs/controller.md` is the record; what follows is what has to survive
+compaction.
 
-**What is closed.** `design.controller_fit()` is the positive case that never
-existed: ten requirements this board makes, counted off the netlist where they
-are countable, against ten numbers read first-hand from the RP2040 datasheet.
-Fourteen signals across J9–J13 against 30 GPIO; 6 PWM against 16 on 8 slices;
-MCLK ≥ 9.216 MHz met by **seven** integer divides of 125 MHz. Tightest countable
-margin 2×. `00-current-state.md`'s claim 9 — *"both have mandatory buck
-converters"* — is marked **not relied upon**: it is a negative, its "mandatory"
-came from documents 0–4 which are not in this repo, no RP2350 datasheet page is
-cited anywhere here, and claim 10 says the MCU was never load-bearing anyway.
+**The part that closed gate 2 is a TPS560430XF and the F is the whole of it.**
+1.1 MHz, forced PWM, 12 V in, 3.3 V out, SOT-23-6. `mcu_dcdc_light_load()`
+computes the continuous/discontinuous boundary for Table 1's own 12 µH — **91 mA
+against this board's maximum 87 mA draw** — so a PFM part would never be in
+continuous conduction and its frequency would be proportional to load: 246 kHz
+at this board's idle, *under* the ≥ 300 kHz rule, and in the audio band below
+1.6 mA. That is `supply_beat()`'s objection to the RCC-topology TMR 6 arriving
+at a second part from the other end, and it is the reason a few pence of
+difference between two suffixes is load-bearing.
 
-**Gate 1 — the package, `controller_package()`.** RP2040 ships only in a 7×7
-QFN-56 at 0.40 mm pitch, and it fails **all three** conditions of the middle rung:
-the widest escape that clears the next pin is 0.20 mm against this board's 0.25;
-0.40 mm of pitch on a 0.50 mm grid gives fourteen pins a side eleven lines to land
-on; and the jog comes 0.150 mm to a neighbour against 0.45.
+**Its input is VA_RAW and not VA+, one node ahead of `R804`.** A buck draws a
+pulse train from its supply; behind the rail filter that train's own IR drop is
+on the rail six audio channels share, and in front of it the same pole that
+attenuates the converter's 75 mV<sub>pp</sub> attenuates this too, 6 dB harder
+at twice the frequency. 39 mA rms of input ripple becomes **2.4 µV on VA+**,
+102 dB down as AM. `verify.check_mcu_supply()` holds the wire, because VIN on
+VA+ works, routes, passes DRC and hums.
 
-**`rules.coarsest_class_for()` solves for the class rather than reading one off a
-table, and the answer is 0.12/0.12 mm or finer** — below JLCPCB's 0.15 mm 2 oz
-floor and above its 0.09 mm one. So the only listed class that works is
-**0.09/0.09, which is 1 oz outer copper only: the copper weight is the price and
-no intermediate class avoids it.** At that class no pad on the package needs an
-escape at all — the fan-out becomes unnecessary rather than sufficient — and the
-grid goes to 0.23 mm, 4.7× the cells.
+**The +Vout budget is the tightest number on this board and it is honest.**
+87.3 mA of 3.3 V load counted off the netlist — the RP2040's 52.1, the flash's
+25, the MIDI loop, the pedal, the opto — costs **32.1 mA of the 35.4 mA that
+was left**, at the pessimistic end of `MEASURED["mcu_dcdc_efficiency"]`. It
+fits at any efficiency above **68 %**, which is a bound that cannot be wrong
+(conservation of energy over a headroom) and is no longer comfortable. The old
+figure in this file was *"clears at any efficiency above 40 %"* and that was
+computed for the MCU alone; the rail carries four more things.
 
-**The coil nets were flagged as an objection to that and they are not one.**
-`rules.track_current()`: 92.7 mA on 0.09 mm of 1 oz copper is **0.33 °C of
-rise**, and 4.0 °C even if the borrowed IPC-2221 constant is three times out.
-The figure that made it look close was **29 A/mm², and current density was the
-wrong instrument** — it divides by the cross-section, which carries the current,
-and omits the surface area, which does the cooling. That is why IPC-2221's
-exponent on area is 0.725 and not 1, and it is the same shape as
-`RAIL_FILTER_ESR`: a number computed without the term that dominates.
+**Do not raise `SUPPLY_IOUT_MA`.** It is a datasheet reading. If the efficiency
+measurement ever disagrees, the thing to change is the 92.7 mA of relay coil
+that V5 makes linearly from twelve volts — 37 % of +Vout, and the only load on
+this board large enough to matter.
 
-**Build time was the other predicted cost and it is measured, and it goes the
-other way.** `gen_pcb.py` end to end: **89.0 s at 0.25/0.20 and 69.0 s at
-0.09/0.09** — 22 % faster on 4.7× the cells, with 1457 track runs and 492 vias
-against 1547 and 561, and no fan-out escape needed anywhere. Runtime is dominated
-by *contention* — failed routes, probes, rip-ups — not by grid size, and a finer
-grid has far less of it. Cell count was a proxy that omits the dominant term:
-`rules.grid_cost()` says so now, having asserted the opposite.
+### What drawing it found, and three of the five are corrections
 
-**"No fan-out needed" was read as "no work needed", and the 1 oz board came back
-with 56 DRC violations.** They were two router faults, both fixed, and both were
-the same missing distinction: **`route.py` had one ring of four cells where three
-different distances were needed.**
+**A requirement derived while a block is deferred is counted against the
+interface that stands in for it.** `controller_asks()` walked J9–J13 and got 14
+signals; those headers carried what *the rest of the board* needed from a
+controller, and the part also needs pins for its own periphery. **19 of 30**,
+and the GPIO margin falls from 2.14× to 1.58×. Nothing was wrong with the
+count; it was a count of a different thing.
 
-That ring blocked a via's four orthogonal neighbours and not its diagonals, with a
-derivation attached — a via is 0.6 mm across and a track 0.25, so at one 0.5 mm
-pitch their copper is 0.075 mm apart, and at a diagonal it is 0.28 mm and clears.
-All true, all true **at a 0.5 mm grid on 0.25/0.20 copper**, and written as though
-it were a fact about the geometry. `rules.via_exclusion()` asks it properly, and
-it is three questions because a via is near three kinds of thing:
+**The PWM row had the wrong denominator.** Six carriers against *sixteen
+outputs* — and spec §4.2 asks for the six to be phase-staggered, which a PWM
+slice cannot do to two channels at once because a slice is one counter. Six of
+**eight slices**, 1.33×, and it is the tightest countable row in
+`controller_fit()` now. `CONTROLLER_MAP` spends six separate slices and
+`controller_slices()` checks it.
 
-| | copper rule | hole rule |
-|---|---|---|
-| to a track's centre | `via/2 + track/2 + clearance` | `drill/2 + hole` |
-| to another via | `via + clearance` | `drill + hole` |
-| to a pad's copper | `via/2 + clearance` | `drill/2 + hole` |
+**`supply_beat()`'s harmonic search was a fact about one caller.** It stopped at
+the pump's 20th, which covers 580 kHz — the 12.9th — and truncated the moment
+`mcu_dcdc_beat()` asked about 1.1 MHz, the 24th: it reported 200 kHz where the
+answer is 20. The count comes from the frequency now. The general form is this
+repo's usual one: a constant that is a fact about the *only existing caller*,
+written where it looks like a fact about the arithmetic.
 
-**The left column shrinks with the fabrication class and the right column does
-not**, because a hole clearance is drill positioning rather than etching — so
-somewhere on the way down the hole rule *overtakes* the copper rule and becomes
-binding. It does: copper wins by 0.10 mm at the fitted class and the hole rule
-wins by 0.01 at 0.09/0.09. The 49 hole violations and the 7 copper ones were the
-two halves of that.
+**This board has a second isolation barrier.** DIN MIDI is an opto-isolated
+current loop, so `U21` is a second `U15` and `C836` is a second `C810` — CA-033
+requires the bridge to be a capacitor: *"Pin 2 of the MIDI In connector shall
+not have any DC path to the receiver's ground"*. `floorplan.py` said *"the"*
+barrier in three places; `BARRIERS` is a table now and `check_isolation()` is
+one test run twice. Its geometric half is deliberately **not** extended —
+`check_isolation_gap()` measures a region because the converter's primary is a
+20 V node switching across 50 pF next to the audio bond, and MIDI's barrier is
+0.4 pF inside a package.
 
-**The hole figures are the fabricator's and `rules.py` did not own the rule at
-all** — KiCad's own 0.25 mm default had been enforcing it unowned, exactly as
-`min_track_width` once sat at zero. Read first-hand off the same JLCPCB page:
-*"Via Hole-to-Hole Spacing: 0.2mm"*, *"Pad Hole-to-Hole Spacing: 0.45mm"*,
-*"Via hole to Track: 0.2mm"*. **What DRC enforces is deliberately unchanged**:
-KiCad's default is *stricter* than the published figure, and declaring 0.20 would
-have made 49 violations vanish with no copper moving, which is indistinguishable
-from relaxing a check to make it pass. The router is held to the stricter of the
-two, the figures are recorded, and designing to the fabricator's real limit is a
-decision left with whoever takes the class decision.
+**A connector at the edge is not a connector nearest the edge.**
+`placement.outline()` adds `MARGIN` of clear board around whatever is outermost,
+so a USB receptacle placed as far east as anything else is 5 mm inside the board
+and no plug reaches it — placed, routed, DRC-clean and unusable, with nothing in
+the repo able to say so. `EDGE_PARTS` and `check_edge_parts()` are the
+instrument, and `outline()` leaves the margin off on the side an edge part
+faces. Without that second half the check is circular: the connector pushes the
+outline out by five millimetres and then fails to reach it, for ever.
 
-### What correcting it cost, and it answers the class question
+### Two the QFN found in files that had nothing to do with the controller
 
-Measured, `gen_pcb.py` end to end, all four combinations:
+**`verify._board_copper()` had never returned a single pad.** Its guard read
+`len(net) < 3`, with a comment saying KiCad writes `(net 12 "MDGND")` on a pad
+and `(net "MDGND")` on a segment — and every board this repo has built, every
+committed one included, writes the two-element form on *both*. So the guard was
+true for every pad, and `check_isolation_gap()` — whose entire subject is where
+parts are — had been measuring tracks and vias and nothing that was placed. It
+reported nothing wrong, which was true. **Nothing would have found it**: it was
+found by writing a second geometric check that needed pads and getting an empty
+list back. The reader takes the net name as the last element now, either form,
+and the isolation check sees 915 pads where it saw none.
 
-| class | via rules | time | unrouted | DRC violations |
-|---|---|---|---|---|
-| 0.25/0.20, 2 oz | ring of four | 89 s | 0 | 0 |
-| 0.09/0.09, 1 oz | ring of four | 69 s | 0 | 56 |
-| 0.25/0.20, 2 oz | **corrected** | **454 s** | **10 (V5)** | 0 |
-| 0.09/0.09, 1 oz | **corrected** | **89 s** | **0** | **0** |
+**A QFN's exposed pad is copper on the back as well.** `pad_boxes()` decided a
+pad's layers from its *drill* — through-hole means every layer, anything else
+means front — and KiCad's `_ThermalVias` variant puts the 3.2 mm thermal pad on
+F.Cu **and** B.Cu. Declared front-only it was invisible to the router, which
+laid IRQ straight across it on the back: **64 DRC violations from one
+assumption**. The pad knows what layers it is on and is asked now, which is
+also true of parts nobody has fitted yet.
 
-**The board that used to close was closing on geometry the router had no rule
-for.** DRC agreed with it, because the two illegal cases — a via inside the
-annulus 0.325 to 0.5 mm from a foreign pad, and two vias on diagonal cells
-0.707 mm apart against a 0.8 mm requirement — were never *attempted* at that grid.
-Latent, not absent. So `verify.UNROUTED_ITEMS` going from 0 to 10 is the router
-becoming honest, and this repo's rule about that number permits it: down as copper
-is laid, **up only with the nets named**. V5 is the name.
+**Both are the same shape and it is this repo's oldest one:** a property
+inferred from a neighbouring fact — a drill, a file format — where the artefact
+could have been asked directly.
 
-**And the last row is the class decision, answered by measurement rather than by
-argument.** Only 0.09/0.09 gives a complete DRC-clean board once via clearance is
-modelled, and it does it in 89 s with no fan-out escape anywhere — while the
-fitted class cannot close the 5 V rail and takes five times as long. That reverses
-the recommendation this file carried an hour earlier, which was for keeping 2 oz
-and building a spreading fan. The spreading fan is not needed at all; the finer
-class removes the problem it was for. **It is still a fabrication decision** —
-0.09/0.09 is 1 oz outer copper only — so it is not taken here: `rules.COPPER_OZ`
-with `TRACK_MM` and `CLEARANCE_MM` is the one-line change.
+**And a third, one level further out: `design.supply()`'s comment named
+`floorplan.check_zone_occupancy()` as "the instrument that would have said so"
+and no such function existed.** In a paragraph about two artefacts disagreeing
+because nothing compared them. A comment naming a check is not a call to one,
+so nothing could fail; it survived two passes and was found by grepping for the
+name while drawing the last zone. It exists now as
+`placement.check_zone_occupancy()` — there and not in `floorplan.py` because the
+dependency runs the other way — and writing it required a zone-to-parts table
+that had never been written down, which is the same finding again: until the
+last zone was drawn, *"the parts in zone P"* was not a question any file could
+be asked.
 
-**Gate 2 — the supply, `controller_supply()`.** `supply_fit()` leaves **35.4 mA**
-of +Vout. V3V3 is an MCP1700 off V5 off VA+, so a milliamp of 3.3 V is a
-milliamp of *twelve* at the converter's pin. The RP2040's own measured range is
-19.2–52.1 mA (Table 637) and **neither end works**: the top fails outright, the
-bottom leaves 16.2 mA for a QSPI flash, a MIDI current loop and an opto. **A
-switcher from VA+ is the only topology with room, and saying so needs no
-efficiency figure** — conservation of energy puts its input current at least
-`3.3/12 × 52.1 = 14.3 mA`, so it clears at any efficiency above **40 %**.
-Quoting 85 % would have been a plausible number about a part nobody has chosen.
-`supply_beat()` is what has to price its frequency, and note what that function
-already found: the ≥300 kHz rule is fundamental-only, so a second unit has to be
-checked against the pump's harmonics *and* against this converter's own
-522–638 kHz band.
+### Three things about the block that are firmware's and are recorded here
 
-**Do not raise `SUPPLY_IOUT_MA`.** It is a datasheet reading.
+Because nothing else in this repo can hold them, and they are hardware-shaped:
+
+* **FSDRV is toggled in software, never by the PWM peripheral.** The fail-safe's
+  mechanism is that *any* stuck state collapses the charge pump, and a hardware
+  PWM output is exactly a square-wave source that outlives a wedged processor.
+  It is on a plain GPIO and `CONTROLLER_MAP` says why.
+* **The six PWM slices want a phase stagger**, §4.2 — which is what buying six
+  separate slices is for.
+* **The expression pedal is calibrated at its extremes**, because pedals differ
+  in element value and taper. The hardware delivers monotonic and bounded.
+
+### The values, and the rule they follow
+
+Everything in the block comes from a document read first-hand: the RP2040
+datasheet, **Hardware design with RP2040** (the vendor's own reference design),
+the W25Q128JV's, the TLP2761's, the TPS560430's, Bourns' SRN6045TA, and CA-033
+— the MMA/AMEI *MIDI 1.0 Electrical Specification Update*. **Where the vendor
+states a value it is used and quoted; where it states a range or leaves the
+choice to the application, a function here derives it.** 12 MHz is a
+requirement (§1.4.1, the USB bootloader), 15 pF is the reference design's own
+arithmetic, 27 Ω is Table 620's word *required*, and the QSPI_SS pull-up is
+**not fitted** because §2.2 marks it DNF for this exact flash.
+
+**The one value this repo had to choose is the MIDI receiver's series
+resistor, and the first claim about it was wrong.** A MIDI cable does not say
+what is on the other end — a 5 V transmitter is 440 Ω of source and a 3.3 V one
+is 43 — so the resistor has to hold the LED current inside the TLP2761's 2–6 mA
+at both. This file said CA-033's own 220 Ω delivers 6.6 mA and fails; that came
+from using 0.2 V for the driver's V_OL where the datasheet says 0.5, and the
+real spread at 220 Ω is **4.32–5.51 mA, which passes**. **390 Ω** is fitted
+because it centres the spread — 2.66–3.80 mA, 1.66× and 1.58× — rather than
+because 220 fails. `midi_loop()` is the arithmetic and `check_midi()` computes
+the current rather than comparing the value, which is what makes the check hold
+against drift in either direction.
 
 ## Toolchain
 
@@ -742,6 +777,8 @@ cv-module/
                          index of six numbers that moved once it was drawn
     fabrication-class.md 0.09/0.09 on 1 oz, and the four-row measurement that
                          decided it rather than an argument
+    controller.md        the last deferred block: the two gates, the part that
+                         closed the second, and the five things drawing it found
     FINDINGS.md          anything wrong in the mixer repo — noted, never fixed
     ASSUMPTIONS.md       everything guessed                      [generated]
     constraints.md       does each constraint have a mechanism?  [generated]
@@ -810,6 +847,17 @@ python3 design.py && python3 gen_netlist.py && python3 gen_sch.py \
   && python3 gen_bom.py && python3 gen_assumptions.py && python3 rules.py \
   && python3 gen_plots.py
 ```
+
+**And the run takes about half an hour now, nearly all of it `gen_pcb.py`.**
+It was 89 s at this fabrication class with 164 nets; the controller brings the
+board to 201 nets and 314 parts, and the router's cost is contention rather than
+cell count -- `rules.grid_cost()` records that measurement and the wrong
+prediction it replaced. The number to watch is not the total but its shape: a
+denser board on the same grid is where a maze router with rip-up and retry gets
+expensive, and `route.RETRY_PASSES` is 4, so it is bounded rather than open.
+Nothing here is waiting on it; it is written down because a build that used to
+be a coffee is now a walk, and somebody should know that before they assume a
+hang.
 
 **`rules.py` is last in that list and first in the dependency order**, which is
 worth not being confused by: `gen_pcb.py` and `gen_project.py` both import it,

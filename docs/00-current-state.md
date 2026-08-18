@@ -89,7 +89,7 @@ For 40 dB of musical gate depth: per-channel depth **≥47 dB**, per-pair isolat
 | | Current position | Was |
 |---|---|---|
 | **Element** | **SSI2164** quad VCA, −33 mV/dB. Unchanged | — |
-| **Controller** | **RP2040**, and the case for it is derived now rather than comparative — `design.controller_fit()`. ~~or STM32G474~~. **Not drawn, and the reason changed**: two computed gates, both decisions above a drawing. `controller_package()` — RP2040 ships only in a 0.40 mm QFN-56 and `rules.fan_out_class()` puts that off the bottom of the ladder at this fabrication class. `controller_supply()` — 35.4 mA of +Vout against 19.2–52.1 mA at 3.3 V through two linear rails | Teensy 4.1 / RP2350B — *both fail the switching-regulator gate*, and see row 9 |
+| **Controller** | **RP2040**, and the case for it is derived rather than comparative — `design.controller_fit()`. ~~or STM32G474~~. ~~Not drawn~~ — **drawn**, with its flash, crystal, USB, DIN MIDI, the panel jacks and a TPS560430XF switcher for its 3.3 V rail. Both gates closed: the package by moving the fabrication class, the supply by that part. `docs/controller.md` | Teensy 4.1 / RP2350B — *both fail the switching-regulator gate*, and see row 9 |
 | **CV generation** | **PWM + 74AHC541 from a precision reference** → 6× AD5683R daisy-chained → DAC8568 with 8 CS pulses | DAC8568 in a single-SYNC burst — *not possible, `t4` min SYNC HIGH = 80 ns* |
 | **Control frame rate** | **8 kHz** | 32 kHz — the aggressor argument dies once the CV filter exists |
 | **CV filter** | **2-pole, 200–400 Hz, per channel. Mandatory.** Worth 15–20 dB of AM noise and doubles as the de-click | 2 kHz single-pole, treated as cosmetic |

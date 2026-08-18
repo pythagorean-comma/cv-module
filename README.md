@@ -26,7 +26,7 @@ drawn for two reasons that are now arithmetic rather than scope.
 |---|---|
 | one channel derived | ✅ every value, arithmetic inline |
 | the coarse pad | ✅ **struck** — 0.000 dB of system noise for 36 parts |
-| netlist | ✅ 266 parts, 164 nets, all pins resolved |
+| netlist | ✅ 314 parts, 201 nets, all pins resolved |
 | schematic | ✅ **0 merges, 0 breaks, 0 stranded pins** |
 | the verification loop | ✅ `verify.py` reads **KiCad's** netlist, compared by name |
 | ERC | ✅ **0 errors and 0 warnings** — `ERC_ALLOWED` is empty |
@@ -48,15 +48,19 @@ drawn for two reasons that are now arithmetic rather than scope.
 | the 3.3 V rail | ✅ **real now, and it had been declared for four passes with no net** — `RAILS` said `V3V3` and `supply-decision.md` said there is no such rail. `check_rails_are_drawn()` is the instrument |
 | the inlet fuse | ❌ **derived and not fitted.** The converter's datasheet asks for 1.6 A slow blow and the assessment says yes — the inlet is shared with a fabricated board that has none. No part number was verified this session, and a plausible order code is worse than an absent part |
 
-| the controller | ⚠️ **the part is settled and the block is not drawn, and the reason changed kind.** `controller_fit()` is the derived case for the RP2040 — fourteen signals against 30 GPIO, MCLK met by seven integer divides, tightest countable margin 2× — and claim 9 is marked **not relied upon**. Two computed gates stop it: `controller_package()` (a 0.40 mm QFN-56 is off the bottom of `rules.fan_out_class()`'s ladder at this fabrication class) and `controller_supply()` (35.4 mA of +Vout against 19.2–52.1 mA at 3.3 V through two linear rails). Both are decisions above a drawing |
+| the controller | ✅ **drawn, and `DEFERRED` is empty.** The RP2040 with its QSPI flash, a 12 MHz crystal, USB, DIN MIDI in and out through an opto, the tap and expression jacks, twelve decoupling capacitors and a **TPS560430XF** switcher for its 3.3 V rail. Gate 1 closed by moving the fabrication class; gate 2 by a part whose F suffix is load-bearing — see [`controller.md`](docs/controller.md) |
 
-**One shared block is deferred** with its reason in `design.DEFERRED`: the
-controller — and that reason is now two computed gates rather than a scope
-statement. The envelope ADC was the second and the supply the third. There
-were six. The relay drive is not deferred but
-deleted, along with the pad it drove; the envelope rectifier and the fail-safe
-are drawn. **`design.UNSPECIFIED` is empty**: the bypass relay and its MOSFET
-are chosen, all 266 parts have a footprint, and no courtyard is reserved.
+**`design.DEFERRED` is empty and so is `design.UNSPECIFIED`.** There were six
+deferred blocks: the supply, the envelope ADC, the envelope rectifier, the
+fail-safe, the relay drive and the controller. Five are drawn and the sixth was
+deleted along with the coarse pad it existed to drive. Every part has a
+footprint, no courtyard is reserved, and no pin is still a role.
+
+**What follows from that is worth stating rather than discovering.**
+`gen_plots.orderable()` reads both of those and returns nothing now, so
+**nothing in the design stops a fabrication package being written** — and
+`gen_plots.py` still writes none. Gerbers are a decision somebody takes, and it
+is on the open list below rather than in the code.
 
 Choosing them also settled a bug that only existed while they were not. The
 dict is keyed by a part's *value*, and an unchosen part's value is `None` — so
@@ -387,12 +391,13 @@ always point **away** from each other. At 0.40 mm on a 0.35 mm grid they need
 not, so QFN escapes can point into each other and `escape_clearances()` refuses
 the second.
 
-## The controller: the part is settled and the block is still not drawn
+## The controller: drawn, and it was the last deferred block
 
-**`design.DEFERRED` still holds one entry and its reason changed kind.** It read
-*"shared block, and the scope statement puts shared blocks after one channel is
-complete"* — true of every shared block, and by then the only one it was still
-true of. Deriving what the block asks for turned it into two computed gates.
+**`design.DEFERRED` is empty.** Its last entry read *"shared block, and the
+scope statement puts shared blocks after one channel is complete"*, which was a
+scope statement rather than a finding; deriving what the block asks for turned
+it into two computed gates, and this pass closed both and drew it.
+[`docs/controller.md`](docs/controller.md) is the record.
 
 **The case for the RP2040 is derived now, and it never was.**
 `00-current-state.md`'s claim 9 is the only case this project ever had for the
@@ -403,14 +408,24 @@ against a number read first-hand from the RP2040 datasheet:
 
 | asked of the controller | RP2040 | |
 |---|---|---|
-| 14 signals across J9–J13, counted off the netlist | 30 GPIO | 2.14× |
-| 6 PWM outputs | 16, on 8 slices | 2.67× |
+| 19 signals on GPIO, counted off the netlist | 30 GPIO | 1.58× |
+| 6 PWM carriers, one slice each | 8 slices, 16 outputs | **1.33×** |
 | MCLK ≥ 9.216 MHz, `envelope_adc_clock()` | 10.417 MHz = 125/12, **one of seven integer divides** | 1.13× |
 | 8 kHz control frame, 2 kHz envelope frame, all channels | 125 MHz `clk_sys` | 2600× / 10400× |
 | ~10 kHz on a GPIO for the fail-safe pump | 125 MHz `clk_sys` | 12500× |
 | USB MIDI, DIN MIDI, tap switch, expression pedal | USB 1.1 device, 2 UARTs, GPIO, 4 ADC channels | |
 
-The tightest row is MCLK and it is not a margin to spend: what makes an integer
+**Two of those rows moved when the block was drawn, and neither moved because
+anything was wrong.** The first counted signals across J9–J13 — five headers
+standing in for an off-board controller — and got 14: those headers carried what
+*the rest of the board* needed from a controller, and the part also needs pins
+for its own periphery, so it is 19 now. The second counted six carriers against
+sixteen *outputs*, which is the wrong denominator for what §4.2 asks: a PWM
+slice is one counter with two outputs, so two channels on one slice cannot be
+phase-staggered against each other. Six of eight slices, and it is the tightest
+countable row on the table.
+
+The tightest row overall is MCLK and it is not a margin to spend: what makes an integer
 divide the right answer is that the ADC's conversions are not on a jittered
 clock, and that is true of all seven divisors. `PWM_CARRIER` is in the table as
 **margin rather than as a reason** — 125 MHz / 2¹² = 30.5 kHz is already derived
@@ -501,28 +516,108 @@ shape as the mixer's `RAIL_FILTER_ESR` — a number that was not wrong so much a
 computed without the term that dominates. The class decision now has no unread
 number in it.
 
-**Gate 2 — the supply.** `supply_fit()` leaves 35.4 mA of +Vout, and V3V3 is an
-MCP1700 off V5 off VA+ — so a milliamp of 3.3 V is a milliamp of *twelve* at the
-converter's pin. The RP2040's own measured range (Table 637: 19.2 mA idle in
-BOOTSEL, 52.1 mA running the VGA demo) straddles that, and **neither end is a
-board that works**: the top fails outright and the bottom leaves 16.2 mA for a
-QSPI flash whose read current is tens of milliamps, a DIN MIDI current loop and
-an opto-isolator. So `MEASURED["mcu_rail_ma"]` records the range and nothing
-waits on it.
+**Gate 2 — the supply, and it is closed by a part.** `supply_fit()` leaves
+35.4 mA of +Vout, and V3V3 is an MCP1700 off V5 off VA+ — so a milliamp of 3.3 V
+is a milliamp of *twelve* at the converter's pin. The RP2040's own measured
+range (Table 637: 19.2 mA idle in BOOTSEL, 52.1 mA running the VGA demo)
+straddles that, and **neither end is a board that works**: the top fails
+outright and the bottom leaves 16.2 mA for a QSPI flash, a DIN MIDI current loop
+and an opto-isolator.
 
-**A switcher from VA+ is the only topology with room, and saying so needs no
+**A switcher from VA_RAW is the only topology with room, and the bound needs no
 efficiency figure.** Conservation of energy puts a converter's input current at
-least `vout/vin` times its output — 3.3/12 × 52.1 = **14.3 mA** — so it clears at
-any efficiency above **40 %**, and there is no buck that is not. Quoting 85 %
-would have been a plausible number about a part nobody has chosen, which is what
-§6 of the spec forbids; the bound is stronger anyway, because it cannot be wrong.
-What it costs is a new switching aggressor on VA+ and MDGND, which `supply_beat()`
-has to price — and note what that function already found: the ≥300 kHz rule is
-fundamental-only, so a second unit has to clear the pump's harmonics *and* this
-converter's own 522–638 kHz band.
+least `vout/vin` times its output, so the floor is arithmetic rather than a
+datasheet reading. What the drawn block then changed is the *numerator*: the
+rail carries the flash's 25 mA, the MIDI loop's 5.5, the pedal's 3.3 and the
+opto's 1 as well, so it is **87.3 mA of 3.3 V**, a floor of 24.0 mA at the
+converter, and it fits at any efficiency above **68 %** rather than 40. At the
+pessimistic end of `MEASURED["mcu_dcdc_efficiency"]` it costs 32.1 mA and leaves
+**3.3 mA**, which is the tightest margin on this board and is said plainly
+rather than rounded.
 
-**Neither gate is a drawing decision, so the block is not drawn.** `SUPPLY_IOUT_MA`
-is a datasheet reading and was not touched.
+**The part is a TPS560430XF and three things chose it**, in order of how easily
+each would have been missed:
+
+* **it is the forced-PWM version.** `mcu_dcdc_light_load()` computes the
+  continuous/discontinuous boundary for Table 1's own 12 µH — **91 mA against a
+  maximum load of 87** — so a PFM part would never be in continuous conduction
+  and its switching frequency would be proportional to load: 246 kHz at this
+  board's idle, *under* the ≥ 300 kHz rule §1.1 sets, and inside the audio band
+  below 1.6 mA. That is `supply_beat()`'s objection to the RCC-topology TMR 6,
+  arriving at a second part from the other end;
+* **its frequency is a stated band**, 0.935–1.265 MHz, which is what
+  `mcu_dcdc_beat()` needs to compute with;
+* **its datasheet states the passives** — L, C_OUT and the divider — so nothing
+  in the block is this repo's invention. The fixed-3.3 V sibling would have
+  saved two resistors and its FB connection is nowhere stated in the document,
+  only implied by two table entries; an inferred connection on the pin that sets
+  a rail is not worth two resistors.
+
+**Its input is VA_RAW and not VA+**, one node ahead of the rail filter, and that
+is the one thing here that would work and be wrong: behind `R804` the switcher's
+own pulse train develops across the filter resistor and onto the rail six audio
+channels share. In front of it, the same pole attenuates it 6 dB harder than it
+does the converter's own ripple — 39 mA rms of input ripple becomes **2.4 µV on
+VA+**, 102 dB down as AM. `verify.check_mcu_supply()` holds the wire.
+
+**`SUPPLY_IOUT_MA` is a datasheet reading and was not touched.**
+
+## What drawing the controller found
+
+Five things, and three are corrections to figures derived while the block was
+deferred — which is the shape worth carrying: **a requirement derived against an
+interface that stands in for a block is a requirement about the stand-in.**
+
+**The GPIO count and the PWM denominator**, both above.
+
+**`supply_beat()`'s harmonic search was a fact about its only caller.** It
+looked at the pump's first twenty harmonics, which covers 580 kHz — the 12.9th —
+and truncated silently when `mcu_dcdc_beat()` asked about 1.1 MHz, the 24th,
+reporting a 200 kHz beat where the answer is 20. The count comes from the
+frequency now.
+
+**This board has a second isolation barrier.** DIN MIDI is an opto-isolated
+current loop: `U21` is a second `U15`, `C836` is a second `C810`, and CA-033
+requires that bridge to be a capacitor — *"Pin 2 of the MIDI In connector shall
+not have any DC path to the receiver's ground"*. `floorplan.py` said *"the"*
+barrier in three places; `BARRIERS` is a table now and `check_isolation()` is one
+test run twice. The geometric half is deliberately not extended to it, and the
+docstring says why.
+
+**A connector at the edge is not a connector nearest the edge.**
+`placement.outline()` puts `MARGIN` of clear board around whatever is outermost,
+so a USB receptacle placed as far east as anything else is 5 mm inside the board
+and no plug can reach it — placed, routed, DRC-clean and unusable, and nothing
+in this repo could have said so. `EDGE_PARTS` and `check_edge_parts()` are the
+instrument; `outline()` leaves the margin off on the side an edge part faces,
+without which the check is circular.
+
+**Two more, in files that have nothing to do with the controller — and both
+were found by writing a new check rather than by running an old one.**
+
+`verify._board_copper()` had never returned a single pad. Its guard read
+`len(net) < 3` with a comment describing a format the boards do not use: KiCad
+writes `(net "MDGND")` on a pad here, not `(net 12 "MDGND")`. So
+`check_isolation_gap()` — whose whole subject is where parts are — had been
+measuring tracks and vias only, and reporting nothing wrong, which was true. It
+sees 915 pads now.
+
+And `pad_boxes()` decided a pad's layers from its **drill**: through-hole meant
+every layer, anything else meant front. KiCad's `_ThermalVias` QFN puts the
+3.2 mm exposed pad on F.Cu *and* B.Cu, so the back-side copper was invisible to
+the router, which laid IRQ across it — **64 DRC violations from one
+assumption**. The pad is asked what layers it is on now.
+
+**And one value this repo had to choose, plus the wrong reason it nearly had.**
+The MIDI receiver's series resistor has to hold the LED current inside the
+TLP2761's 2–6 mA against *both* transmitters CA-033 allows — a 5 V one is 440 Ω
+of source, a 3.3 V one is 43. The first version of this section said the
+specification's own 220 Ω fails, at 6.6 mA. It does not: that used 0.2 V for the
+driver's V_OL where the RP2040's table says 0.5, and the real spread is
+**4.32–5.51 mA**, inside the range with 9 % of headroom. **390 Ω** is fitted
+because it centres the spread at 2.66–3.80 mA, not because 220 breaks — and
+`check_midi()` computes the current rather than comparing the value, so it holds
+against drift either way.
 
 **The 2-bit coarse pad is gone, and it is the largest thing this repo has
 deleted.** 36 parts, 52 % of the placed courtyard, about two thirds of the BOM,

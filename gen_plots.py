@@ -19,22 +19,26 @@ look cosmetic are not.
 
 **They go in `docs/` and not in a `fab/`, and that is derived rather than
 copied.** The mixer keeps its equivalents in `fab/` because they travel with
-gerbers to a fabricator and an assembler. Nothing here can travel anywhere:
-orderable() below lists the reasons, and they are not near-misses -- three of
-the board's parts have no footprint because nobody has chosen the part, and
-three blocks of the circuit are not drawn. These are documents for reviewing an
-unfinished design, and CLAUDE.md's rule is that the split is by audience: `out/`
-is what another tool reads next, `docs/` is what a person reads at a screen. A
-`fab/` appears when there is something to fabricate, and these move into it
-then.
+gerbers to a fabricator and an assembler. CLAUDE.md's rule is that the split is
+by audience: `out/` is what another tool reads next, `docs/` is what a person
+reads at a screen. A `fab/` appears when there is something to fabricate, and
+these move into it then.
 
-**No gerbers, and that is a gate rather than an omission.** The mixer's
-build.sh refuses to write a fabrication package while a board has DRC errors.
-The same argument applies harder here and orderable() states it, because a
-gerber set of this board would be a complete-looking package for a board that
-must not be ordered: it would silently omit three relays that have courtyards
-reserved and no copper, and it would be missing the controller, the envelope
-ADC and the supply entirely.
+**No gerbers, and the reason has changed from a gate to a decision.** This
+paragraph used to say that a gerber set here "would be a complete-looking
+package for a board that must not be ordered" -- three parts with no footprint,
+three blocks not drawn -- and orderable() read both facts off design.py rather
+than restating them, so that drawing the last block would change the answer
+without anybody remembering to edit prose. It has. `design.DEFERRED` and
+`design.UNSPECIFIED` are both empty, every part has a footprint, and
+orderable() returns nothing.
+
+So what stops a fabrication package now is not the design. It is that writing
+one is a decision -- which layers, which format, which fabricator's drill
+convention, and whether the hole clearance this board is routed to is the one
+it should be ordered at (docs/fabrication-class.md's last section). That
+decision has not been taken, and orderable()'s empty list is how this file says
+so rather than by carrying a paragraph that is no longer true.
 """
 
 import pathlib

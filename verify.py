@@ -1598,18 +1598,32 @@ def _board_copper(board):
                 reference = str(prop[2])
         for pad in sexp.find_all(footprint, "pad"):
             net = sexp.find(pad, "net")
-            # A pad with no net, or with a net number and no name, is not on
-            # anything and cannot be on the wrong side of a barrier. The guard
-            # is for the second form: KiCad writes `(net 0)` with no string on
-            # a pad it considers unconnected, and reading index 2 of that is
-            # how this function first crashed rather than reporting.
-            if net is None or len(net) < 3:
+            # **This skipped every pad on every board this repo has ever
+            # built, and it took a second caller to find out.** The guard read
+            # `len(net) < 3` with a comment saying KiCad writes
+            # `(net 12 "MDGND")` on a pad and `(net "MDGND")` on a segment --
+            # and the boards in this repo, including every committed one, write
+            # `(net "MDGND")` on *both*. So the guard was true for every pad,
+            # `items` was tracks and vias only, and check_isolation_gap() --
+            # whose whole subject is where parts are -- was measuring copper
+            # the router laid and nothing that was placed.
+            #
+            # It reported nothing wrong, which was true, and it is the third
+            # variant of this repo's own failure: a check that passes because
+            # what it looks for is not there to be found. Nothing else would
+            # have said so; it was found by writing a second function that
+            # needed pads and getting an empty list.
+            #
+            # Both forms are read now, and the name is the last element either
+            # way. A pad with no net entry at all is still skipped, because
+            # that is a pad on nothing.
+            if net is None or len(net) < 2:
                 continue
             local = sexp.find(pad, "at")
             lx, ly = float(local[1]), float(local[2])
             x = origin[0] + lx * math.cos(angle) + ly * math.sin(angle)
             y = origin[1] - lx * math.sin(angle) + ly * math.cos(angle)
-            items.append((str(net[2]), reference, x, y))
+            items.append((str(net[-1]), reference, x, y))
     # **Tracks and vias name their net; pads number it and name it.** KiCad 10
     # writes `(net "MDGND")` on a segment and `(net 12 "MDGND")` on a pad, so a
     # single accessor for both is wrong in one of the two places. Reading index
@@ -1679,6 +1693,365 @@ def check_isolation_gap(board):
             "check passed by measuring nothing")
     return problems
 
+def check_controller(nets, values):
+    """The controller's pins carry what CONTROLLER_MAP says, and its supplies
+    are the ones its own datasheet asks for.
+
+    **Every pin on this part looks the same and that is the whole reason this
+    check exists.** A QFN-56 with fourteen identical pins a side is a part
+    where SCLK on GPIO14 draws exactly like SCLK on GPIO18, and only one of
+    them is a pin SPI0's clock can leave by. design.Design.check_controller_
+    functions() holds the *assignment* against the datasheet's Table 2; this
+    holds the **board** against the assignment, which is the other half and
+    the one that catches a wire rather than a table.
+
+    Four claims:
+
+      * **every net in CONTROLLER_MAP is on the pin the map names**, read out
+        of KiCad's own netlist;
+      * **the supplies are the single-3.3 V scheme of section 2.9.7.1.** All
+        six IOVDD, USB_VDD, ADC_AVDD and VREG_VIN on VMCU; both DVDD and
+        VREG_VOUT on VCORE and on nothing else. **VREG_VOUT is the one worth
+        naming**: it is an output, and tying it to VMCU is a regulator driving
+        into a rail 2.2 V above its own -- a part that would work until it did
+        not;
+      * **TESTEN is grounded**, which Table 619 gives as the pin's entire
+        description, and the exposed pad with it;
+      * **every supply pin has its own capacitor.** Section 2.9 says "close to
+        each of the chip's IOVDD pins", and the reference design's own
+        compromise -- one capacitor shared between pins 48 and 49 -- is
+        explained there by a two-layer board this one is not. Counted rather
+        than assumed, because twelve capacitors on one rail is exactly the
+        kind of thing that quietly becomes eleven.
+    """
+    problems = []
+    ref = design.CONTROLLER_REF
+    found = {pin: net for net, entries in nets.items()
+             for part, pin in entries if part == ref}
+
+    for row in design.controller_pin_map():
+        pin = str(row["pin"])
+        if found.get(pin) != row["net"]:
+            problems.append(
+                f"{ref}.{pin} ({row['name']}) is on {found.get(pin)!r} and "
+                f"CONTROLLER_MAP says {row['net']!r} for {row['function']} -- "
+                f"the assignment is checkable because Table 2 is transcribed; "
+                f"the wire is checkable because this is KiCad's netlist")
+
+    expected = {}
+    for pin in design.CONTROLLER_IOVDD_PINS:
+        expected[str(pin)] = "VMCU"
+    for pin in design.CONTROLLER_DVDD_PINS:
+        expected[str(pin)] = "VCORE"
+    P = design.CONTROLLER_PINS
+    expected[str(P["VREG_VIN"])] = "VMCU"
+    expected[str(P["VREG_VOUT"])] = "VCORE"
+    expected[str(P["USB_VDD"])] = "VMCU"
+    expected[str(P["ADC_AVDD"])] = "VMCU"
+    expected[str(P["TESTEN"])] = "MDGND"
+    expected[str(P["GND"])] = "MDGND"
+    for pin, net in sorted(expected.items(), key=lambda kv: int(kv[0])):
+        if found.get(pin) != net:
+            problems.append(
+                f"{ref}.{pin} is on {found.get(pin)!r} and should be {net!r} "
+                f"-- RP2040 section 2.9, the single 3.3 V supply scheme")
+
+    supply_pins = (len(design.CONTROLLER_IOVDD_PINS)
+                   + len(design.CONTROLLER_DVDD_PINS) + 4)
+    capacitors = {part for net in ("VMCU", "VCORE")
+                  for part, _ in nets.get(net, ())
+                  if part.startswith("C") and 820 <= int(part[1:]) <= 831}
+    if len(capacitors) != supply_pins:
+        problems.append(
+            f"{len(capacitors)} decoupling capacitors for {supply_pins} "
+            f"supply pins on {ref} ({sorted(capacitors)}) -- section 2.9 asks "
+            f"for one at each, and the reference design's own exception is "
+            f"argued from a two-layer board")
+    return problems
+
+
+def check_controller_periphery(nets, values):
+    """The flash, the crystal and USB are wired the way their own documents
+    say.
+
+    Three blocks, each with one thing in it that is a *value* rather than a
+    choice, and each of those is what is checked:
+
+      * **the QSPI bus is straight across.** Six nets, six pins each end, and
+        no third part on any of them. A pull-up on QSPI_SS would be the
+        reference design's R2 -- which that document marks DNF for this exact
+        flash -- and anything else is a stub on the fastest bus on the board;
+      * **the crystal's drive resistor is in series with XOUT and its two load
+        capacitors are equal.** design.crystal_load() computes the load from
+        the pair being equal, so unequal ones make its answer wrong rather
+        than making the board wrong, which is the failure that survives
+        longest. The 1 kohm is minimal design 2.3's own value at IOVDD = 3.3 V;
+      * **both USB lines have a 27 ohm series resistor**, which Table 620
+        states as a requirement rather than a suggestion -- "27 ohm series
+        resistor required for USB operation".
+    """
+    problems = []
+    P = design.CONTROLLER_PINS
+    F = design.FLASH_PINS
+    mcu, flash = design.CONTROLLER_REF, design.FLASH_REF
+    for net, mcu_pin, flash_pin in (("QSD0", "QSPI_SD0", "DI_IO0"),
+                                    ("QSD1", "QSPI_SD1", "DO_IO1"),
+                                    ("QSD2", "QSPI_SD2", "WP_IO2"),
+                                    ("QSD3", "QSPI_SD3", "HOLD_IO3"),
+                                    ("QSCK", "QSPI_SCLK", "CLK"),
+                                    ("QSCS", "QSPI_SS", "CS")):
+        carried = {(part, pin) for part, pin in nets.get(net, ())}
+        want = {(mcu, str(P[mcu_pin])), (flash, str(F[flash_pin]))}
+        # QSPI_SS also reaches the boot header through R826, which is the one
+        # declared exception and is minimal design 2.2's own 1 kohm.
+        if net == "QSCS":
+            want.add(("R826", "1"))
+        if carried != want:
+            problems.append(
+                f"{net} carries {sorted(carried)}, expected {sorted(want)} -- "
+                f"the QSPI bus goes straight across and nothing else hangs "
+                f"on it")
+
+    crystal = design.CRYSTAL_REF
+    xin = {part for part, _ in nets.get("XIN", ())}
+    if xin != {mcu, crystal, "C832"}:
+        problems.append(
+            f"XIN carries {sorted(xin)}, expected {sorted({mcu, crystal, 'C832'})}")
+    xout = {part for part, _ in nets.get("XOUT", ())}
+    if xout != {mcu, "R824"}:
+        problems.append(
+            f"XOUT carries {sorted(xout)}, expected {mcu} and R824 -- the "
+            f"drive resistor is in series with the *amplifier's* output, and "
+            f"a crystal wired directly to XOUT is the over-drive minimal "
+            f"design 2.3 warns about")
+    xtal = {part for part, _ in nets.get("XTAL", ())}
+    if xtal != {crystal, "R824", "C833"}:
+        problems.append(
+            f"XTAL carries {sorted(xtal)}, expected the crystal, R824 and "
+            f"C833")
+    try:
+        if kisim.magnitude(values["C832"]) != kisim.magnitude(values["C833"]):
+            problems.append(
+                f"the crystal's load capacitors are {values['C832']} and "
+                f"{values['C833']} -- crystal_load() computes C/2 from them "
+                f"being equal, so unequal ones make the *calculation* wrong "
+                f"and leave the board looking right")
+    except Exception as error:
+        problems.append(f"the crystal's load capacitors do not parse: {error!r}")
+
+    for net, pin, resistor in (("UDM", "USB_DM", "R820"),
+                               ("UDP", "USB_DP", "R821")):
+        carried = {(part, pin_number) for part, pin_number in nets.get(net, ())}
+        want = {(mcu, str(P[pin])), (resistor, "1")}
+        if carried != want:
+            problems.append(
+                f"{net} carries {sorted(carried)}, expected {sorted(want)} -- "
+                f"Table 620 makes the 27 ohm series resistor a requirement")
+        try:
+            ohms = kisim.magnitude(values[resistor])
+        except Exception as error:
+            problems.append(f"{resistor} does not parse: {error!r}")
+            continue
+        if abs(ohms - design.USB_SERIES_R_OHMS) > 0.5:
+            problems.append(
+                f"{resistor} is {values[resistor]} and USB asks for "
+                f"{design.USB_SERIES_R_OHMS:.0f} ohm")
+    return problems
+
+
+def check_mcu_supply(nets, values):
+    """The controller's rail is a switcher, and it is fed from the right node.
+
+    **The one thing here that would work and be wrong is the input node.**
+    U22's VIN on VA+ instead of VA_RAW draws a 1.1 MHz pulse train *through*
+    R804 -- the rail filter -- so the filter's own resistor develops the
+    switcher's input ripple straight onto the rail the six channels share.
+    Nothing downstream would notice: the netlist is well formed, the part
+    works, DRC passes, and the board hums at a frequency nobody is listening
+    for. design.mcu_dcdc_injection() is the arithmetic and this is the wire.
+
+    Also checked: EN tied to VIN, which the datasheet's section 8.3.3 gives as
+    the way to make the part self-starting and which is not a default -- "The
+    EN pin is an input and cannot be left open or floating"; the feedback
+    divider's two resistors, against the equation-7 arithmetic in
+    design.mcu_dcdc_output(), because a divider swapped end for end is still a
+    divider and puts 12 V into a 3.63 V absolute maximum; and that VMCU
+    carries the parts mcu_rail_load() counts, which is what makes the supply
+    budget a statement about this board.
+    """
+    problems = []
+    ref = design.MCU_DCDC_REF
+    Q = design.MCU_DCDC_PINS
+    found = {pin: net for net, entries in nets.items()
+             for part, pin in entries if part == ref}
+    expected = {str(Q["VIN"]): "VA_RAW", str(Q["EN"]): "VA_RAW",
+                str(Q["GND"]): "MDGND", str(Q["SW"]): "MSW",
+                str(Q["CB"]): "MCB", str(Q["FB"]): "MFB"}
+    for pin, net in sorted(expected.items(), key=lambda kv: int(kv[0])):
+        if found.get(pin) != net:
+            problems.append(
+                f"{ref}.{pin} is on {found.get(pin)!r} and should be {net!r} "
+                f"-- VIN is VA_RAW and not VA+, which is the difference "
+                f"between the rail filter standing between this switcher and "
+                f"the audio rail and it standing behind it")
+
+    top = {part for part, _ in nets.get("VMCU", ()) if part == "R850"}
+    bottom = {part for part, _ in nets.get("MFB", ())}
+    if not top or bottom != {ref, "R850", "R851"}:
+        problems.append(
+            f"the feedback divider is R850 on VMCU and MFB and R851 on MFB "
+            f"and MDGND; MFB carries {sorted(bottom)} and VMCU "
+            f"{'has' if top else 'does not have'} R850")
+    else:
+        try:
+            rfbt = kisim.magnitude(values["R850"])
+            rfbb = kisim.magnitude(values["R851"])
+        except Exception as error:
+            problems.append(f"the feedback divider does not parse: {error!r}")
+            rfbt = rfbb = None
+        if rfbt and rfbb:
+            volts = design.mcu_dcdc_output(rfbt, rfbb)
+            if abs(volts["volts"] - design.RAILS["VMCU"]) > 0.1:
+                problems.append(
+                    f"R850/R851 = {values['R850']}/{values['R851']} sets VMCU "
+                    f"to {volts['volts']:.2f} V, not "
+                    f"{design.RAILS['VMCU']:.1f} -- equation 7, and the "
+                    f"absolute maximum on IOVDD is "
+                    f"{design.CONTROLLER_IOVDD_ABS_MAX:.2f}")
+
+    counted = {part for part, _ in nets.get("VMCU", ())}
+    declared = set(design.mcu_rail_load()["parts"])
+    if counted != declared:
+        problems.append(
+            f"VMCU carries {sorted(counted - declared)} that "
+            f"mcu_rail_load() does not count and misses "
+            f"{sorted(declared - counted)} -- the supply budget is counted "
+            f"off this net, so a part added to it silently is a part the "
+            f"converter's 250 mA does not know about")
+    return problems
+
+
+def check_midi(nets, values):
+    """The MIDI receiver breaks the loop, and nothing but the shield capacitor
+    crosses it.
+
+    **This is constraint 5.2's argument arriving from a different direction.**
+    CA-033 requires the receiver to be opto-isolated and forbids a DC path
+    from the MIDI IN jack's pin 2 or shield to the receiver's ground -- for
+    the same reason this module has exactly one bond to the mixer: a second
+    conductor to another box's ground is a loop through the audio ground. So
+    the check is the same shape as check_isolation_gap()'s netlist half: the
+    only thing allowed to touch both sides is the declared bridge.
+
+    Three claims:
+
+      * **the loop side reaches nothing of ours.** MINJ, MINA and MINK carry
+        only J15, R827, D805 and the opto's own two pins;
+      * **the shield's only path is C836**, which is CA-033's own optional
+        capacitor and the reason it is a capacitor;
+      * **the loop resistor keeps the current inside the opto's own range at
+        both kinds of transmitter.** Checked by computing it rather than by
+        comparing the value, because what matters is the current: design.
+        midi_loop() runs all four corners -- 5 V and 3.3 V transmitters, VF at
+        both extremes -- against the TLP2761's recommended 2 to 6 mA. CA-033's
+        own 220 ohm passes that test with 9 % of headroom at one end; 390 is
+        fitted because it centres the spread, and *this* check is what stops
+        the value drifting far enough to leave the range in either direction.
+    """
+    problems = []
+    opto = design.MIDI_OPTO_REF
+    O = design.MIDI_OPTO_PINS
+    ours = {"MDGND", "VMCU", "MAGND"}
+    isolated = {
+        "MINJ": {("J15", "1"), ("R827", "1")},
+        "MINA": {("R827", "2"), ("D805", str(design.DIODE_PINS["K"])),
+                 (opto, str(O["A"]))},
+        "MINK": {("J15", "3"), ("D805", str(design.DIODE_PINS["A"])),
+                 (opto, str(O["K"]))},
+        "MINSH": {("J15", "2"), ("C836", "1")},
+    }
+    for net, want in sorted(isolated.items()):
+        carried = {(part, pin) for part, pin in nets.get(net, ())}
+        if carried != want:
+            problems.append(
+                f"{net} carries {sorted(carried)}, expected {sorted(want)} -- "
+                f"CA-033: 'Pin 2 of the MIDI In connector shall not have any "
+                f"DC path to the receiver's ground'")
+    for net in ours:
+        for part, _ in nets.get(net, ()):
+            if part in ("J15", "R827", "D805"):
+                problems.append(
+                    f"{part} is on {net}, which is this board's ground -- it "
+                    f"belongs to the transmitter's, on the far side of {opto}")
+    expected = {str(O["VCC"]): "VMCU", str(O["GND"]): "MDGND",
+                str(O["VO"]): "MIDI_RX"}
+    found = {pin: net for net, entries in nets.items()
+             for part, pin in entries if part == opto}
+    for pin, net in sorted(expected.items(), key=lambda kv: int(kv[0])):
+        if found.get(pin) != net:
+            problems.append(
+                f"{opto}.{pin} is on {found.get(pin)!r} and should be {net!r}")
+    try:
+        ohms = kisim.magnitude(values["R827"])
+    except Exception as error:
+        problems.append(f"R827 does not parse: {error!r}")
+        return problems
+    loop = design.midi_loop(ohms)
+    if not loop["inside"]:
+        problems.append(
+            f"R827 = {values['R827']} puts {loop['low_ma']:.2f}-"
+            f"{loop['high_ma']:.2f} mA through {opto}'s LED across the two "
+            f"transmitters CA-033 allows, against a recommended "
+            f"{loop['recommended'][0]:.0f}-{loop['recommended'][1]:.0f} mA -- "
+            f"see design.midi_loop(), and note that CA-033's own 220 ohm is "
+            f"one of the values that fails this")
+    return problems
+
+
+def check_midi_bypass(board):
+    """U21's bypass capacitor is within the distance its datasheet states.
+
+    **A placement rule with a number in it, so it gets a check.** The TLP2761's
+    own note is not the usual decoupling advice: "A ceramic capacitor (0.1 uF)
+    should be connected between pin 6 and pin 4 to stabilize the operation of a
+    high-gain linear amplifier. Otherwise, this photocoupler may not switch
+    properly. The bypass capacitor should be placed within 1 cm of each pin."
+    That is a condition of operation with a distance attached, and a distance
+    is a thing the board can be measured for -- unlike "close to the pin",
+    which every other capacitor on this board has to settle for.
+
+    Measured pad to pad off the saved board, through the same reader
+    check_isolation_gap() uses. **Not through pcbnew**, which is the mistake
+    the first version made: verify.py runs under the ordinary interpreter and
+    `import pcbnew` fails there, so a check written that way is a check that
+    raises rather than one that measures -- and it did, after every other
+    check had passed.
+    """
+    if not board.exists():
+        raise SystemExit(f"{board} does not exist -- run gen_pcb.py")
+    pads = {}
+    for net, reference, x, y in _board_copper(board):
+        if reference:
+            pads.setdefault(reference, []).append((net, x, y))
+    problems = []
+    opto = design.MIDI_OPTO_REF
+    cap = [(x, y) for net, x, y in pads.get("C835", ())]
+    supply = [(x, y) for net, x, y in pads.get(opto, ()) if net == "VMCU"]
+    ground = [(x, y) for net, x, y in pads.get(opto, ()) if net == "MDGND"]
+    if not cap or not supply or not ground:
+        return [f"cannot measure C835 against {opto}: the board carries "
+                f"{len(cap)} capacitor pads, {len(supply)} VMCU pads and "
+                f"{len(ground)} MDGND pads on it"]
+    for name, pins in (("VCC", supply), ("GND", ground)):
+        distance = min(math.dist(pad, end) for pad in pins for end in cap)
+        if distance > design.MIDI_OPTO_LOCAL_MM:
+            problems.append(
+                f"C835 is {distance:.1f} mm from {opto}'s {name} pad and its "
+                f"datasheet asks for {design.MIDI_OPTO_LOCAL_MM:.0f} mm -- "
+                f"'otherwise, this photocoupler may not switch properly'")
+    return problems
+
+
 CHECKS = (
     ("1  no load on the mixer's rails", check_no_mixer_rail_load, ("nets",)),
     ("2a exactly one ground bond", check_one_ground_bond, ("nets",)),
@@ -1707,6 +2080,15 @@ CHECKS = (
      ("nets", "values")),
     ("   nothing but the primary in its region", check_isolation_gap,
      ("board",)),
+    ("   the controller's pins are the map's", check_controller,
+     ("nets", "values")),
+    ("   flash, crystal and USB as specified", check_controller_periphery,
+     ("nets", "values")),
+    ("   the 3.3 V switcher is fed from VA_RAW", check_mcu_supply,
+     ("nets", "values")),
+    ("   MIDI in is isolated, and by one part", check_midi,
+     ("nets", "values")),
+    ("   U21's bypass is inside its 10 mm", check_midi_bypass, ("board",)),
 )
 
 

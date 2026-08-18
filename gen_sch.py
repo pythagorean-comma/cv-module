@@ -624,20 +624,11 @@ def shared_block(sch, y):
 
     # J8 is not in this loop any more: it is a two-way *primary* inlet now and
     # is drawn with the converter it feeds. See supply_block().
-    for ref_name, x in (("J9", 370 * G), ("J10", 410 * G),
-                        ("J11", 450 * G)):
-        part = circuit.PARTS[ref_name]
-        lib = ("Connector_Generic:Conn_01x03" if "1x03" in part.footprint
-               else "Connector_Generic:Conn_01x05")
-        conn = sch.place(ref_name, lib, part.value, x, y + 45.72,
-                         footprint=part.footprint)
-        for pin, net in sorted(_conn_nets(ref_name).items(), key=lambda kv: int(kv[0])):
-            px, py = conn.pin(pin)
-            sch.wire((px, py), (px + 7.62, py))
-            if net in ("MAGND", "MDGND"):
-                _gnd(sch, px + 7.62, py, net)
-            else:
-                sch.label(net, px + 7.62, py)
+    #
+    # **J9, J10 and J11 were drawn here and they are gone**, with J12 and J13
+    # in adc_block(): five headers out to a controller on some other board.
+    # The controller is on this one, in controller_block(), and the fourteen
+    # nets they carried are labels into it.
 
     # -- the loom bond pad -----------------------------------------------
     bond = sch.place("J7", "Connector:TestPoint", "BOND", 520 * G, y + 45.72,
@@ -886,7 +877,13 @@ def shared_block(sch, y):
     # R805 from the pins that drive them, so the rail *net* still has nothing
     # but passives on it. And the primary side gains two, because IGND and
     # VIN_P feed power_in pins from a connector.
-    for index, net in enumerate(("VA+", "VA-", "IGND", "VIN_P",
+    # **VMCU is the seventh and it is here for VA+'s exact reason.** The 3.3 V
+    # rail is driven by U22's SW pin through L802, so the *net* called VMCU
+    # has nothing but passives and power inputs on it -- an inductor is not a
+    # driver. ERC found it the first time the block was drawn, on U19 pin 1.
+    # VCORE deliberately gets no flag: VREG_VOUT is a `power_out` pin on the
+    # net, so a flag there would be the second-driver complaint instead.
+    for index, net in enumerate(("VA+", "VA-", "IGND", "VIN_P", "VMCU",
                                  "MAGND", socket.AGND)):
         fx = 640 * G + index * 16 * G
         flag = sch.place(f"#FLG{index + 1:02d}", "power:PWR_FLAG", "PWR_FLAG",
@@ -1155,37 +1152,337 @@ def adc_block(sch, y):
         sch.label(net, cx, cy - 6.35)
         _drop(sch, cap, "2", "MAGND", dy=5.08)
 
-    # -- out to the controller --------------------------------------------
-    for ref_name, x, pinout in (
-            ("J12", 560 * G, ((1, "MOSI"), (2, "MDGND"), (3, "SCLK"),
-                              (4, "MDGND"), (5, "MISO"))),
-            ("J13", 620 * G, ((1, "CS"), (2, "MDGND"), (3, "MCLK"),
-                              (4, "MDGND"), (5, "IRQ")))):
-        conn = sch.place(ref_name, "Connector_Generic:Conn_01x05",
-                         circuit.PARTS[ref_name].value, x, y,
-                         footprint=circuit.PARTS[ref_name].footprint)
-        for pin, net in pinout:
-            px, py = conn.pin(str(pin))
-            sch.wire((px, py), (px + 7.62, py))
-            # The ground symbol sits at the wire end rather than below it,
-            # which is J9-J11's own idiom and is not a style choice: a drop
-            # of 5.08 from pin 2 of a 1x05 lands exactly on pin 4's wire, and
-            # the two grounds and the three signals between them become one
-            # net. This sheet reported it as two merges on the first run.
-            if net == "MDGND":
-                _gnd(sch, px + 7.62, py, net)
-            else:
-                sch.label(net, px + 7.62, py)
+    # J12 and J13 were here -- two 5-way headers carrying the ADC's six logic
+    # signals out to a deferred controller. They are gone with the deferral;
+    # the six are labels into controller_block() now.
 
     sch.text("The envelope ADC. AGND and DGND are one net here and both are "
              "MAGND -- DS20006181C section 7.3's second scheme, and the only "
              "one compatible with this board having exactly one "
-             "analogue/digital star. Six logic signals leave at J12/J13 and "
-             "no analogue trace crosses the boundary; MCLK is one of the six "
-             "because the part's own RC oscillator cannot hold 2 kHz on six "
-             "channels -- see design.envelope_adc_clock().",
+             "analogue/digital star. Six logic signals leave for the "
+             "controller and no analogue trace crosses the boundary; MCLK is "
+             "one of the six because the part's own RC oscillator cannot hold "
+             "2 kHz on six channels -- see design.envelope_adc_clock().",
              200 * G, y - 60 * G, size=2.0)
 
+
+CONTROLLER_SHEET_Y = ADC_SHEET_Y + 200 * G
+
+
+def _label_out(sch, part, pin, net, dx=0.0, dy=0.0):
+    """Take a pin clear of the package and name it there.
+
+    The commonest gesture in the controller block, for the same reason
+    _drop_out() is the commonest one elsewhere: a QFN symbol has four rows of
+    pins 2.54 mm apart, so every wire has to leave along its own pin's axis
+    before anything else happens to it.
+    """
+    x, y = part.pin(str(pin))
+    sch.wire((x, y), (x + dx, y + dy))
+    if net in ("MAGND", "MDGND"):
+        _gnd(sch, x + dx, y + dy, net)
+    else:
+        sch.label(net, x + dx, y + dy)
+
+
+def controller_block(sch, y):
+    """The RP2040, its flash and crystal, USB, MIDI, the panel and U22.
+
+    **Drawn as one block because it is one zone** -- floorplan.ZONES entry D2 --
+    and the sheet and the board agree about what a block is, which is the rule
+    adc_block()'s own docstring states.
+
+    Two things about the geometry rather than the circuit:
+
+      * **the package's four rows all leave along their own axis first.** The
+        symbol is a 57-pin rectangle with pins 2.54 mm apart on every side, so
+        a wire that turns before it is clear of the row runs through its
+        neighbours -- the fault _drop_out() records at the op-amp inputs, with
+        fifty-six chances to happen instead of two;
+      * **the six IOVDD pins are one point on the symbol and six pins in the
+        netlist.** KiCad stacks them, which is the usual idiom for a part with
+        six pins of one supply, so one wire and one label carry all six. That
+        is why the decoupling capacitors are drawn in a row of their own below
+        rather than one beside each pin: the sheet cannot say which is which
+        and placement.py can.
+    """
+    P = circuit.CONTROLLER_PINS
+    mcu = sch.place(circuit.CONTROLLER_REF, "MCU_RaspberryPi:RP2040",
+                    circuit.CONTROLLER, 300 * G, y,
+                    footprint=circuit.PARTS[circuit.CONTROLLER_REF].footprint)
+
+    # -- the GPIO column, east ---------------------------------------------
+    for row in circuit.controller_pin_map():
+        _label_out(sch, mcu, row["pin"], row["net"], dx=15.24)
+
+    # -- the west column: QSPI, crystal, USB, debug, reset ------------------
+    #
+    # Every one of these leaves west by 15.24 except the two USB pins, which go
+    # further so that their series resistors sit in a column of their own.
+    for name, net in (("QSPI_SD3", "QSD3"), ("QSPI_SCLK", "QSCK"),
+                      ("QSPI_SD0", "QSD0"), ("QSPI_SD2", "QSD2"),
+                      ("QSPI_SD1", "QSD1"), ("QSPI_SS", "QSCS"),
+                      ("XIN", "XIN"), ("XOUT", "XOUT"),
+                      ("SWCLK", "SWCLK"), ("SWDIO", "SWDIO"),
+                      ("RUN", "RUN"),
+                      ("USB_DM", "UDM"), ("USB_DP", "UDP")):
+        _label_out(sch, mcu, P[name], net, dx=-15.24)
+    # TESTEN is the one pin whose net is a ground, and Table 619 makes it a
+    # value rather than a choice: "Test enable (connect to Gnd)".
+    _label_out(sch, mcu, P["TESTEN"], "MDGND", dx=-20.32)
+
+    # -- supplies, north; the exposed pad, south ---------------------------
+    #
+    # Staggered lengths, because the six supply pins on the north row are as
+    # close as 2.54 mm and a label anchor landing on a neighbour's wire is a
+    # merge. The stagger is what keeps each anchor in clear space.
+    for index, (name, net) in enumerate((
+            ("USB_VDD", "VMCU"), ("ADC_AVDD", "VMCU"),
+            ("VREG_VIN", "VMCU"), ("VREG_VOUT", "VCORE"))):
+        _label_out(sch, mcu, P[name], net, dy=-(12.7 + index * 5.08))
+    # The two stacks: IOVDD is pins 1, 10, 22, 33, 42 and 49 at one point and
+    # DVDD is 23 and 50 at another.
+    _label_out(sch, mcu, circuit.CONTROLLER_IOVDD_PINS[0], "VMCU", dy=-33.02)
+    _label_out(sch, mcu, circuit.CONTROLLER_DVDD_PINS[0], "VCORE", dy=-38.1)
+    _drop(sch, mcu, str(P["GND"]), "MDGND", dy=7.62)
+
+    # -- the decoupling, in a row -----------------------------------------
+    #
+    # Twelve capacitors, one per supply pin plus the regulator's two, drawn as
+    # a row under the package. Which capacitor serves which pin is a placement
+    # statement and not a schematic one -- see placement.py, where the six
+    # IOVDD ones are placed at the six pins.
+    caps = [(f"C{820 + n}", "VMCU") for n in range(6)]
+    caps += [(f"C{826 + n}", "VCORE") for n in range(2)]
+    caps += [("C828", "VMCU"), ("C829", "VCORE"),
+             ("C830", "VMCU"), ("C831", "VMCU")]
+    for index, (ref, net) in enumerate(caps):
+        cap = _c(sch, ref, (150 + index * 12) * G, y + 60 * G, angle=VERT)
+        cx, cy = cap.pin("1")
+        sch.wire((cx, cy - 6.35), (cx, cy))
+        sch.label(net, cx, cy - 6.35)
+        _drop(sch, cap, "2", "MDGND", dy=5.08)
+
+    # -- the crystal -------------------------------------------------------
+    xtal = sch.place(circuit.CRYSTAL_REF, "Device:Crystal_GND24",
+                     circuit.CRYSTAL, 120 * G, y - 40 * G,
+                     footprint=circuit.PARTS[circuit.CRYSTAL_REF].footprint,
+                     angle=VERT)
+    for pin, net in ((circuit.CRYSTAL_PINS["XIN"], "XIN"),
+                     (circuit.CRYSTAL_PINS["XOUT"], "XTAL")):
+        px, py = xtal.pin(str(pin))
+        side = -7.62 if py < xtal.pin(str(circuit.CRYSTAL_PINS["XOUT"]))[1] \
+            else 7.62
+        sch.wire((px, py), (px, py + side))
+        sch.label(net, px, py + side)
+    # The case pins are 2 and 4 and they are one net; each gets its own drop,
+    # sideways first, because they sit either side of the body.
+    for pin, dx in ((circuit.CRYSTAL_PINS["CASE_A"], -10.16),
+                    (circuit.CRYSTAL_PINS["CASE_B"], 10.16)):
+        _drop_out(sch, xtal, str(pin), "MDGND", dx=dx, dy=7.62)
+    for ref, left, right in (("R824", "XOUT", "XTAL"),):
+        res = _r(sch, ref, 150 * G, y - 55 * G, angle=HORIZ)
+        for pin, net, side in (("1", left, -6.35), ("2", right, 6.35)):
+            px, py = res.pin(pin)
+            sch.wire((px, py), (px + side, py))
+            sch.label(net, px + side, py)
+    for ref, net, dx in (("C832", "XIN", 0), ("C833", "XTAL", 24)):
+        cap = _c(sch, ref, (100 + dx) * G, y - 25 * G, angle=VERT)
+        cx, cy = cap.pin("1")
+        sch.wire((cx, cy - 6.35), (cx, cy))
+        sch.label(net, cx, cy - 6.35)
+        _drop(sch, cap, "2", "MDGND", dy=5.08)
+
+    # -- the flash ---------------------------------------------------------
+    F = circuit.FLASH_PINS
+    flash = sch.place(circuit.FLASH_REF, "Memory_Flash:W25Q128JVS",
+                      circuit.FLASH, 120 * G, y + 20 * G,
+                      footprint=circuit.PARTS[circuit.FLASH_REF].footprint)
+    for name, net, dx in (("CS", "QSCS", -12.7), ("CLK", "QSCK", -12.7),
+                          ("DI_IO0", "QSD0", -12.7), ("DO_IO1", "QSD1", 12.7),
+                          ("WP_IO2", "QSD2", 12.7), ("HOLD_IO3", "QSD3", 12.7)):
+        _label_out(sch, flash, F[name], net, dx=dx)
+    _label_out(sch, flash, F["VCC"], "VMCU", dy=-10.16)
+    _drop_out(sch, flash, str(F["GND"]), "MDGND", dx=-7.62, dy=7.62)
+    cap = _c(sch, "C834", 150 * G, y + 20 * G, angle=VERT)
+    cx, cy = cap.pin("1")
+    sch.wire((cx, cy - 6.35), (cx, cy))
+    sch.label("VMCU", cx, cy - 6.35)
+    _drop(sch, cap, "2", "MDGND", dy=5.08)
+
+    # -- USB ---------------------------------------------------------------
+    for ref, left, right, dy in (("R820", "UDM", "UDMJ", 0),
+                                 ("R821", "UDP", "UDPJ", 12)):
+        res = _r(sch, ref, 200 * G, y - 80 * G + dy * G, angle=HORIZ)
+        for pin, net, side in (("1", left, -6.35), ("2", right, 6.35)):
+            px, py = res.pin(pin)
+            sch.wire((px, py), (px + side, py))
+            sch.label(net, px + side, py)
+    usb = sch.place(circuit.USB_CONN_REF, "Connector:USB_B_Micro",
+                    circuit.USB_CONN, 250 * G, y - 90 * G,
+                    footprint=circuit.PARTS[circuit.USB_CONN_REF].footprint)
+    for pin, net, dx, dy in ((1, "VBUS", 12.7, 0), (2, "UDMJ", 12.7, 0),
+                             (3, "UDPJ", 12.7, 0)):
+        _label_out(sch, usb, pin, net, dx=dx, dy=dy)
+    # Ground and shield are one net and two pins on opposite sides of the
+    # symbol, so each leaves along its own axis before it drops.
+    _drop_out(sch, usb, "5", "MDGND", dx=7.62, dy=10.16)
+    _drop_out(sch, usb, "SH", "MDGND", dx=-7.62, dy=10.16)
+    for ref, top, bottom in (("R822", "VBUS", "VBUSD"),):
+        res = _r(sch, ref, 300 * G, y - 95 * G, angle=VERT)
+        px, py = res.pin("1")
+        sch.wire((px, py - 6.35), (px, py))
+        sch.label(top, px, py - 6.35)
+        px, py = res.pin("2")
+        sch.wire((px, py), (px, py + 6.35))
+        sch.label(bottom, px, py + 6.35)
+    res = _r(sch, "R823", 320 * G, y - 95 * G, angle=VERT)
+    px, py = res.pin("1")
+    sch.wire((px, py - 6.35), (px, py))
+    sch.label("VBUSD", px, py - 6.35)
+    _drop(sch, res, "2", "MDGND", dy=5.08)
+
+    # -- DIN MIDI ----------------------------------------------------------
+    O = circuit.MIDI_OPTO_PINS
+    opto = sch.place(circuit.MIDI_OPTO_REF, "Isolator:TLP2761",
+                     circuit.MIDI_OPTO, 460 * G, y + 40 * G,
+                     footprint=circuit.PARTS[circuit.MIDI_OPTO_REF].footprint)
+    for name, net, dx in (("A", "MINA", -12.7), ("K", "MINK", -12.7),
+                          ("VO", "MIDI_RX", 12.7)):
+        _label_out(sch, opto, O[name], net, dx=dx)
+    _label_out(sch, opto, O["VCC"], "VMCU", dx=20.32)
+    _drop_out(sch, opto, str(O["GND"]), "MDGND", dx=7.62, dy=10.16)
+    cap = _c(sch, "C835", 520 * G, y + 40 * G, angle=VERT)
+    cx, cy = cap.pin("1")
+    sch.wire((cx, cy - 6.35), (cx, cy))
+    sch.label("VMCU", cx, cy - 6.35)
+    _drop(sch, cap, "2", "MDGND", dy=5.08)
+    res = _r(sch, "R827", 400 * G, y + 30 * G, angle=HORIZ)
+    for pin, net, side in (("1", "MINJ", -6.35), ("2", "MINA", 6.35)):
+        px, py = res.pin(pin)
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
+    diode = sch.place("D805", "Device:D", circuit.MIDI_IN_DIODE,
+                      400 * G, y + 50 * G,
+                      footprint=circuit.PARTS["D805"].footprint, angle=HORIZ)
+    for pin, net in ((str(circuit.DIODE_PINS["K"]), "MINA"),
+                     (str(circuit.DIODE_PINS["A"]), "MINK")):
+        px, py = diode.pin(pin)
+        side = -6.35 if px < 400 * G else 6.35
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
+    cap = _c(sch, "C836", 360 * G, y + 70 * G, angle=VERT)
+    cx, cy = cap.pin("1")
+    sch.wire((cx, cy - 6.35), (cx, cy))
+    sch.label("MINSH", cx, cy - 6.35)
+    _drop(sch, cap, "2", "MDGND", dy=5.08)
+    for ref, left, right, dy in (("R828", "VMCU", "MOUTV", 0),
+                                 ("R829", "MIDI_TX", "MOUTD", 14)):
+        res = _r(sch, ref, 400 * G, y + 90 * G + dy * G, angle=HORIZ)
+        for pin, net, side in (("1", left, -6.35), ("2", right, 6.35)):
+            px, py = res.pin(pin)
+            sch.wire((px, py), (px + side, py))
+            sch.label(net, px + side, py)
+
+    # -- the panel: tap and expression -------------------------------------
+    for ref, left, right, ypos in (("R830", "VMCU", "TAPJ", 120),
+                                   ("R831", "TAPJ", "TAP", 134),
+                                   ("R832", "VMCU", "EXPRV", 158),
+                                   ("R833", "EXPRW", "EXPR", 172)):
+        res = _r(sch, ref, 400 * G, y + ypos * G, angle=HORIZ)
+        for pin, net, side in (("1", left, -6.35), ("2", right, 6.35)):
+            px, py = res.pin(pin)
+            sch.wire((px, py), (px + side, py))
+            sch.label(net, px + side, py)
+    for ref, net, ypos in (("C837", "TAP", 134), ("C838", "EXPR", 172)):
+        cap = _c(sch, ref, 460 * G, y + ypos * G, angle=VERT)
+        cx, cy = cap.pin("1")
+        sch.wire((cx, cy - 6.35), (cx, cy))
+        sch.label(net, cx, cy - 6.35)
+        _drop(sch, cap, "2", "MDGND", dy=5.08)
+
+    # -- the connectors ----------------------------------------------------
+    for ref_name, x, ypos in (("J15", 250 * G, 110), ("J16", 300 * G, 110),
+                              ("J17", 250 * G, 150), ("J18", 300 * G, 150),
+                              ("J19", 200 * G, 110), ("J20", 200 * G, 150)):
+        part = circuit.PARTS[ref_name]
+        pins = _conn_nets(ref_name)
+        lib = ("Connector_Generic:Conn_01x02" if len(pins) == 2
+               else "Connector_Generic:Conn_01x03")
+        conn = sch.place(ref_name, lib, part.value, x, y + ypos * G,
+                         footprint=part.footprint)
+        for pin, net in sorted(pins.items(), key=lambda kv: int(kv[0])):
+            px, py = conn.pin(pin)
+            sch.wire((px, py), (px + 7.62, py))
+            if net in ("MAGND", "MDGND"):
+                _gnd(sch, px + 7.62, py, net)
+            else:
+                sch.label(net, px + 7.62, py)
+    # The BOOTSEL series resistor, between QSPI_SS and J19.
+    res = _r(sch, "R826", 150 * G, y + 110 * G, angle=HORIZ)
+    for pin, net, side in (("1", "QSCS", -6.35), ("2", "BOOT", 6.35)):
+        px, py = res.pin(pin)
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
+    res = _r(sch, "R825", 150 * G, y + 130 * G, angle=HORIZ)
+    for pin, net, side in (("1", "VMCU", -6.35), ("2", "RUN", 6.35)):
+        px, py = res.pin(pin)
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
+
+    # -- the 3.3 V switcher ------------------------------------------------
+    Q = circuit.MCU_DCDC_PINS
+    reg = sch.place(circuit.MCU_DCDC_REF, "cv:TPS560430XF", circuit.MCU_DCDC,
+                    620 * G, y - 30 * G,
+                    footprint=circuit.PARTS[circuit.MCU_DCDC_REF].footprint)
+    for name, net, dx, dy in (("VIN", "VA_RAW", -12.7, 0),
+                              ("EN", "VA_RAW", -20.32, 0),
+                              ("FB", "MFB", -12.7, 0),
+                              ("SW", "MSW", 12.7, 0),
+                              ("CB", "MCB", 12.7, 0)):
+        _label_out(sch, reg, Q[name], net, dx=dx, dy=dy)
+    _drop_out(sch, reg, str(Q["GND"]), "MDGND", dx=-7.62, dy=12.7)
+    ind = sch.place("L802", "Device:L", circuit.MCU_DCDC_L,
+                    700 * G, y - 30 * G,
+                    footprint=circuit.PARTS["L802"].footprint, angle=HORIZ)
+    for pin, net, side in (("1", "MSW", -6.35), ("2", "VMCU", 6.35)):
+        px, py = ind.pin(pin)
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
+    for ref, net, x in (("C840", "VA_RAW", 600), ("C841", "VA_RAW", 624),
+                        ("C843", "VMCU", 700)):
+        cap = _c(sch, ref, x * G, y - 5 * G, angle=VERT)
+        cx, cy = cap.pin("1")
+        sch.wire((cx, cy - 6.35), (cx, cy))
+        sch.label(net, cx, cy - 6.35)
+        _drop(sch, cap, "2", "MDGND", dy=5.08)
+    cap = _c(sch, "C842", 660 * G, y - 55 * G, angle=HORIZ)
+    for pin, net, side in (("1", "MCB", -6.35), ("2", "MSW", 6.35)):
+        px, py = cap.pin(pin)
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
+    for ref, top, bottom, x in (("R850", "VMCU", "MFB", 620),):
+        res = _r(sch, ref, x * G, y + 20 * G, angle=VERT)
+        px, py = res.pin("1")
+        sch.wire((px, py - 6.35), (px, py))
+        sch.label(top, px, py - 6.35)
+        px, py = res.pin("2")
+        sch.wire((px, py), (px, py + 6.35))
+        sch.label(bottom, px, py + 6.35)
+    res = _r(sch, "R851", 650 * G, y + 20 * G, angle=VERT)
+    px, py = res.pin("1")
+    sch.wire((px, py - 6.35), (px, py))
+    sch.label("MFB", px, py - 6.35)
+    _drop(sch, res, "2", "MDGND", dy=5.08)
+
+    sch.text("The controller. Two 3.3 V rails on this sheet and they are not "
+             "one net: V3V3 is the ADC's, linear from V5, and VMCU is this "
+             "block's, switched from VA_RAW at 1.1 MHz -- see design.RAILS. "
+             "U22's input is ahead of R804 so that its ripple meets the same "
+             "pole the converter's own does. MINA/MINK/MINJ are on the far "
+             "side of U21 and belong to whatever is sending: CA-033 forbids a "
+             "DC path from them to this board's ground.",
+             150 * G, y - 110 * G, size=2.0)
 
 def _between(point, a, b):
     """Is `point` strictly inside the segment a-b, collinear with it?
@@ -1477,6 +1774,7 @@ def build():
     shared_block(sch, SHARED_Y)
     supply_block(sch, SUPPLY_SHEET_Y)
     adc_block(sch, ADC_SHEET_Y)
+    controller_block(sch, CONTROLLER_SHEET_Y)
     sch._undrawn_flags = no_connects(sch)
     sch.auto_junctions()
     return sch

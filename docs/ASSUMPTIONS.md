@@ -70,6 +70,16 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **When wrong:** Nothing. It is common to all six channels -- same part, matched -- so it is a law error and not a matching error, and 0.23 % over a 61 dB span is 0.14 dB. Calibratable in firmware from a single measured curve if it ever matters.
 
+### `mcu_dcdc_efficiency` = 0.85 fractional, TPS560430XF at 12 V in, 3.3 V out
+
+**Range:** 0.75 .. 0.92
+
+**Question:** What does U22 draw from VA_RAW at this board's real 3.3 V load? SLVSE22B gives efficiency as figures rather than as a table -- section 7.8's curves at 8, 12, 24 and 36 V in -- and a number read off a plotted curve is not a reading. The measurement is one ammeter in series with the switcher's VIN pin.
+
+**Sets:** how much of the converter's remaining 35.4 mA of +Vout the controller costs, and that is the tightest budget on the board
+
+**When wrong:** **Only in one direction, and the threshold is computed rather than assumed.** mcu_supply() states the efficiency at which the +Vout budget stops closing -- about 67 % -- and the range's floor is above it deliberately: a synchronous buck at a quarter of its rated current does not do worse than three quarters, and the FPWM version's own penalty at light load is inside that. If the measurement came back under 67 % the fix is not this part: it is the 92.7 mA of relay coil that V5 makes linearly from twelve volts, which is 37 % of +Vout and the only load on this board large enough to matter.
+
 ### `mcu_rail_ma` = 52.1 mA on 3.3 V, RP2040 alone, maximum average
 
 **Range:** 19.2 .. 52.1
@@ -78,7 +88,7 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **Sets:** nothing, and that is the point -- controller_supply() shows the linear V3V3 chain fails at both ends of this range and a switcher clears both, so no topology decision waits on it
 
-**When wrong:** Only the size of the switcher, not whether there is one. The bound that decides is conservation of energy: a converter's input current is at least vout/vin times its output, so 3.3/12 x 52.1 = 14.3 mA against 35.4 mA of +Vout headroom, and any efficiency above 40 % clears it. Measuring this would size a part; it would not change the topology.
+**When wrong:** Only the size of the switcher, not whether there is one. The bound that decides is conservation of energy: a converter's input current is at least vout/vin times its output, so 3.3/12 x 52.1 = 14.3 mA against 35.4 mA of +Vout headroom, and any efficiency above 40 % clears it. Measuring this would size a part; it would not change the topology. **Both halves of that held and the margin did not.** The switcher is fitted and mcu_supply() counts the rest of the rail -- the flash's 25 mA, the MIDI loop, the opto, the pedal -- so the 14.3 mA floor is 23.6 mA and the efficiency that clears it is 67 %, not 40. It still fits and it is the tightest margin on this board.
 
 ### `noise_floor` = 0.000144V rms
 
@@ -131,7 +141,6 @@ None. The one entry was the pad relay — a part the spec asks for by function, 
 
 Not assumptions so much as absences, listed because a section 5 check against a partial board proves less than it appears to.
 
-- **controller** — RP2040, and the part is settled -- controller_fit() is the derived case for it. One of the two gates is closed: controller_package() reports the 0.40 mm QFN-56 reachable now, with no fan-out escape needed, because the fabrication class moved to 0.09/0.09 on 1 oz -- see docs/fabrication-class.md. What is left is controller_supply(): the linear V3V3 chain cannot carry it out of 35.4 mA of +Vout, and the switcher that can is a part nobody has chosen.
 
 ### Pins waiting on a deferred block
 
@@ -371,7 +380,7 @@ None. All 48 were the twelve pad relays' coils, and they went with the pad — s
 
 ## Prices
 
-Of 51 BOM lines, **5 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 44 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
+Of 69 BOM lines, **5 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 62 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
 
 The totals in `docs/SHOPPING.md` are therefore a range, and the range is honest rather than decorative. They are also a floor: none of the deferred blocks is costed.
 
