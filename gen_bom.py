@@ -155,14 +155,44 @@ PRICES = {
 
     "2n2/50V C0G": band(0.02, 0.08, "GBP", 100, "0805 C0G"),
     "1u/16V X7R": band(0.02, 0.08, "GBP", 100, "0805 X7R"),
-    design.CLAMP_DIODE: band(
+    design.PUMP_DIODE: band(
         0.05, 0.15, "GBP", 100,
-        "BAT54-7-F or any small Schottky in SOD-123. Six of them do three "
-        "different jobs -- pump clamp, pump rectifier, coil flyback and the "
-        "inverted reference's clamp -- and the low forward drop matters in "
-        "two of the three: the pump has only 3.3 V to work with, and the "
-        "clamp's +7.4 dB against the summer's 7.84 dB of margin is a "
-        "0.3 V figure. A silicon 1N4148 would fail both."),
+        "BAT54-7-F, in SOD-123. Five of them do two jobs -- the two-diode "
+        "pump and three coil flybacks -- and what the pump wants from it is "
+        "*leakage*, 2 uA max at 25 V, because the same diode has to hold a "
+        "1 uF node up between 10 kHz cycles. Its forward drop at the pump's "
+        "18 uA is off the bottom of its own table; PUMP_DIODE_VF's 0.32 V "
+        "sits above the datasheet maximum at ten times that current, "
+        "deliberately."),
+
+    design.CLAMP_DIODE: band(
+        0.10, 0.30, "GBP", 100,
+        "PMEG2010AEH in SOD123F, and it is the one diode on this board "
+        "chosen by a number rather than a class. It is a 1 A part carrying "
+        "36 mA, which is the whole trick: 259 mV max there against the "
+        "BAT54's 545 mV, and design.clamp_vf_ceiling() says the mixer's "
+        "headroom will take 320 mV. The BAT54 that used to be fitted here "
+        "missed by 5.5 dB. Higher leakage is the price and it is free on a "
+        "node inside an op-amp's feedback loop."),
+
+    design.BYPASS_RELAY: band(
+        3.00, 5.50, "GBP", 10,
+        "Omron G6S-2 DC5, surface-mount G6S-2F body. Single-side stable, "
+        "which is Omron's name for non-latching and is the property the "
+        "whole fail-safe turns on. The line worth reading twice is the "
+        "contact material -- bifurcated crossbar, Ag(Au-Alloy) -- because a "
+        "plain silver contact needs a wetting current a guitar string will "
+        "never supply, and fails intermittently in a way that looks like a "
+        "dry joint."),
+
+    design.BYPASS_FET: band(
+        0.06, 0.20, "GBP", 100,
+        "Diodes DMG1012T in SOT-523. Chosen for one row of its table: "
+        "R_DS(on) 0.7 ohm max at V_GS = 1.8 V, which is the gate voltage "
+        "pump_timing() computes and the only voltage this circuit can "
+        "produce. Vgs(th) 1.0 V max is the stated filter; being "
+        "characterised at 1.8 V is what made this part rather than another "
+        "that meets it."),
 
     # -- not chosen --------------------------------------------------------
     None: NONE,

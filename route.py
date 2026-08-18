@@ -20,6 +20,12 @@ is and it has the property this repo needs -- **it either finds a path or says
 it did not**, and it never produces a short. Everything it cannot route is
 reported by name and counted, which is what verify.UNROUTED_ITEMS holds.
 
+On top of it, **rip-up and retry**: a route that cannot get through probes for
+the nets in its way, displaces exactly those, and puts them back on the queue.
+route_all() has the argument, including why the obvious cheaper version --
+re-routing the whole board in a different order -- looks like it works and does
+not.
+
 Three rules make the result DRC-clean by construction rather than by luck:
 
   * **the grid pitch is set from the design rules**, not chosen. Two tracks on
@@ -45,24 +51,57 @@ import math
 FRONT, BACK = 0, 1
 LAYERS = (FRONT, BACK)
 
-# Cost of changing layer, in cells, and it was tuned rather than reasoned:
-# 9 leaves 78 connections unmade, 6 leaves 69, 4 leaves 69 and 2 leaves 67.
-# The direction is the interesting part -- **cheap vias route better on this
-# board** -- and the reason is the placement. Twelve rows of parts on a 7.62 mm
-# pitch make the front layer a set of corridors that run east-west, so a route
-# that needs to go north is better off dropping to the back, crossing, and
-# coming up than it is threading between two rows. A board laid out with
-# routing channels would prefer the opposite.
+# Cost of changing layer, in cells. **This was 2, and the measurement that set
+# it was answering a question that no longer exists.**
 #
-# Two cells is about 1 mm of copper per via, which is roughly what one costs in
-# inductance terms at these frequencies. Nothing here is fast enough for that
-# to be the binding consideration; it is the count that matters, and 249 vias
-# on 144 nets is ordinary.
-VIA_COST = 2
+# It was tuned against unrouted nets: 9 left 78 connections unmade, 6 left 69,
+# 4 left 69 and 2 left 67, so 2 won and the comment here concluded that "cheap
+# vias route better on this board". With rip-up and retry the board finishes at
+# every one of those values -- 2, 4, 6, 9, 12, 16 and 24 all reach zero -- so
+# completeness has stopped being the thing the number buys, and what is left is
+# the count:
+#
+#     VIA_COST      2     4     6     9    12    16    24
+#     vias        452   424   380   360   345   373   345
+#
+# It flattens at 12 and does not improve after. So the parameter now costs
+# **345 vias instead of 452**, a quarter of the holes in the board, for no
+# connection given up -- and the old conclusion was not wrong about the
+# placement, it was wrong about what the placement implied. Cheap vias did
+# route better while the router had one attempt per net, because a route that
+# cannot get through has to go round and a via is how it goes round. Once a
+# route that cannot get through can move somebody instead, it does not need
+# the via, and the reason to prefer one disappears.
+#
+# The argument the old comment made about the geometry is still true and worth
+# keeping: twelve rows of parts on a 7.62 mm pitch make the front layer a set
+# of corridors that run east-west, so a route that needs to go north is better
+# off dropping to the back, crossing, and coming up than threading between two
+# rows. A board laid out with routing channels would prefer the opposite. What
+# is no longer true is that this makes vias worth encouraging.
+#
+# Twelve cells is 6 mm of copper per via. Nothing on this board is fast enough
+# for via inductance to be the binding consideration; it is the drill count
+# that matters, and 345 on 144 nets is ordinary.
+VIA_COST = 12
 
 # Cost of turning, in cells. Nothing structural depends on it; it buys tracks
 # that look deliberate rather than like a plotter fault, at no routing cost.
 BEND_COST = 1
+
+# What it costs a route to cross a track that is already down, in cells, when
+# it is probing for something to rip up. 50 cells is 25 mm: a route will go a
+# long way round rather than displace somebody, which is what keeps the number
+# of rips small, and it will still displace somebody rather than fail. It is
+# only ever paid inside a probe -- see Grid.route()'s `crossable`.
+RIPUP_COST = 50
+
+# How many times one net may be ripped up before it is left alone. This is
+# what makes the loop terminate rather than trade two nets back and forth
+# forever: each rip increments a counter, a net at the limit stops being
+# crossable, and the work queue can therefore only grow by RIPUP_LIMIT times
+# the number of nets. Four is enough here that no net has ever reached it.
+RIPUP_LIMIT = 4
 
 
 class Grid:
@@ -83,6 +122,19 @@ class Grid:
         self.columns = int((self.right - self.left) / pitch) + 1
         self.rows = int((self.bottom - self.top) / pitch) + 1
         self.owner = [[None] * (self.columns * self.rows) for _ in LAYERS]
+        # Which cells are a pad's own copper. Held separately from `owner`
+        # because it is a different claim: `owner` says who may route here,
+        # `copper` says that no clearance rule reaches this cell at all.
+        self.copper = [set() for _ in LAYERS]
+        # The grid as it was before one millimetre of track was laid: pads,
+        # rings, obstacles and the board edge, and nothing else. **This is what
+        # makes ripping a net up exact rather than approximate**, and its
+        # absence is the whole reason the first attempt at rip-up was rejected
+        # as unbookkeepable. Restoring a cell is not "put back what was there
+        # before I claimed it", which needs a per-claim ledger and goes wrong
+        # the moment two nets claim one cell in sequence; it is "put back what
+        # blocking said", which is a constant.
+        self.base = None
 
     # -- geometry ---------------------------------------------------------
     def cell_of(self, x, y):
@@ -112,63 +164,89 @@ class Grid:
         held = self.owner[layer][self.index(column, row)]
         return held is None or held == net
 
-    def block_box(self, layer, x0, y0, x1, y1, owner, margin=0.0):
-        """Mark every cell whose track centre would be inside a rectangle.
+    def _cells_within(self, x0, y0, x1, y1, reach):
+        """Every cell whose *centre* lies inside a rectangle grown by `reach`.
 
-        **Floor and ceiling, not cell_of().** cell_of() rounds to the nearest
-        cell, which on the far edge of a box rounds *inwards* and leaves the
-        first free cell up to a quarter-millimetre too close. Those were the
-        clearance violations reported at 0.15 and 0.19 mm against a 0.2 mm
-        rule -- not shorts, and not visible on the sheet, and exactly the size
-        of half a grid pitch.
+        **The sample point, not the index, and this is the third version.**
+        The first used cell_of(), which rounds to the nearest cell and so on
+        the far edge of a box rounds *inwards*, leaving the first free cell up
+        to half a pitch too close: those were the clearance violations reported
+        at 0.15 and 0.19 mm against a 0.2 mm rule. The second replaced it with
+        floor and ceiling on the range, which never leaves a cell too close and
+        was the right correction in the only direction anybody was looking --
+        but floor and ceiling round the *range* outwards, so it also claims a
+        ring of cells up to a whole pitch beyond `reach`, whose track copper is
+        demonstrably far enough away.
+
+        On open board that costs nothing and nobody would ever see it. Between
+        two SOIC pins 1.27 mm apart it is the whole of the space, which is why
+        it took until a routing pass to show up. The cells are enumerated over
+        the floor/ceiling range, because that is the range that cannot miss
+        one, and then each is admitted on its own centre.
         """
-        reach = margin + self.clearance + self.track / 2
         first = (int(math.floor((x0 - reach - self.left) / self.pitch)),
                  int(math.floor((y0 - reach - self.top) / self.pitch)))
         last = (int(math.ceil((x1 + reach - self.left) / self.pitch)),
                 int(math.ceil((y1 + reach - self.top) / self.pitch)))
         for column in range(first[0], last[0] + 1):
             for row in range(first[1], last[1] + 1):
-                self.take(layer, column, row, owner)
+                x, y = self.point_of(column, row)
+                if (x0 - reach <= x <= x1 + reach
+                        and y0 - reach <= y <= y1 + reach):
+                    yield column, row
 
-    def block_pad(self, layer, x0, y0, x1, y1, net):
-        """A pad's own copper, then its halo, and they are not the same rule.
+    def block_box(self, layer, x0, y0, x1, y1, owner, margin=0.0):
+        """Mark every cell whose track centre would be inside a rectangle."""
+        reach = margin + self.clearance + self.track / 2
+        for column, row in self._cells_within(x0, y0, x1, y1, reach):
+            self.take(layer, column, row, owner)
 
-        **The copper is hard and the halo is exclusive.** A cell inside the pad
-        belongs to that net and to nothing else. A cell in the clearance ring
-        around it may be used by that net -- a stub has to leave the pad
-        somehow -- but if it is also in *another* pad's ring, nobody may have
-        it: two pads 1.27 mm apart on a 0.5 mm grid share ring cells, and a
+    def block_pad_copper(self, layer, x0, y0, x1, y1, net):
+        """A pad's own copper: hard, and **every pad's before any pad's ring**.
+
+        A cell whose centre is inside the pad belongs to that net and to
+        nothing else, and it is the one place on this board where a track has
+        no clearance to satisfy -- a segment inside a pad's own copper cannot
+        be too close to anything, because the pad already is not.
+
+        **Which is why this is a separate pass from block_pad_ring().** The
+        first version did both in one call, pad by pad, so a pad written later
+        marked its neighbour's copper cells "blocked" on the way past: two SOIC
+        pins are 1.27 mm apart and each one's clearance ring reaches 0.475 mm,
+        so every pin in a row sits inside both its neighbours' rings. The pad
+        lost the cells it is made of, `access()` found nothing free inside it
+        and route_all() reported the net unreachable. That was IOUT1, IOUT4 and
+        VREF, and from outside it looked exactly like congestion.
+        """
+        for column, row in self._cells_within(x0, y0, x1, y1, 0.0):
+            self.take(layer, column, row, net)
+            self.copper[layer].add(self.index(column, row))
+
+    def block_pad_ring(self, layer, x0, y0, x1, y1, net):
+        """The clearance halo around a pad, and it is exclusive rather than hard.
+
+        A cell in the ring may be used by that pad's own net -- a stub has to
+        leave the pad somehow -- but if it is also in *another* pad's ring,
+        nobody may have it: two pads 1.27 mm apart share ring cells, and a
         track legally placed in one pad's ring is illegally close to the other.
 
-        The first version blocked both with one call and let the last pad
-        written win, which is how a track ended up 0.12 mm from a pin of a net
-        it had never heard of.
-        """
-        first = (int(math.floor((x0 - self.left) / self.pitch)),
-                 int(math.floor((y0 - self.top) / self.pitch)))
-        last = (int(math.ceil((x1 - self.left) / self.pitch)),
-                int(math.ceil((y1 - self.top) / self.pitch)))
-        for column in range(first[0], last[0] + 1):
-            for row in range(first[1], last[1] + 1):
-                self.take(layer, column, row, net)
+        The first version blocked copper and halo with one call and let the
+        last pad written win, which is how a track ended up 0.12 mm from a pin
+        of a net it had never heard of.
 
+        Copper is never overwritten, whoever owns it. That is what makes the
+        two passes mean anything.
+        """
         reach = self.clearance + self.track / 2
-        ring_first = (int(math.floor((x0 - reach - self.left) / self.pitch)),
-                      int(math.floor((y0 - reach - self.top) / self.pitch)))
-        ring_last = (int(math.ceil((x1 + reach - self.left) / self.pitch)),
-                     int(math.ceil((y1 + reach - self.top) / self.pitch)))
-        for column in range(ring_first[0], ring_last[0] + 1):
-            for row in range(ring_first[1], ring_last[1] + 1):
-                if first[0] <= column <= last[0] and first[1] <= row <= last[1]:
-                    continue
-                if not self.inside(column, row):
-                    continue
-                held = self.owner[layer][self.index(column, row)]
-                if held is None:
-                    self.take(layer, column, row, net)
-                elif held != net:
-                    self.take(layer, column, row, "blocked")
+        for column, row in self._cells_within(x0, y0, x1, y1, reach):
+            index = self.index(column, row)
+            if index in self.copper[layer]:
+                continue
+            held = self.owner[layer][index]
+            if held is None:
+                self.take(layer, column, row, net)
+            elif held != net:
+                self.take(layer, column, row, "blocked")
 
     def access(self, layer, x, y, half_w, half_h, net):
         """The cell a route joins this pad at, and **it is inside the pad**.
@@ -202,6 +280,16 @@ class Grid:
             return best
         return (column, row) if self.free(layer, column, row, net) else None
 
+    def freeze(self):
+        """Take the snapshot. Called once, after blocking and before routing."""
+        self.base = [list(plane) for plane in self.owner]
+
+    def release(self, cells):
+        """Un-route these cells: back to what blocking left, not to empty."""
+        for layer, column, row in cells:
+            index = self.index(column, row)
+            self.owner[layer][index] = self.base[layer][index]
+
     def block_edge(self, edge_clearance):
         """The board outline, on both layers."""
         reach = edge_clearance + self.track / 2
@@ -228,28 +316,36 @@ class Grid:
     # same corridor, and the ones that arrived last found it full.
     VIA_NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1), (0, 0))
 
-    def via_fits(self, column, row, net):
+    def via_fits(self, column, row, net, crossable=()):
         for dc, dr in self.VIA_NEIGHBOURS:
             for layer in LAYERS:
-                if not self.free(layer, column + dc, row + dr, net):
+                if (not self.free(layer, column + dc, row + dr, net)
+                        and (layer, column + dc, row + dr) not in crossable):
                     return False
         return True
 
-    def _neighbours(self, cell, net):
+    def _neighbours(self, cell, net, crossable):
         layer, column, row = cell
         for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             yield (layer, column + dc, row + dr), 1
-        if self.via_fits(column, row, net):
+        if self.via_fits(column, row, net, crossable):
             yield (1 - layer, column, row), VIA_COST
 
-    def route(self, net, sources, targets):
+    def route(self, net, sources, targets, crossable=None):
         """A* from any source cell to any target cell. None if there is none.
 
         Sources are the net's own copper so far, targets the pad being
         reached. Both are sets of (layer, column, row).
+
+        `crossable` maps a cell to the net whose track is sitting on it, and
+        turns this from "find a path" into "find a path, and say whose copper
+        it would have to displace". Cells in it are passable at RIPUP_COST.
+        A search given one is a *probe*: nothing it finds may be laid down
+        until whatever it crossed has actually been ripped up.
         """
         if not sources or not targets:
             return None
+        crossable = crossable or {}
         goal = {(c, r) for _, c, r in targets}
 
         def heuristic(cell):
@@ -274,10 +370,12 @@ class Grid:
                 return list(reversed(path))
             if cost > best.get(cell, cost):
                 continue
-            for step, penalty in self._neighbours(cell, net):
+            for step, penalty in self._neighbours(cell, net, crossable):
                 layer, column, row = step
                 if not self.free(layer, column, row, net):
-                    continue
+                    if step not in crossable:
+                        continue
+                    penalty += RIPUP_COST
                 # A bend costs, so a route that could go straight does. The
                 # comparison is against where this cell was entered from,
                 # which is what `came` holds.
@@ -333,27 +431,61 @@ def segments(grid, path):
     return runs, vias
 
 
-def route_all(rect, pads, obstacles, rules, skip=()):
-    """Route every net in `pads`. Returns tracks, vias and what was missed.
+def _connect(grid, net, entries, access, crossable=None, claim=True):
+    """Join every pad of one net, pad to nearest pad. None if a hop has no path.
 
-    `pads` is {net: [(x, y, half_width, half_height, layers), ...]} in
-    millimetres and
-    `obstacles` is [(layers, x, y, half_width, half_height)] for copper that
-    belongs to nobody the router may route -- **which is where the ground
-    stitching goes.** Skipping the two ground nets is not the same as their
-    copper not being there: 104 vias and 104 stubs are on the board before this
-    runs, and the first routed version was not told, so tracks went through
-    them. 198 shorts, every one against a ground via.
+    Returns (tracks, vias, cells, displaced). `cells` is exactly what this net
+    claimed on the grid, which is what Grid.release() needs to un-route it, and
+    `displaced` is the nets a probe would have to move out of the way.
 
-    `skip` is the nets that reach their copper another way.
+    **A failed hop releases the hops that succeeded**, so a net is either
+    entirely routed or entirely absent. A half-routed net leaves copper on the
+    board with no matching entry in `placed`, which is a piece of track nothing
+    can ever rip up and nothing can ever account for.
+    """
+    crossable = crossable or {}
+    tracks, vias, cells, displaced = [], [], [], set()
+    first = access[(net, entries[0][0], entries[0][1])]
+    reached = {(layer, first[0], first[1]) for layer in entries[0][4]}
+    for x, y, _, _, layers in entries[1:]:
+        column, row = access[(net, x, y)]
+        targets = {(layer, column, row) for layer in layers}
+        path = grid.route(net, reached, targets, crossable)
+        if path is None:
+            grid.release(cells)
+            return None
+        runs, path_vias = segments(grid, path)
+        tracks.extend((net, layer, points) for layer, points in runs)
+        vias.extend((net, point) for point in path_vias)
+        reached.update(path)
+        for layer, cell_column, cell_row in path:
+            if (layer, cell_column, cell_row) in crossable:
+                displaced.add(crossable[(layer, cell_column, cell_row)])
+            if claim:
+                grid.take(layer, cell_column, cell_row, net)
+                cells.append((layer, cell_column, cell_row))
+        # A via is wider than a track: its neighbours have to go too, or a
+        # track one pitch away is inside the clearance with both centres
+        # legally placed. This is the rule the grid cannot express.
+        for point in path_vias:
+            column, row = grid.cell_of(*point)
+            for dc, dr in Grid.VIA_NEIGHBOURS:
+                for layer in LAYERS:
+                    spot = (layer, column + dc, row + dr)
+                    if spot in crossable:
+                        displaced.add(crossable[spot])
+                    if claim and grid.free(layer, column + dc, row + dr, None):
+                        grid.take(layer, column + dc, row + dr, net)
+                        cells.append(spot)
+    return tracks, vias, cells, displaced
 
-    **The big nets go first and the small ones after**, which is the opposite
-    of the usual advice and is what this board wants. VA+ and VA- have
-    twenty-five pads each, spread over ten packages and a decoupling row, and a
-    net like that routed last has to reach every one of them through a board
-    that is already full. A two-pad net 4 mm long has alternatives; a rail
-    spanning 180 mm does not. Shortest-first left 21 nets unrouted, most of
-    them rails.
+
+def _one_pass(rect, pads, obstacles, rules, skip, first):
+    """Route every net once, on a clean grid, in an order this pass is given.
+
+    `first` is the nets to attempt before the rest; everything else follows in
+    the size order below. Returns tracks, vias and the nets missed, in the
+    order they were missed -- which is what the next pass promotes.
     """
     grid = Grid(rect, rules["pitch"], rules["track"], rules["clearance"],
                 rules["via"])
@@ -371,66 +503,205 @@ def route_all(rect, pads, obstacles, rules, skip=()):
     # B.Cu at an SMD pad with no via under them, which is 191 tracks with an
     # unconnected end; and two nets could own the same back-side cell, because
     # neither had ever claimed it. One line, three fault classes.
-    for net, entries in pads.items():
-        owner = net if net else "blocked"
-        for x, y, half_w, half_h, layers in entries:
-            for layer in layers:
-                grid.block_pad(layer, x - half_w, y - half_h, x + half_w,
-                               y + half_h, owner)
+    # **Copper first, for every pad, and only then the rings.** Pad by pad, the
+    # ring of one pin marks the copper of the next one "blocked", because two
+    # SOIC pins are closer together than one clearance ring is wide.
+    for stage in (Grid.block_pad_copper, Grid.block_pad_ring):
+        for net, entries in pads.items():
+            owner = net if net else "blocked"
+            for x, y, half_w, half_h, layers in entries:
+                for layer in layers:
+                    stage(grid, layer, x - half_w, y - half_h, x + half_w,
+                          y + half_h, owner)
     for layers, x, y, half_w, half_h in obstacles:
         for layer in layers:
             grid.block_box(layer, x - half_w, y - half_h, x + half_w,
                            y + half_h, "blocked")
 
-    tracks, vias, missed = [], [], []
+    # **The big nets go first and the small ones after**, which is the opposite
+    # of the usual advice and is what this board wants. VA+ and VA- have
+    # twenty-five pads each, spread over ten packages and a decoupling row, and
+    # a net like that routed last has to reach every one of them through a
+    # board that is already full. A two-pad net 4 mm long has alternatives; a
+    # rail spanning 180 mm does not. Shortest-first left 21 nets unrouted, most
+    # of them rails.
+    #
+    # `first` overrides that for the nets a previous pass could not finish, and
+    # it is what route_all()'s outer loop has to say.
+    rank = {net: index for index, net in enumerate(first)}
     order = sorted((net for net in pads
                     if net and net not in skip and len(pads[net]) > 1),
-                   key=lambda net: -len(pads[net]))
+                   key=lambda net: (rank.get(net, len(rank)), -len(pads[net]),
+                                    net))
+
+    # **Every pad gets a stub from its own centre to its access cell**, and the
+    # reason is that a pad is not on the grid. cell_of() rounds, so the nearest
+    # cell is up to 0.35 mm away, and the first routed board ended with 173
+    # dangling tracks: routes that reached the right cell and stopped short of
+    # the copper. The stub is inside the pad's own halo, so it can cross
+    # nothing, and it is never ripped up -- it is a property of the pad, not of
+    # any route.
+    tracks, vias, missed = [], [], []
+    unreachable, access, ordered = set(), {}, {}
     for net in order:
-        entries = _order(pads[net])
-        # **Every pad gets a stub from its own centre to its access cell**, and
-        # the reason is that a pad is not on the grid. cell_of() rounds, so the
-        # nearest cell is up to 0.35 mm away, and the first routed board ended
-        # with 173 dangling tracks: routes that reached the right cell and
-        # stopped short of the copper. The stub is inside the pad's own halo,
-        # so it can cross nothing.
-        access = {}
+        ordered[net] = entries = _order(pads[net])
         for x, y, half_w, half_h, layers in entries:
             cell = grid.access(min(layers), x, y, half_w, half_h, net)
             if cell is None:
-                missed.append(net)
+                unreachable.add(net)
                 break
-            access[(x, y)] = cell
+            access[(net, x, y)] = cell
             spot = grid.point_of(*cell)
             if spot != (x, y):
                 tracks.append((net, min(layers), [(x, y), spot]))
-        if len(access) != len(entries):
+    missed.extend(net for net in order if net in unreachable)
+
+    # Nothing has been routed yet, so this is the grid that ripping up restores
+    # to. It must be taken after every pad, every ring and every obstacle and
+    # before the first track.
+    grid.freeze()
+
+    routed, placed, rips = {}, {}, {}
+    queue = [net for net in order if net not in unreachable]
+    while queue:
+        net = queue.pop(0)
+        result = _connect(grid, net, ordered[net], access)
+        if result is None:
+            # **Ask what is in the way, then move it.** The probe re-runs the
+            # same search with every routed net's copper passable at
+            # RIPUP_COST; what comes back is not a route -- it may run straight
+            # through three other nets -- it is the list of nets whose copper
+            # would have to go. They are ripped, re-queued, and the route is
+            # attempted again on a grid where the space genuinely is free.
+            #
+            # Nothing is ever laid down from a probe, which is the invariant
+            # that keeps this from producing a short: `claim=False` and the
+            # only thing kept is `displaced`.
+            crossable = {cell: other
+                         for other, cells in placed.items()
+                         if other != net and rips.get(other, 0) < RIPUP_LIMIT
+                         for cell in cells}
+            probe = _connect(grid, net, ordered[net], access, crossable,
+                             claim=False)
+            if probe is not None and probe[3]:
+                for other in sorted(probe[3]):
+                    grid.release(placed.pop(other))
+                    routed.pop(other, None)
+                    rips[other] = rips.get(other, 0) + 1
+                    queue.append(other)
+                result = _connect(grid, net, ordered[net], access)
+        if result is None:
+            missed.append(net)
             continue
-        first = access[(entries[0][0], entries[0][1])]
-        reached = {(layer, first[0], first[1]) for layer in entries[0][4]}
-        for x, y, _, _, layers in entries[1:]:
-            column, row = access[(x, y)]
-            targets = {(layer, column, row) for layer in layers}
-            path = grid.route(net, reached, targets)
-            if path is None:
-                missed.append(net)
-                break
-            runs, path_vias = segments(grid, path)
-            tracks.extend((net, layer, points) for layer, points in runs)
-            vias.extend((net, point) for point in path_vias)
-            for layer, cell_column, cell_row in path:
-                grid.take(layer, cell_column, cell_row, net)
-                reached.add((layer, cell_column, cell_row))
-            # A via is wider than a track: its neighbours have to go too, or a
-            # track one pitch away is inside the clearance with both centres
-            # legally placed. This is the rule the grid cannot express.
-            for point in path_vias:
-                column, row = grid.cell_of(*point)
-                for dc, dr in Grid.VIA_NEIGHBOURS:
-                    for layer in LAYERS:
-                        if grid.free(layer, column + dc, row + dr, None):
-                            grid.take(layer, column + dc, row + dr, net)
-    return tracks, vias, sorted(set(missed))
+        net_tracks, net_vias, cells, _ = result
+        routed[net] = (net_tracks, net_vias)
+        placed[net] = cells
+
+    for net in order:
+        if net in routed:
+            net_tracks, net_vias = routed[net]
+            tracks.extend(net_tracks)
+            vias.extend(net_vias)
+    seen, ordered_misses = set(), []
+    for net in missed:
+        if net not in seen and net not in routed:
+            seen.add(net)
+            ordered_misses.append(net)
+    return tracks, vias, ordered_misses
+
+
+# How many times the whole board may be routed from scratch, each pass a
+# complete legal route in a different order. **This board finishes on the
+# first**, so the number is a fallback rather than a mechanism -- see
+# route_all() for the measurement that demoted it, and note that the loop stops
+# the moment a pass finishes, so three unused passes cost nothing.
+RETRY_PASSES = 4
+
+
+def route_all(rect, pads, obstacles, rules, skip=()):
+    """Route every net in `pads`. Returns tracks, vias and what was missed.
+
+    `pads` is {net: [(x, y, half_width, half_height, layers), ...]} in
+    millimetres and
+    `obstacles` is [(layers, x, y, half_width, half_height)] for copper that
+    belongs to nobody the router may route -- **which is where the ground
+    stitching goes.** Skipping the two ground nets is not the same as their
+    copper not being there: 104 vias and 104 stubs are on the board before this
+    runs, and the first routed version was not told, so tracks went through
+    them. 198 shorts, every one against a ground via.
+
+    `skip` is the nets that reach their copper another way.
+
+    **Rip-up and retry, which this file used to say it did not do.** The
+    twenty-three nets it could not finish were left as a choice between that
+    and a finer grid on thinner track. The finer grid is priced in
+    rules.escape_corridor() and refused: no legal pitch at any class this board
+    would order puts a cell between two SOIC pins, and the one that would costs
+    a copper weight. So the answer was the routing side, and it took two goes
+    to find the right instrument.
+
+    **Reordering was the first go, and it is worth keeping because it is a
+    good-looking wrong answer.** Rip up the whole board, route it again with
+    the nets that failed promoted to the front, keep the best result: every
+    pass is a complete legal route on a clean grid, so nothing can short, and
+    it needs no bookkeeping at all. It works, up to a point -- 19 nets, then 7,
+    then 3 -- and then it random-walks: 8, 7, 3, 2, 2, 0 for one board, and for
+    the board that exists after J8 moved, twenty passes hovering between 1 and
+    8 without ever closing. The reason is visible once stated. Promoting the
+    nets that failed remembers *who* lost and nothing about *where*, and after
+    a few passes almost every net has lost once, so the order it produces is
+    close to arbitrary. Both promotion rules that were tried -- most recent
+    first, and most often first -- have the same defect and differ only in how
+    long they take to develop it. RETRY_PASSES is what is left of it, and it is
+    a fallback now.
+
+    **What works is displacing the nets that are actually in the way**, which
+    is rip-up as the literature means it. When a route fails, the same search
+    runs again with every routed net's copper passable at RIPUP_COST; the
+    probe's path names the nets whose copper is in the way; those are ripped
+    up, put back on the queue, and the route is tried again on a grid where
+    the space is genuinely free. It finishes this board on the first pass, in
+    a fifth of the time twelve reordering passes took, with nothing missed.
+
+    **The ledger objection that had ruled this out dissolves in one line.**
+    Ripping one net must not un-route the net that took its place, which
+    sounds like it needs a per-claim record of what every cell was before every
+    claim -- and a wrong record there is a grid that disagrees with the copper,
+    which is a short, which is the one thing this router must never produce.
+    But nothing needs to be remembered: a cell being released goes back to what
+    *blocking* said, and blocking is a constant. Grid.freeze() takes that
+    snapshot once, and Grid.release() is three lines. The difficulty was
+    entirely in having framed the question as "what was here before" instead of
+    "what is here when nothing is routed".
+
+    Two invariants carry the safety, and they are worth stating because they
+    are what stand in for the ledger:
+
+      * **a probe never lays anything down.** `claim=False`, and the only thing
+        kept from it is the set of displaced nets -- the path it found runs
+        through other people's copper and is thrown away;
+      * **a net is entirely routed or entirely absent.** _connect() releases
+        its own cells if a later hop fails, so `placed` and the copper always
+        describe the same board.
+
+    check_no_shorts() is the assertion that both held, and it runs on every
+    build.
+    """
+    best = None
+    first, tally = [], {}
+    for _ in range(RETRY_PASSES):
+        result = _one_pass(rect, pads, obstacles, rules, skip, first)
+        if best is None or len(result[2]) < len(best[2]):
+            best = result
+        if not result[2]:
+            break
+        for net in result[2]:
+            tally[net] = tally.get(net, 0) + 1
+        # Sorted by name within a count, so a pass is reproducible: two runs of
+        # this file on one board must lay down the same copper.
+        first = [net for net, _ in sorted(tally.items(),
+                                          key=lambda item: (-item[1], item[0]))]
+    return best[0], best[1], sorted(best[2])
 
 
 def check_no_shorts(tracks, vias, pitch):

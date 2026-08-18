@@ -1555,7 +1555,7 @@
 				)
 			)
 		)
-		(property "Description" "Relay DPDT, monostable, EN50005"
+		(property "Description" "DPDT signal relay, single-side stable, bifurcated Au-alloy contacts"
 			(at 0 0 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -1943,7 +1943,7 @@
 						)
 					)
 				)
-				(number "11"
+				(number "9"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1961,7 +1961,7 @@
 						)
 					)
 				)
-				(number "12"
+				(number "10"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1979,7 +1979,7 @@
 						)
 					)
 				)
-				(number "14"
+				(number "8"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -1997,7 +1997,7 @@
 						)
 					)
 				)
-				(number "21"
+				(number "4"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2015,7 +2015,7 @@
 						)
 					)
 				)
-				(number "22"
+				(number "3"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2033,7 +2033,7 @@
 						)
 					)
 				)
-				(number "24"
+				(number "5"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2051,7 +2051,7 @@
 						)
 					)
 				)
-				(number "A1"
+				(number "1"
 					(effects
 						(font
 							(size 1.27 1.27)
@@ -2069,7 +2069,7 @@
 						)
 					)
 				)
-				(number "A2"
+				(number "12"
 					(effects
 						(font
 							(size 1.27 1.27)

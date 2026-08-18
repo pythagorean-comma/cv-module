@@ -18,18 +18,30 @@ Library paths go through KiCad's own ${KICAD10_*_DIR} variables rather than
 absolute paths, so the project opens on any machine with KiCad 10 installed. The
 mixer's gen_project.py does the same and for the same reason.
 
-**No board design rules.** The mixer's version of this file carries a full
-`design_settings` block from its rules.py, because it has a board. This module
-does not have one yet, and inventing clearances for a board nobody has laid out
-would be six plausible numbers that DRC would then enforce -- section 6's rule,
-applied to a file format instead of a resistor. The block is left as KiCad's own
-defaults and gen_pcb.py, when it exists, is where the rules go.
+**The design rules, and this paragraph used to say the opposite.** It said:
+*"No board design rules ... inventing clearances for a board nobody has laid
+out would be six plausible numbers that DRC would then enforce ... the block is
+left as KiCad's own defaults and gen_pcb.py, when it exists, is where the rules
+go."* The argument was right and the description of the file was not, twice
+over. There *is* a board now. And even while there was not, net_classes() below
+was already writing a track width, a clearance, a via diameter and a via drill
+as literals -- the six plausible numbers, in the file whose docstring said it
+had declined to write them -- which then matched gen_pcb.py's own copies by
+nobody's arithmetic at all.
+
+They come from rules.py now, which is where the mixer keeps its own and where
+this docstring already said the mixer keeps them. `design_settings` is still
+KiCad's defaults, because gen_pcb.py sets the board's rules through pcbnew
+directly and SaveBoard() would overwrite anything written here anyway -- which
+is why gen_pcb.py re-runs this file afterwards, and why verify.check_rules()
+reads all three off disk instead of taking any of their words for it.
 """
 
 import json
 import pathlib
 
 import design as circuit
+import rules
 from toolchain import symlib
 from toolchain.kisch import Schematic
 from toolchain.sexp import Sym, dumps
@@ -45,23 +57,64 @@ NICK = "cv"
 def net_classes():
     """One class, plus a wider one for the rails and both grounds.
 
-    Track widths are absent for the same reason the design rules are: there is
-    no board. What the classes do carry is the *grouping*, which is a design
-    statement rather than a fabrication one -- the two grounds are separate
-    classes' worth of copper because floorplan.py keeps them separate domains,
-    and MDGND is in the wide class for the reason design.py gives at R902.
+    Every fabrication number here comes from rules.py; what this function
+    contributes is the *grouping*, which is a design statement rather than a
+    fabrication one -- the two grounds are separate classes' worth of copper
+    because floorplan.py keeps them separate domains, and MDGND is in the wide
+    class for the reason design.py gives at R902.
+
+    The four that used to be literals were `clearance`, `track_width`,
+    `via_diameter` and `via_drill`, and they were the same four gen_pcb.py
+    declared. They agreed. Nothing made them agree.
     """
     default = {
-        "bus_width": 12, "clearance": 0.2, "diff_pair_gap": 0.25,
-        "diff_pair_via_gap": 0.25, "diff_pair_width": 0.2, "line_style": 0,
+        "bus_width": 12, "clearance": rules.CLEARANCE_MM,
+        "diff_pair_gap": 0.25, "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2, "line_style": 0,
         "microvia_diameter": 0.3, "microvia_drill": 0.1, "name": "Default",
         "pcb_color": "rgba(0, 0, 0, 0.000)", "priority": 2147483647,
-        "schematic_color": "rgba(0, 0, 0, 0.000)", "track_width": 0.25,
-        "via_diameter": 0.6, "via_drill": 0.3, "wire_width": 6,
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": rules.TRACK_MM,
+        "via_diameter": rules.VIA_DIAMETER_MM,
+        "via_drill": rules.VIA_DRILL_MM, "wire_width": 6,
     }
-    power = dict(default, name="Power", track_width=0.5, priority=1,
-                 pcb_color="rgba(200, 52, 52, 0.800)")
+    power = dict(default, name="Power", track_width=rules.POWER_TRACK_MM,
+                 priority=1, pcb_color="rgba(200, 52, 52, 0.800)")
     return [default, power]
+
+
+def design_rules():
+    """The constraints DRC enforces, and **they were being deleted every build.**
+
+    This is where KiCad 10 keeps the numbers `kicad-cli pcb drc` checks against;
+    the board file's own `(setup ...)` block does not carry them. gen_pcb.py
+    sets them through pcbnew, SaveBoard() writes them here, and then this file
+    re-runs -- because SaveBoard() also flattens everything else -- and until
+    now wrote `"rules": {}` straight over the top of them.
+
+    **So the mixer's hard-won lesson was applied in the right shape and the
+    wrong direction.** build.sh upstream re-runs its project generator after
+    saving precisely so the design rules survive; this repo copied the re-run
+    and not the rules, and the re-run was what destroyed them. Every DRC report
+    this project has produced ran with `min_track_width`, `min_via_diameter`
+    and `min_copper_edge_clearance` at KiCad's defaults, which are zero.
+
+    What was *not* wrong is the clearance, and that is worth being exact about
+    rather than claiming a bigger catch than there was: DRC takes clearance
+    from the net class, not from here, and net_classes() has always written
+    0.2 mm. So the copper this repo has already reported as DRC-clean is
+    genuinely 0.2 mm clear. What went unchecked is every rule that is not a
+    clearance.
+
+    Keys absent from this dict fall back to KiCad's defaults, so the four that
+    matter are named and the rest are left alone deliberately.
+    """
+    return {
+        "min_clearance": rules.CLEARANCE_MM,
+        "min_track_width": rules.TRACK_MM,
+        "min_via_diameter": rules.VIA_DIAMETER_MM,
+        "min_copper_edge_clearance": rules.EDGE_CLEARANCE_MM,
+    }
 
 
 def project_document(root_uuid):
@@ -73,7 +126,8 @@ def project_document(root_uuid):
     in KiCad's expanded form and drops `netclass_patterns` on the way.
     """
     return {
-        "board": {"design_settings": {"drc_exclusions": [], "rules": {}}},
+        "board": {"design_settings": {"drc_exclusions": [],
+                                      "rules": design_rules()}},
         "boards": [],
         "cvpcb": {"equivalence_files": []},
         "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []},

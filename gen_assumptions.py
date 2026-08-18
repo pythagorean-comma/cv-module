@@ -183,36 +183,68 @@ MODELS = (
         "and 8 were found. It needs no hardware."),
 
     Guess(
-        "The Schottky forward drop, in three places that need it small.",
-        "0.3 V is assumed for a BAT54-class part at the microamps this "
-        "circuit draws, and no datasheet was opened this session. It is not "
-        "one figure doing one job: it sets how much gate voltage the charge "
-        "pump can produce (3.3 - 2*Vf), and it *is* the clamped voltage on "
-        "the inverted reference.",
-        "pump_timing()'s whole margin, and clamp_gain()'s +7.4 dB against the "
-        "mixer's 7.84 dB of headroom -- which is 0.44 dB of room, so this is "
-        "the assumption in this repo with the least slack behind it.",
-        "At 0.4 V the clamp gives +9.8 dB and the summer clips on the fault "
-        "it was fitted to prevent; at 0.25 V it gives +6.1 dB and the pump "
-        "gains 0.14 V of gate. The direction that hurts is the one a hot "
-        "junction moves in.",
-        "Read the curve at 10 uA and 25 C for the specific part, before the "
-        "BOM is ordered. It is the one reading this pass left undone."),
+        "The Schottky forward drop at the *pump*, which is the half of this "
+        "that is still an assumption.",
+        "PUMP_DIODE_VF = 0.32 V for the BAT54 at D801/D802. The datasheet has "
+        "now been read (DS11005 Rev. 34-2) and its lowest tabulated point is "
+        "240 mV **max** at 0.1 mA; the pump's hold node is bled at about "
+        "18 uA, an order of magnitude below that, where the table stops. So "
+        "0.32 V is not a reading -- it is a deliberate pessimism sitting "
+        "above the datasheet's own maximum at ten times the current, in the "
+        "style OUTPUT_SWING_MARGIN uses upstream.",
+        "pump_timing()'s margin only. The gate reaches 3.3 - 2*Vf before the "
+        "bleed divides it, so a *smaller* Vf gives more gate voltage: every "
+        "direction the real part can move is the safe one, which is why this "
+        "is now a comfortable assumption rather than the tightest in the "
+        "repo.",
+        "The gate is computed at 1.83 V against a 1.0 V threshold "
+        "requirement. At the datasheet's 0.24 V it would be 1.99 V, and at "
+        "125 C lower still -- Figure 1 of the PMEG data sheet shows the "
+        "tempco is negative, so a hot junction *helps* here. **The old entry "
+        "said the opposite** -- \"the direction that hurts is the one a hot "
+        "junction moves in\" -- which is true of a silicon junction's leakage "
+        "and false of a Schottky's forward drop.",
+        "Nothing, before ordering. If the pump is ever measured short of "
+        "gate, the reading to take is Vf at 20 uA, which is off the bottom of "
+        "the published table and would have to be measured rather than read."),
 
     Guess(
-        "A 5 V signal DPDT relay coil draws 25-40 mA.",
-        "An envelope for the class, not a part: the relay is in "
-        "design.UNSPECIFIED with its requirements and coil current is a "
-        "property of whichever one is fitted.",
-        "coil_budget(), and through it the deferred supply -- 75 to 120 mA "
-        "continuous on V5, against 78 mA for every amplifier and VCA on the "
-        "board.",
-        "The supply is sized wrong, which is a DC-DC that has not been chosen "
-        "yet rather than a board change. Nothing on the schematic moves: the "
-        "FET's requirement is stated as 200 mA, which covers the top of a "
-        "wide error.",
-        "Choose the relay. It is now the only part on this board whose "
-        "*current* matters to another block."),
+        "**RESOLVED** -- the clamp's forward drop, which used to share the "
+        "entry above and was the assumption in this repo with the least slack "
+        "behind it.",
+        "It is read now, not assumed, and reading it found the clamp did not "
+        "work. Two things were wrong. The current was stated as \"the "
+        "microamps this circuit draws\" and D803 sits on U8's output pin, so "
+        "it carries the amplifier's short-circuit current -- 36 mA, from "
+        "SBOS484D page 8. And the BAT54's own table gives 500 mV max at "
+        "30 mA, which is +13.4 dB: over the mixer's headroom by 5.5 dB, on "
+        "the fault the clamp exists to prevent.",
+        "Nothing now. clamp_gain() computes the drop from the fitted part's "
+        "datasheet at the current clamp_current() derives, so the number is a "
+        "result rather than an input.",
+        "The fix is a part, not a resistor, and clamp_current() shows why: "
+        "the normal reference load and the fault current cross the same "
+        "series resistor, so their ratio is 4.54x whatever its value. A "
+        "PMEG2010AEH -- a 1 A die run at 36 mA -- is 259 mV max there, which "
+        "is +6.3 dB with 1.5 dB of margin.",
+        "Settled. What is left is a requirement rather than a guess: "
+        "clamp_vf_ceiling() states it as 0.32 V at clamp_current(), and any "
+        "substitute part is checked against that."),
+
+    Guess(
+        "**RESOLVED** -- a 5 V signal DPDT relay coil draws 25-40 mA.",
+        "It was an envelope for the class, because the relay was in "
+        "design.UNSPECIFIED. The relay is an Omron G6S-2 DC5 now and its own "
+        "ratings table gives 28.1 mA on 178 ohm at 5 VDC, to a stated +-10%.",
+        "coil_budget(), and through it the deferred supply. The figure it "
+        "carries is 76 to 93 mA continuous on V5 rather than 75 to 120, "
+        "against 78 mA for every amplifier and VCA on the board -- so the "
+        "supply's largest single load is now a read number and not a guess.",
+        "Nothing. The band it replaces contained it.",
+        "Settled by choosing the part. What it leaves behind is a "
+        "requirement on the one block still deferred: the supply has to hold "
+        "5 V through 93 mA of coil plus the reference's own draw, and "
+        "design.coil_budget() is where that number lives."),
 
     Guess(
         "X7R is acceptable for the CV filter's 56 nF and 22 nF.",

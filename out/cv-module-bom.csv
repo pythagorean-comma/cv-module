@@ -11,7 +11,8 @@ C801,100n/50V C0G,Capacitor_SMD:C_0805_2012Metric,GRM2195C1H104JA01D,1,5,0.15,0.
 C805,2n2/50V C0G,Capacitor_SMD:C_0805_2012Metric,GRM2165C1H222JA01D,1,5,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
 C806,1u/16V X7R,Capacitor_SMD:C_0805_2012Metric,GRM21BR71C105KA01L,1,5,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
 "D151,D152,D251,D252,D351,D352,D451,D452,D551,D552,D651,D652",1N4148W,Diode_SMD:D_SOD-123,1N4148WS-7-F,12,13,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
-"D801,D802,D803,D813,D823,D833",BAT54,Diode_SMD:D_SOD-123,BAT54-7-F,6,7,0.05,0.15,GBP,100,band,"typical distributor band, not read this session"
+"D801,D802,D813,D823,D833",BAT54,Diode_SMD:D_SOD-123,BAT54-7-F,5,6,0.05,0.15,GBP,100,band,"typical distributor band, not read this session"
+D803,PMEG2010AEH,Diode_SMD:D_SOD-123F,"PMEG2010AEH,115",1,2,0.10,0.30,GBP,100,band,"typical distributor band, not read this session"
 J1,CH1,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
 J2,CH2,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
 J3,CH3,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
@@ -22,8 +23,8 @@ J8,PWR,Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical,61300511121,1,
 J9,CTRL,Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical,61300511121,1,5,0.40,0.90,GBP,10,band,"typical distributor band, not read this session"
 J10,CTRL2,Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical,61300511121,1,5,0.40,0.90,GBP,10,band,"typical distributor band, not read this session"
 J11,CTRL3,Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical,61300511121,1,5,0.40,0.90,GBP,10,band,"typical distributor band, not read this session"
-"K801,K802,K803",NOT CHOSEN,,,3,4,,,,,none,part not chosen
-Q801,NOT CHOSEN,Package_TO_SOT_SMD:SOT-23,,1,2,,,,,none,part not chosen
+"K801,K802,K803",G6S-2 DC5,Relay_SMD:Relay_DPDT_Omron_G6S-2F,G6S-2 DC5,3,7,3.00,5.50,GBP,10,band,"typical distributor band, not read this session"
+Q801,DMG1012T,Package_TO_SOT_SMD:SOT-523,DMG1012T-7,1,2,0.06,0.20,GBP,100,band,"typical distributor band, not read this session"
 "R101,R102,R201,R202,R301,R302,R401,R402,R501,R502,R601,R602,R801,R802",10k 0.1%,Resistor_SMD:R_0805_2012Metric,ERA6AEB103V,14,18,0.10,0.30,GBP,100,band,"typical distributor band, not read this session"
 "R111,R121,R211,R221,R311,R321,R411,R421,R511,R521,R611,R621",12k1 0.1%,Resistor_SMD:R_0805_2012Metric,ERA6AEB1212V,12,16,0.10,0.30,GBP,25,band,"typical distributor band, not read this session"
 "R115,R215,R315,R415,R515,R615",220R 1%,Resistor_SMD:R_0805_2012Metric,RC0805FR-07220RL,6,10,0.01,0.03,GBP,100,band,"typical distributor band, not read this session"

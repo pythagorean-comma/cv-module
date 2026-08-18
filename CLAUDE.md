@@ -87,6 +87,16 @@ is the existing precedent for the kind of check `verify.py` here should contain.
 
 ## Design rules
 
+**Two things this pass settled that are worth carrying.** `UNSPECIFIED` is empty
+— the bypass relay is an Omron G6S-2 DC5 and its MOSFET a Diodes DMG1012T, each
+chosen by a number the design computes rather than by a class. And the clamp
+diode **had failed and every instrument agreed it worked**, because all of them
+read one assumed constant: `D803` sits on an op-amp's output pin and carries its
+36 mA short-circuit current, not the "microamps" `ASSUMPTIONS.md` claimed, and a
+BAT54 there is 5.5 dB over the mixer's headroom. `clamp_gain()` computes the
+drop from the fitted part's own datasheet now. An assumption that names the
+wrong *operating point* is invisible to every check that consumes its result.
+
 1. **Do not invent values.** If something is not in `docs/hardware-spec-v0.md` and
    cannot be *derived* from it, stop and ask. A schematic full of plausible values
    is worse than an incomplete one, because it looks finished. §6 of the spec lists
@@ -362,7 +372,11 @@ cv-module/
     ASSUMPTIONS.md       everything guessed                      [generated]
     constraints.md       does each constraint have a mechanism?  [generated]
     floorplan.md         zones, domains, boundary crossings      [generated]
+    rules.md             the fab class, and what it decides      [generated]
     SHOPPING.md          what to buy and from where              [generated]
+    cv-module-schematic.pdf   the sheet, for reading              [generated]
+    cv-module-layout.pdf      one page per copper layer           [generated]
+    cv-module-top.png         the board, at a glance              [generated]
 
   contract/
     PINNED.md            the fabricated commit hash — socket.py parses it
@@ -376,8 +390,9 @@ cv-module/
   constraints.py         does each constraint have a mechanism? one did not
   delta.py               this module's effect, via the mixer's own functions
   floorplan.py           zones, ground domains, boundary crossings
+  rules.py               the fabrication rules, and the arithmetic behind them
   placement.py           the floorplan as coordinates. No KiCad import
-  route.py               a maze router: pads in, polylines out. No KiCad
+  route.py               a maze router with rip-up and retry. No KiCad
   verify.py              the constraints, checked against KiCad's own netlist
   test_verify.py         plants faults to prove verify.py's checks can fail
 
@@ -387,9 +402,11 @@ cv-module/
   gen_sch.py             -> out/cv-module.kicad_sch
   gen_project.py         -> out/cv-module.kicad_pro, the lib tables, out/cv.kicad_sym
   gen_bom.py             -> out/cv-module-bom.csv, docs/SHOPPING.md
+  gen_plots.py           -> docs/cv-module-{schematic,layout}.pdf, -top.png
   gen_assumptions.py     -> docs/ASSUMPTIONS.md
   constraints.py         -> docs/constraints.md
   floorplan.py           -> docs/floorplan.md
+  rules.py               -> docs/rules.md
 
   out/                   for machines: the sheet, the board, the project, the
                          netlist, the BOM as CSV, and from-kicad.net /
@@ -414,8 +431,23 @@ python3 design.py && python3 gen_netlist.py && python3 gen_sch.py \
   && python3 gen_project.py && python3 placement.py && python3 gen_pcb.py \
   && python3 verify.py && python3 test_verify.py \
   && python3 constraints.py && python3 delta.py && python3 floorplan.py \
-  && python3 gen_bom.py && python3 gen_assumptions.py
+  && python3 gen_bom.py && python3 gen_assumptions.py && python3 rules.py \
+  && python3 gen_plots.py
 ```
+
+**`rules.py` is last in that list and first in the dependency order**, which is
+worth not being confused by: `gen_pcb.py` and `gen_project.py` both import it,
+so its constants are already in force by the time anything runs. Its own line
+only writes `docs/rules.md`.
+
+**`gen_plots.py` produces the only outputs a person can look at without
+installing KiCad** — the schematic, one plotted page per copper layer, and a
+render of the board. It must run after `gen_pcb.py`, and it rewrites each PDF's
+`/CreationDate` to the epoch so that two builds of one board give byte-identical
+files: these are tracked binaries, and a tracked binary that churns on every run
+is one whose history says nothing. **It deliberately writes no gerbers.**
+`gen_plots.orderable()` holds the reason and reads it off `design.UNSPECIFIED`
+and `design.DEFERRED`, so choosing the last part is what changes the answer.
 
 **`gen_pcb.py` comes before `verify.py` for the same reason the schematic
 generators do**: verify.py runs `kicad-cli pcb drc` over the board and reads the
@@ -431,6 +463,15 @@ used to read `out/cv-module.net`, written by `gen_netlist.py` from the same
 transcription error because there was no transcription. It also runs
 `kicad-cli sch erc`, and `verify.ERC_ALLOWED` declares the residue with a reason
 and an exact count, so a new violation of a declared class still fails.
+
+**`test_verify.py` checks its own faults now, and it had to.** Three planted
+mutations named the bypass relay's contacts as IEC numbers, which was right
+while the part was `None` and dead the moment a G6S was fitted — `set.discard`
+on a member that is not there is a no-op, so they planted nothing and went on
+reporting "caught". `dead_mutations()` runs before the cases and refuses a
+discard that removes nothing. The naive version of that test — "did the
+mutation change anything?" — passes all forty and would have passed those three,
+because they also `add` a pin. **The discriminator is the discard.**
 
 **`test_verify.py` is not optional and is the reason `verify.py` means
 anything.** A green check proves nothing on its own — the failure this project

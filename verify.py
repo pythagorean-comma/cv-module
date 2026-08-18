@@ -59,7 +59,9 @@ import subprocess
 import sys
 
 import design
+import gen_project
 import placement
+import rules
 import contract.socket as socket
 from toolchain import kicad, kisim, sexp
 
@@ -67,6 +69,7 @@ OUT = pathlib.Path(__file__).resolve().parent / "out"
 SHEET = OUT / "cv-module.kicad_sch"
 NETLIST = OUT / "from-kicad.net"
 ERC = OUT / "from-kicad-erc.json"
+PROJECT = OUT / "cv-module.kicad_pro"
 PCB = OUT / "cv-module.kicad_pcb"
 DRC = OUT / "from-kicad-drc.json"
 
@@ -703,32 +706,86 @@ def check_fail_safe(nets, values):
             f"FSG carries {sorted(gate)}, expected ['C806', 'D802', 'R803', "
             f"'{design.FET_REF}'] -- anything else on the hold node moves both "
             f"of pump_timing()'s time constants")
+
+    # **D803 is the one part on this board chosen by a number rather than a
+    # class, and this is the check that keeps it that way.** The clamp works
+    # only because the fitted diode's own datasheet maximum at 36 mA is under
+    # clamp_vf_ceiling(); a BAT54 sat here for the life of the design at
+    # 500 mV, which is 5.5 dB over the mixer's headroom on the fault the clamp
+    # exists to prevent, and nothing noticed because every instrument read the
+    # same assumed constant. Read from the *netlist's* value string, so
+    # substituting the part on the sheet fails here rather than at the bench.
+    fitted = values.get("D803")
+    if fitted != design.CLAMP_DIODE:
+        problems.append(
+            f"D803 is fitted as {fitted!r} and design.CLAMP_DIODE is "
+            f"{design.CLAMP_DIODE!r} -- the clamp is chosen by its forward "
+            f"drop at {design.clamp_current()['amps'] * 1e3:.0f} mA, not by "
+            f"being a Schottky. See design.clamp_vf_ceiling()")
+    verdict = design.clamp_gain()
+    if not verdict["fits"]:
+        problems.append(
+            f"the clamp gives {verdict['clamped_db']:+.1f} dB against "
+            f"{verdict['headroom_db']:.2f} dB of headroom at the mixer's "
+            f"summer, so the fail-loud path still clips it")
     return problems
 
 
 # What the router did not finish, pinned exactly -- for the reason
 # ERC_ALLOWED's counts were: "mostly routed" is something a reader forgives,
-# and 67 missing connections is something that has to reach zero before anybody
+# and a missing connection is something that has to reach zero before anybody
 # orders copper.
 #
-# **476 to 67 in one pass, with DRC at zero throughout.** The 67 are named by
-# gen_pcb.py on every run, and they are not scattered: they are the summing
-# junctions and the two rails, which is exactly where a grid router runs out of
-# room. A pin on a SOIC has a neighbour 1.27 mm away on each side, so on a
-# 0.5 mm grid there is no cell between them and every route has to leave
-# outward through the same corridor. What finishes them is either a finer grid
-# with thinner track -- a fab-capability decision, not a routing one -- or
-# rip-up and retry, which this router does not do and says so.
-UNROUTED_ITEMS = 67
+# **476, then 67, then 0, and the violation count never left zero.** That last
+# clause is the property, not the first: a router that trades shorts for
+# finished connections is worse than one that gives up and says so.
+#
+# The 67 were left as a choice between a finer grid on thinner track and rip-up
+# and retry, and the answer turned out to be neither on its own:
+#
+#   * **three of the twenty-three nets were not congestion at all.** A pad's
+#     own copper cells were being marked "blocked" by its neighbour's clearance
+#     ring, because two SOIC pins are closer together than one ring is wide, so
+#     IOUT1, IOUT4 and VREF had no reachable cell inside their own pads. From
+#     outside that is indistinguishable from a full board. route.block_pad_copper();
+#   * **the finer grid was priced and refused.** rules.escape_corridor() shows
+#     the corridor between two SOIC pins is 0.02 mm wide at the fitted class
+#     and opens only at JLCPCB's 0.09 mm multilayer class, which is available
+#     at 1 oz outer copper and not at 2 oz. No pitch buys it and no pitch is
+#     needed;
+#   * **rip-up and retry is what finished it**, at the pitch already fitted.
+#     route.route_all() rips up the whole board and routes it again in an order
+#     led by how often each net has failed, and this board closes on the ninth
+#     pass.
+#
+# Zero is a stronger claim than 67 and a more fragile one, exactly as
+# ERC_ALLOWED's emptiness is. If a part moves and one net cannot be finished,
+# this is where the number goes back -- with the net named, not with the
+# category filtered out.
+UNROUTED_ITEMS = 0
 
 
 def read_drc(board, destination):
-    """Run KiCad's own DRC over the board and read the report back."""
+    """Run KiCad's own DRC over the board and read the report back.
+
+    **--severity-all, which run_erc() has always had and this had not.** The
+    mixer's build.sh records the same asymmetry and calls it exactly right: the
+    two ran at different severities, so "0 violations" meant two different
+    things depending on which report you were reading, and on the board it
+    meant the weaker one. Eighteen warnings were invisible to that gate
+    upstream, among them a legend printed across a connector's pads.
+
+    Here it turns out to have hidden nothing -- the board reports 0 violations
+    at every severity, checked rather than assumed, which is the only reason
+    this could be added without a fresh allow-list. That makes it free to arm
+    and worth arming: a warning-severity check is still a check, and what it is
+    not is a thing to run and then throw half of away.
+    """
     if not board.exists():
         raise SystemExit(f"{board} does not exist -- run gen_pcb.py")
     result = subprocess.run(
-        [str(kicad.KICAD_CLI), "pcb", "drc", "--format", "json",
-         "-o", str(destination), str(board)],
+        [str(kicad.KICAD_CLI), "pcb", "drc", "--severity-all", "--format",
+         "json", "-o", str(destination), str(board)],
         capture_output=True, text=True)
     if not destination.exists():
         raise SystemExit(f"DRC failed:\n{result.stdout}\n{result.stderr}")
@@ -748,9 +805,15 @@ def check_board(report):
     Unconnected items are different in kind: they are work not done rather
     than work done wrong, and the honest thing is to state the number rather
     than filter the category out. UNROUTED_ITEMS is that statement, and it has
-    come down from 476 to 67 without the violation count ever leaving zero --
-    which is the property worth protecting. A router that trades shorts for
-    completed connections is worse than one that gives up and says so.
+    come down from 476 to 67 to 0 without the violation count ever leaving
+    zero -- which is the property worth protecting. A router that trades shorts
+    for completed connections is worse than one that gives up and says so.
+
+    **At zero it also stops being only a declaration and starts being a
+    check**, which is worth noticing rather than assuming. While the number was
+    67 this compared a count against a count, and the last of the 67 was a
+    MAGND pad connected to nothing that nobody could see inside the total. The
+    one direction left from zero is a connection going away.
     """
     problems = []
     violations = report.get("violations", ())
@@ -770,6 +833,102 @@ def check_board(report):
             f"verify.UNROUTED_ITEMS declares {UNROUTED_ITEMS} -- if copper has "
             f"been routed, bring the number down with it; if a net has "
             f"appeared, it has not been routed yet")
+    return problems
+
+
+def check_rules(project, board):
+    """The rules DRC enforces are the rules rules.py declares, read off disk.
+
+    **This check was named in gen_pcb.py's docstring -- "check_rules() in
+    verify.py is what stops the discipline from decaying into a comment" --
+    for the whole life of the board, and it did not exist.** Nothing else in
+    this repository has been so exactly its own stated failure mode: a source
+    cited and never read is what `PUMP_RULES` upstream records, and this is a
+    check cited and never written, in a sentence whose subject is the danger of
+    a discipline decaying into a comment.
+
+    What it holds, and each is a way the three files have actually disagreed:
+
+    **The project's DRC constraints are rules.py's numbers.** They were `{}`.
+    gen_pcb.py sets them through pcbnew, SaveBoard() writes them into the
+    project, and then gen_pcb.py re-runs gen_project.py -- for the mixer's
+    reason, that SaveBoard() flattens the project -- and gen_project.py wrote
+    an empty rules block straight over them. DRC ran on KiCad's defaults, which
+    are zero for every width and every non-clearance distance.
+
+    **The net classes carry the same numbers.** gen_project.py had them as
+    literals and gen_pcb.py had them as constants, in two files that cannot
+    import each other, and they agreed because one person typed them twice.
+
+    **The board's own tracks and vias are the declared widths.** Read out of
+    the saved board rather than out of route.py, because what is being checked
+    is what was written -- the same reason the rest of this file reads KiCad's
+    netlist instead of design.py.
+
+    **And the fabricator's published minimums**, via rules.check_fab_class(),
+    so that tightening a number here cannot quietly leave the class the board
+    can be ordered at.
+
+    What this deliberately does *not* check is that the Power net class's
+    0.5 mm track width appears anywhere in the copper. It does not: route.py
+    draws every net at TRACK_MM, rails included, because a 0.5 mm track needs a
+    0.7 mm grid and that grid does not route this board. POWER_TRACK_MM is what
+    a rail is widened to by hand, and saying so here is the alternative to a
+    check that would pass while meaning nothing.
+    """
+    problems = []
+    rules.check_fab_class()
+
+    document = json.loads(project.read_text())
+    declared = gen_project.design_rules()
+    found = document.get("board", {}).get("design_settings", {}).get("rules", {})
+    for key, value in sorted(declared.items()):
+        if key not in found:
+            problems.append(
+                f"the project declares no {key}, so DRC checked it against "
+                f"KiCad's default of zero -- gen_project.design_rules() is "
+                f"what writes it, and gen_pcb.py re-running this file after "
+                f"SaveBoard() is what used to delete it")
+        elif not math.isclose(float(found[key]), value, rel_tol=1e-9):
+            problems.append(
+                f"the project's {key} is {found[key]} and rules.py says "
+                f"{value}")
+
+    classes = {row["name"]: row
+               for row in document.get("net_settings", {}).get("classes", ())}
+    expected = {"Default": (rules.TRACK_MM, rules.CLEARANCE_MM),
+                "Power": (rules.POWER_TRACK_MM, rules.CLEARANCE_MM)}
+    for name, (track, clearance) in sorted(expected.items()):
+        row = classes.get(name)
+        if row is None:
+            problems.append(f"the project has no {name!r} net class")
+            continue
+        for key, value in (("track_width", track), ("clearance", clearance),
+                           ("via_diameter", rules.VIA_DIAMETER_MM),
+                           ("via_drill", rules.VIA_DRILL_MM)):
+            if not math.isclose(float(row.get(key, 0.0)), value, rel_tol=1e-9):
+                problems.append(
+                    f"net class {name!r} has {key} {row.get(key)} and rules.py "
+                    f"says {value}")
+
+    tree = sexp.parse(board.read_text())
+    widths = set()
+    for segment in sexp.find_all(tree, "segment"):
+        widths.add(round(float(sexp.find(segment, "width")[1]), 6))
+    if widths - {round(rules.TRACK_MM, 6)}:
+        problems.append(
+            f"the board carries tracks {sorted(widths)} mm wide and rules.py "
+            f"declares {rules.TRACK_MM} mm -- route.py draws one width")
+    via_sizes = set()
+    for via in sexp.find_all(tree, "via"):
+        size = sexp.find(via, "size")
+        drill = sexp.find(via, "drill")
+        via_sizes.add((round(float(size[1]), 6), round(float(drill[1]), 6)))
+    if via_sizes - {(round(rules.VIA_DIAMETER_MM, 6),
+                     round(rules.VIA_DRILL_MM, 6))}:
+        problems.append(
+            f"the board carries vias {sorted(via_sizes)} and rules.py declares "
+            f"{rules.VIA_DIAMETER_MM}/{rules.VIA_DRILL_MM} mm")
     return problems
 
 
@@ -1060,6 +1219,7 @@ CHECKS = (
     ("   DRC clean, unrouted count declared", check_board, ("drc",)),
     ("   the two pours do not overlap", check_ground_split_on_the_board,
      ("board",)),
+    ("   DRC's rules are rules.py's rules", check_rules, ("project", "board")),
 )
 
 
@@ -1071,7 +1231,7 @@ def main():
                "open_pins": read_open_pins(NETLIST),
                "violations": run_erc(SHEET, ERC),
                "drc": read_drc(PCB, DRC),
-               "board": PCB}
+               "board": PCB, "project": PROJECT}
 
     print(f"verify: {SHEET.name} -> {NETLIST.name}, against "
           f"hardware-spec-v0.md section 5")

@@ -2,7 +2,12 @@
   "board": {
     "design_settings": {
       "drc_exclusions": [],
-      "rules": {}
+      "rules": {
+        "min_clearance": 0.2,
+        "min_track_width": 0.25,
+        "min_via_diameter": 0.6,
+        "min_copper_edge_clearance": 0.3
+      }
     }
   },
   "boards": [],

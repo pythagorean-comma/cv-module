@@ -32,6 +32,7 @@ their own columns spanning the rows they feed -- which is why the columns are
 declared as x positions and the packages as (x, y) pairs.
 """
 
+import math
 import re
 
 import design
@@ -53,18 +54,68 @@ MARGIN = 5.0
 # times over. Separate bands cost nothing in area -- the same rows, in two
 # groups -- and mean a package only ever crosses rows of its own kind.
 
-# Courtyard estimates, width x height in the footprint's own orientation.
-# Approximate, and DRC is the authority: this table exists so that a placement
-# can be iterated in a second rather than in a KiCad round trip, which is the
-# same reason floorplan.COURTYARD exists.
+# Courtyard boxes, width x height in the footprint's own orientation, read off
+# the F.CrtYd outline of each footprint this design names. This table exists so
+# that a placement can be iterated in a second rather than in a KiCad round
+# trip, which is the same reason floorplan.COURTYARD exists.
+#
+# **Centrelines, not KiCad's BBox(), and the difference decides a check.**
+# GetCourtyard().BBox() comes back 0.09 mm larger in each axis on every
+# footprint here -- half a 0.05 mm courtyard line on each side, plus a little
+# from polygonising the corners outward. DRC's courtyards_overlap rule compares
+# the outlines, so the outlines are what check_overlaps() has to compare: with
+# the BBox figures it reports C701 and R901 overlapping by 0.02 mm, on a
+# placement KiCad passes, because it counts one courtyard line twice.
+# COURTYARD_TOLERANCE_MM below is that 0.09 written down once.
+#
+# **Every multi-pin entry here used to be transposed, and the word
+# "approximate" was carrying it.** The table said it was estimates and that DRC
+# was the authority, which is a fair thing to say about a body dimension
+# rounded down by a millimetre -- and it was also being used to excuse
+# SOIC-14 at (9.2, 6.6) when KiCad's courtyard is 7.49 wide and 9.25 tall. A
+# rounded number is approximate. A number on the wrong axis is wrong, and no
+# amount of "DRC is the authority" makes a transposed box a conservative one:
+# it is smaller than the part in one direction.
+#
+# It survived because every consumer was transposed too. check_overlaps()
+# compares these boxes against each other, so two parts modelled sideways
+# collide with each other exactly as they would have upright, and the layout is
+# a grid of rows and columns generous enough that the difference never crossed
+# a threshold. It surfaced the first time a part had to be fitted into a gap --
+# J8, below -- where the model reported a collision that does not exist and
+# hid one that does.
+#
+# The numbers are KiCad's, to two decimals, including the courtyard line width
+# that BBox() includes. check_courtyards() in gen_pcb.py is what now holds them
+# there: it is the only place both this table and the real footprint exist at
+# once.
 SIZE = {
-    "R_0805": (2.4, 1.7), "C_0805": (2.4, 1.7), "C_1210": (4.2, 3.2),
-    "D_SOD-123": (4.0, 2.0), "SOT-23": (3.4, 3.0),
-    "SOIC-8": (5.4, 6.6), "SOIC-14": (9.2, 6.6), "SOIC-16": (10.4, 6.6),
-    "SOIC-20W": (13.4, 10.2),
-    "PinHeader_1x02": (3.2, 6.2), "PinHeader_1x05": (13.4, 6.2),
-    "TestPoint": (2.2, 2.2),
+    "R_0805": (3.36, 1.90), "C_0805": (3.40, 1.96), "C_1210": (4.60, 3.20),
+    "D_SOD-123": (4.70, 2.30), "D_SOD-123F": (4.40, 2.30),
+    "SOT-23": (3.86, 3.40), "SOT-523": (2.30, 2.10),
+    "Relay_DPDT_Omron_G6S-2F": (10.70, 15.30),
+    "SOIC-8": (7.40, 5.40), "SOIC-14": (7.40, 9.16), "SOIC-16": (7.40, 10.40),
+    "SOIC-20W": (11.86, 13.30),
+    "PinHeader_1x02": (3.54, 6.09), "PinHeader_1x05": (3.54, 13.70),
+    "TestPoint": (3.00, 3.00),
 }
+
+# Where a footprint's anchor sits inside its own courtyard, in the footprint's
+# orientation. Zero for everything KiCad centres on the body, and not zero for
+# a pin header, whose anchor is pad 1 at one end -- 5.08 mm for the 1x05, which
+# is two thirds of its length. courtyard() centred every part on its position
+# and so drew the headers 5 mm north of where they are.
+ANCHOR = {"PinHeader_1x02": (0.0, 1.275), "PinHeader_1x05": (0.0, 5.08),
+          # The G6S-2F's courtyard is not quite centred on its anchor.
+          "Relay_DPDT_Omron_G6S-2F": (0.0, -0.05)}
+
+# How far a box above may sit inside the bounding box KiCad computes for the
+# same footprint. Not a fudge factor: it is the courtyard line, measured at
+# 0.045 mm per edge on every one of the twelve footprints this design uses, and
+# 0.06 is that with a little room. gen_pcb.check_courtyards() is the only place
+# both numbers exist at once, and it is what would have caught the transposed
+# entries the first time the board was built.
+COURTYARD_TOLERANCE_MM = 0.06
 
 # West to east, and the order is floorplan.ZONES' own. Each entry is a column
 # of one part per channel; the comment names the zone it implements.
@@ -156,9 +207,12 @@ SHARED = {
     # two DRC violations on the first routed board, and the only ones that were
     # a design fault rather than a router one.
     "R902": (6.0, SPLIT_Y, 270),
-    "K801": (44.0, SPLIT_Y, 0),
-    "K802": (62.0, SPLIT_Y, 0),
-    "K803": (80.0, SPLIT_Y, 0),
+    # 90 degrees, so the long axis runs east-west along the split rather
+    # than across it: at 0 the body is 15.3 mm tall and reaches both the
+    # bypass decoupling row to the north and the pump to the south.
+    "K801": (44.0, SPLIT_Y, 90),
+    "K802": (62.0, SPLIT_Y, 90),
+    "K803": (80.0, SPLIT_Y, 90),
 
     # Zone F south of the line: the pump, the sink and the flybacks. The coils
     # are north of them at the relays; nothing here carries audio.
@@ -172,8 +226,51 @@ SHARED = {
     "D823": (70.0, SPLIT_Y + 10.0, 90),
     "D833": (74.0, SPLIT_Y + 10.0, 90),
 
-    # Zone D2, the connectors, on the south edge where a loom can reach them.
-    "J8": (10.0, SPLIT_Y + 18.0, 0),
+    # **J8 is a straddler and was filed as a connector**, and that is the whole
+    # of this correction. The block above states the rule -- parts that
+    # genuinely span both domains go on the line -- and then lists four of
+    # them; the supply inlet satisfies the condition and was never tested
+    # against it, because it was grouped with J9 to J11 by being a header
+    # rather than by what it carries. It carries VA+, VA-, MAGND, V5 and
+    # MDGND: both rails, both grounds, one part.
+    #
+    # What that cost is one connection, and it is worth naming the exact
+    # mechanism because nothing else on this board can go wrong this way.
+    # stitch_grounds() gives every SMD ground pad a via into its own pour and
+    # skips through-hole pads, on the correct reasoning that a barrel already
+    # crosses every layer. It does -- but it reaches the plane that is *under
+    # it*, and pin 3 is MAGND sitting 18 mm inside the MDGND pour, so the
+    # barrel crossed four layers and met the wrong ground on two of them and
+    # nothing on the other two. **A through-hole pad is already stitched only
+    # if it is in its own pour**, which is _in_pour()'s rule arriving one part
+    # class late. DRC had been reporting it for as long as the board has
+    # existed, inside a count of 67 that nobody could read item by item, which
+    # is the argument for UNROUTED_ITEMS reaching zero rather than getting
+    # smaller.
+    #
+    # Moving the part is the fix rather than stitching it across, and the
+    # reason is CROSSING_RULE, not convenience: a stitch from here would put
+    # the whole board's analogue return current on 19 mm of F.Cu running the
+    # length of the digital zone. MAGND is declared to cross the boundary at
+    # R902, and that declaration is about where the current goes.
+    #
+    # The header runs north-south at rotation 0 with pin 1 at the anchor, so
+    # placing the anchor 7.62 mm north of the line puts VA+, VA- and MAGND in
+    # the analogue pour, MDGND in the digital one, and V5 alone in the 2 mm
+    # gap between them -- which is free, because V5 is routed rather than
+    # poured.
+    #
+    # East, and floorplan.py had already said so: zone P is "the far corner
+    # from A1 and R, with its own local return". A1 is the west column and R
+    # is the reference across the middle, so the far corner is south-east, and
+    # x = 91 is the strip east of K803 with nothing else in it. It also puts
+    # the power loom on the opposite edge from the six audio looms at J1-J6,
+    # which is worth more than the tidiness of having all four headers in a
+    # row was.
+    "J8": (91.0, SPLIT_Y - 7.62, 0),
+
+    # Zone D2, the signal connectors, on the south edge where a loom can reach
+    # them.
     "J9": (26.0, SPLIT_Y + 18.0, 0),
     "J10": (42.0, SPLIT_Y + 18.0, 0),
     "J11": (58.0, SPLIT_Y + 18.0, 0),
@@ -191,10 +288,14 @@ PULLDOWN_Y = SPLIT_Y + 18.0
 # on two pads.
 REFERENCE_MOVES = {"U9": (8.0, 0.0), "U10": (8.0, 0.0)}
 
-# The parts with no footprint, because they are not chosen: their area is
-# reserved rather than placed. gen_pcb.py draws the rectangle.
-RESERVED = {"K801": (14.0, 9.0), "K802": (14.0, 9.0),
-            "K803": (14.0, 9.0)}
+# **Empty, and that is the whole of choosing the last two parts.** This held a
+# 14 x 9 mm envelope for each of the three bypass relays, because
+# design.BYPASS_RELAY was None and an unchosen part still needs its area
+# committed. The G6S-2F is 10.70 x 15.30, so the guess was 1 mm out in one axis
+# and 6 mm out in the other -- turned 90 degrees it is 15.30 wide, and the
+# three still clear each other on the 18 mm spacing below because the guess was
+# wrong in the direction that had room.
+RESERVED = {}
 
 # Rail decoupling, two rows of twelve rather than one of twenty-four: a single
 # row is 84 mm long and would set the board's width on its own.
@@ -321,24 +422,47 @@ def check_placed():
 
 
 def courtyard(ref):
-    """(left, top, right, bottom) for one part, from SIZE and its rotation."""
+    """(left, top, right, bottom) for one part, from SIZE, ANCHOR and rotation.
+
+    `position()` gives the *anchor*, which is what gen_pcb.py hands
+    SetPosition(), and for most footprints that is the middle of the body. For
+    a pin header it is pad 1, so the box has to be offset -- and the offset
+    turns with the part. KiCad's convention, measured rather than assumed:
+    local (x, y) at angle a lands at (x cos a + y sin a, -x sin a + y cos a),
+    so pad 3 of a 1x05 at local (0, 5.08) is at (+5.08, 0) when the part is
+    rotated 90 and (-5.08, 0) at 270.
+    """
     spot = position(ref)
     if spot is None:
         return None
     x, y, rotation = spot
     footprint = design.PARTS[ref].footprint
+    offset = (0.0, 0.0)
     if footprint is None:
         width, height = RESERVED.get(ref, (14.0, 9.0))
     else:
-        for token, size in SIZE.items():
+        # **Longest token first, and that is not tidiness.** These are substring
+        # matches, and "D_SOD-123" is a substring of "D_SOD-123F" -- so with
+        # plain dict order the low-drop clamp at D803 would silently be
+        # measured as the 0.3 mm wider package it replaced, and the only thing
+        # that would ever have said so is gen_pcb.check_courtyards(). Matching
+        # the most specific token means the table can gain a variant without
+        # its position in the dict becoming load-bearing.
+        for token in sorted(SIZE, key=len, reverse=True):
             if token in footprint:
-                width, height = size
+                width, height = SIZE[token]
+                offset = ANCHOR.get(token, (0.0, 0.0))
                 break
         else:
             return None
+    radians = math.radians(rotation)
+    cosine, sine = math.cos(radians), math.sin(radians)
+    centre_x = x + offset[0] * cosine + offset[1] * sine
+    centre_y = y - offset[0] * sine + offset[1] * cosine
     if rotation % 180:
         width, height = height, width
-    return (x - width / 2, y - height / 2, x + width / 2, y + height / 2)
+    return (centre_x - width / 2, centre_y - height / 2,
+            centre_x + width / 2, centre_y + height / 2)
 
 
 def check_overlaps():

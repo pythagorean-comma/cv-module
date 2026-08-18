@@ -116,6 +116,24 @@ MEASURED = {
                    "anti-AM filter and a sharper click, and 00-current-state "
                    "puts this block at 15-20 dB of the whole noise argument."),
 
+    "env_opamp_iq": Assumption(
+        value=2.5, units=" mA/amplifier, TL074 quiescent, maximum",
+        low=1.125, high=2.8,
+        question="What is the plain TL074's maximum quiescent current per "
+                 "amplifier? SLOS080W is a combined TL071/72/74 document and "
+                 "the pages walked in this session carry the TL07x*H* grade "
+                 "(937.5 uA typ, 1125 uA max); the plain grade's own row was "
+                 "not located. The 1.4 mA typical this repo carries is "
+                 "unsourced.",
+        sets="8 amplifiers of the 40 on VA+/VA-, so about 8 mA on a rail "
+             "supply_load() puts at 110 mA maximum",
+        when_wrong="The bipolar rails move by at most 11 mA either way, which "
+                   "is inside any sensible margin on a DC-DC that has not been "
+                   "chosen. It is declared rather than resolved because a "
+                   "supply sized on an invented maximum is exactly what "
+                   "section 6 forbids, and because fitting the H grade -- "
+                   "which is read -- would settle it by choosing a part."),
+
     "servo_vos": Assumption(
         value=0.5e-3, units=" V, servo amplifier input offset",
         low=0.05e-3, high=3.0e-3,
@@ -681,6 +699,24 @@ ENV_OPAMP_VOS = 3.0e-3                # typical; 10 mV maximum
 ENV_SECTIONS_NEEDED = CHANNELS
 ENV_QUADS = -(-ENV_SECTIONS_NEEDED // OPAMP_SECTIONS)
 ENV_PACKAGES_REFS = tuple(f"U{13 + i}" for i in range(ENV_QUADS))
+
+# The audio-path quads, U1 to U8. Declared beside the envelope's own tuple
+# because supply_load() counts packages off the netlist and needs to know which
+# refs are quads rather than inferring it from a prefix.
+OPAMP_PACKAGES_REFS = tuple(f"U{1 + i}" for i in range(OPAMP_QUADS))
+
+# Spec section 1.1's rule, as a number: |f_module - 45 kHz| > 20 kHz because the
+# mixer already runs a 45 kHz charge pump and a VCA is a multiplier, so two
+# supply ripples intermodulate into the audio band. That gives f > 65 kHz; the
+# target the decision settles on is 300 kHz, which puts the beat at 255 kHz and
+# is easy to filter. See docs/supply-decision.md section 2.
+SUPPLY_MIN_KHZ = 300.0
+
+# MAX6126 supply current, from the datasheet REF_PINS was read out of
+# (19-2647 Rev 8): 400 uA typ, 550 uA max, no load. Small against three relay
+# coils and counted rather than dropped, because "small" is a judgement and a
+# sum is not.
+VREF_SUPPLY_MA = (0.4, 0.55)
 
 
 def front_end():
@@ -1781,12 +1817,42 @@ def fail_states():
 # coil is 25-40 mA; three of them is 75-120 mA held for as long as the module is
 # working, against about 55 mA for every amplifier and VCA on the board. See
 # coil_budget() -- it is a requirement on the deferred supply, not a detail.
-BYPASS_RELAY = None                    # see UNSPECIFIED; the pins are pinned
-BYPASS_FET = None
+# **Chosen, and the choice is a reading rather than a preference.** Omron G6S-2
+# DC5: DPDT, single-side stable -- which is Omron's name for non-latching, and
+# the property the whole block turns on -- fully sealed, in the surface-mount
+# G6S-2F body. From the ratings table on page 2 of its data sheet, at 5 VDC:
+# 28.1 mA of coil, 178 ohm, must-operate 75 % max of rated and must-release
+# 10 % min, which is 3.75 V and 0.5 V.
+#
+# The contact material is the part of the table that decides it for audio and
+# it is not the part anybody would think to filter on: **bifurcated crossbar,
+# Ag (Au-Alloy)**. Two contact points per pole in parallel and a gold alloy over
+# them, which is what makes a relay usable at the microvolts a guitar string
+# produces -- a plain silver contact needs a wetting current this signal path
+# will never provide, and its failure mode is intermittent and looks like a bad
+# solder joint.
+BYPASS_RELAY = "G6S-2 DC5"
+# **SOT-523 and the spec said SOT-23**, which is worth being explicit about
+# because the package was the one part of that requirement nobody had derived.
+# UNSPECIFIED filtered on Vgs(th) <= 1.0 V and Id >= 200 mA, both computed, and
+# then named a package out of habit. Diodes DMG1012T (DS31783 Rev. 8-2) meets
+# the two derived filters -- Vgs(th) 0.5 to 1.0 V, Id 0.63 A at 25 C -- and
+# meets them with the row that actually matters here:
+#
+#     R_DS(on) at V_GS = 1.8 V, I_D = 350 mA:  0.5 ohm typ, 0.7 ohm max
+#
+# **1.8 V is the number pump_timing() computes**, to two decimal places, and
+# this is the only candidate whose data sheet characterises it there rather
+# than leaving a curve to be read at the one gate voltage this circuit can
+# produce. A part specified only at 4.5 V would have been a guess about the
+# region the design lives in. The package followed the electrical filter, which
+# is the right way round.
+BYPASS_FET = "DMG1012T"
 BYPASS_RELAYS = 3
 BYPASS_POLES_EACH = 2
 BYPASS_COIL_V = 5.0                    # V5 exists in RAILS; the coil must suit
-BYPASS_COIL_MA = (25.0, 40.0)          # envelope for a 5 V signal DPDT, not read
+BYPASS_COIL_OHMS = 178.0               # G6S data sheet page 2, at 5 VDC
+BYPASS_COIL_MA = (28.1 * 0.9, 28.1 * 1.1)   # read, +-10% per the table's note 1
 BYPASS_TRANSFER_MS = 5.0               # section 4.5's own figure
 
 # The pump, and every value here is set by an inequality rather than preferred.
@@ -1877,9 +1943,13 @@ def coil_budget():
     """
     low, high = BYPASS_COIL_MA
     quads = OPAMP_QUADS + ENV_QUADS
-    # OPA1644 is 1.7 mA per section typical; the TL074 is 1.4. Both are quoted
-    # per amplifier, and this is the only place the two are added up.
-    amplifiers = (OPAMP_QUADS * 4 * 1.7) + (ENV_QUADS * 4 * 1.4)
+    # **1.7 mA was here and no row of the OPA1644's table says 1.7.** Its
+    # POWER SUPPLY section gives 1.8 mA typical per amplifier and 2.3 maximum
+    # (SBOS484D page 8); the figure used here matched neither. Both constants
+    # come from OPAMP_IQ_MA and ENV_OPAMP_IQ_MA now, so this and supply_load()
+    # cannot quote different numbers for the same amplifiers -- which they did.
+    amplifiers = (OPAMP_QUADS * OPAMP_SECTIONS * OPAMP_IQ_MA[0]
+                  + ENV_QUADS * OPAMP_SECTIONS * ENV_OPAMP_IQ_MA[0])
     vcas = VCA_PACKAGES * VCA_SUPPLY_MA
     return {
         "relays": BYPASS_RELAYS,
@@ -1891,6 +1961,115 @@ def coil_budget():
         "quads": quads,
         "ratio": (low + high) / 2 * BYPASS_RELAYS / (amplifiers + vcas),
         "rail": "V5",
+    }
+
+
+# What each amplifier costs its rails, typical and maximum. **The pair matters
+# and the repo only had one half of it**: coil_budget() computed the board's
+# draw from typicals alone, which is the right number for "what does the module
+# dissipate" and the wrong one for "what must the supply deliver". A supply is
+# sized on maxima, and the two differ here by 41 %.
+#
+# OPA1644, SBOS484D page 8, POWER SUPPLY: quiescent current per amplifier,
+# I_OUT = 0 A -- 1.8 mA typ, 2.3 mA max. Read first-hand. **This corrects the
+# 1.7 mA that coil_budget() carried**, which matched no row of that table.
+OPAMP_IQ_MA = (1.8, 2.3)
+
+# TL074, and **this is the one figure in the supply arithmetic that is not
+# read.** SLOS080W (July 2025) is a combined TL071/72/74 document; the pages
+# walked in this session carry the TL07x**H** grade at 937.5 uA typ and
+# 1125 uA max per amplifier, and the plain grade's own row was not located. The
+# 1.4 mA typical below is the figure the repo already carried, unsourced. The
+# maximum is declared as an envelope rather than invented precisely, and it is
+# deliberately the pessimistic end: MEASURED["env_opamp_iq"] holds the range.
+#
+# It is 8 amplifiers of 40, so the whole uncertainty is 8 mA on a rail carrying
+# about 110 -- worth declaring, not worth blocking on.
+ENV_OPAMP_IQ_MA = (1.4, 2.5)
+
+
+def supply_load():
+    """What each rail must deliver, counted off the netlist rather than a table.
+
+    **Counted, because the alternative drifted.** coil_budget() multiplies
+    OPAMP_QUADS and ENV_QUADS by a per-section figure, and those constants are
+    derived from how many sections the design *needs* -- not from how many
+    packages are on the sheet. The two agree today and nothing holds them
+    together. This walks pin_owner(), so a package added to a rail appears here
+    whether or not anybody updated a count.
+
+    Returns typical and maximum milliamps per rail. The maximum is the number a
+    DC-DC is chosen against; the typical is the number the board dissipates.
+    """
+    owner = DESIGN.pin_owner()
+    on_rail = {}
+    for (ref, _), net in owner.items():
+        on_rail.setdefault(net, set()).add(ref)
+
+    def quads(rail, refs):
+        return sorted(r for r in on_rail.get(rail, ()) if r in refs)
+
+    opamps = quads("VA+", set(OPAMP_PACKAGES_REFS))
+    envs = quads("VA+", set(ENV_PACKAGES_REFS))
+    vcas = quads("VA+", set(VCA_PACKAGES_REFS))
+    coils = sorted(on_rail.get("V5", set()) & set(BYPASS_RELAY_REFS))
+
+    bipolar_typ = (len(opamps) * OPAMP_SECTIONS * OPAMP_IQ_MA[0]
+                   + len(envs) * OPAMP_SECTIONS * ENV_OPAMP_IQ_MA[0]
+                   + len(vcas) * VCA_SUPPLY_MA)
+    bipolar_max = (len(opamps) * OPAMP_SECTIONS * OPAMP_IQ_MA[1]
+                   + len(envs) * OPAMP_SECTIONS * ENV_OPAMP_IQ_MA[1]
+                   + len(vcas) * VCA_SUPPLY_MA_MAX)
+    coil_typ, coil_max = (BYPASS_COIL_MA[0] * len(coils),
+                          BYPASS_COIL_MA[1] * len(coils))
+    return {
+        "VA+": {"typ_ma": bipolar_typ, "max_ma": bipolar_max,
+                "volts": RAILS["VA+"], "parts": opamps + envs + vcas},
+        "VA-": {"typ_ma": bipolar_typ, "max_ma": bipolar_max,
+                "volts": RAILS["VA-"], "parts": opamps + envs + vcas},
+        # The reference is on V5 and its own draw is small against three coils;
+        # it is counted at its datasheet maximum rather than omitted.
+        "V5": {"typ_ma": coil_typ + VREF_SUPPLY_MA[0],
+               "max_ma": coil_max + VREF_SUPPLY_MA[1],
+               "volts": RAILS["V5"], "parts": coils + [REF_REF]},
+    }
+
+
+def supply_requirement():
+    """The DC-DC this board needs, as numbers rather than as a topology.
+
+    Spec section 1.1 decided the topology -- one DC inlet, an isolated DC-DC at
+    >= 300 kHz -- and left the sizing to a table in supply-decision.md that
+    predates the schematic. **That table says "~44 mA per rail" for the bipolar
+    domain and the board draws 110 mA maximum**, which is not a small error and
+    has a specific cause worth recording rather than patching.
+
+    The document's own argument was that the CV filters and the envelope
+    rectifiers should run single-supply off +5 V, precisely so the negative rail
+    would stay small -- "the temptation will be to run everything bipolar
+    because it's simpler to think about. Resist it." The schematic did not
+    resist it: U7, U8, U13 and U14 are all on VA+/VA-, which is 16 amplifiers
+    of the 40.
+
+    **And the reason the advice stopped applying is in the same document.** The
+    44 mA figure existed to make a *charge pump* viable -- "at 100 mA a charge
+    pump would have been out; at 44 mA it is comfortable". The decision that
+    document reaches is an isolated DC-DC, which does not care. So running the
+    CV and envelope stages bipolar is defensible, and nobody wrote down that the
+    constraint it violated had been retired. That is the gap this function
+    closes: the number is now derived from what is drawn.
+    """
+    load = supply_load()
+    watts = sum(abs(rail["volts"]) * rail["max_ma"] * 1e-3
+                for rail in load.values())
+    return {
+        "load": load,
+        "rails": {"VA+": RAILS["VA+"], "VA-": RAILS["VA-"], "V5": RAILS["V5"]},
+        "isolated": True,
+        "min_khz": SUPPLY_MIN_KHZ,
+        "watts_max": watts,
+        "doc_estimate_ma": 44.0,
+        "largest_single_load": "three relay coils on V5, 93 mA",
     }
 
 
@@ -1941,26 +2120,164 @@ def bypass_state():
 # round off. What the clamp buys is not comfort, it is the difference between a
 # fault that overloads the whole mono mix and one that sits at the edge of the
 # design's own envelope.
-CLAMP_DIODE = "BAT54"
-CLAMP_VF = 0.3
+#
+# ---------------------------------------------------------------------------
+# **The 0.3 V was never read, and reading it broke the clamp.** This constant
+# was `CLAMP_VF = 0.3` with a BAT54 behind it, and ASSUMPTIONS.md's own entry
+# said the basis was "a BAT54-class part at the microamps this circuit draws,
+# and no datasheet was opened this session". Both halves of that turned out to
+# be wrong in different ways, and the second is the one that matters.
+#
+# **It is not microamps.** D803's anode is U8's output pin -- floorplan.py puts
+# it there deliberately, "what it clamps is that amplifier and a long run would
+# clamp the trace instead" -- so when the loop breaks, the diode carries
+# whatever the amplifier can source. The OPA1644's own figure, read first-hand
+# from SBOS484D page 8, is I_SC = 36 mA sourcing. Three orders of magnitude
+# above the assumption, and in the direction that costs forward drop.
+#
+# **And no series resistor rescues it**, which is the part worth keeping
+# because it is the reason a part change is the only fix. Put R between U8 and
+# VREFN and both the normal 682 uA and the fault current flow through it, so
+# their ratio is fixed by the voltage ratio alone:
+#
+#     I_fault / I_normal = (V_sat - Vf) / VREF = 11.65 / 2.5 = 4.54x
+#
+# R cancels. The best case is R large enough to sit the amplifier on its own
+# negative rail in normal operation -- unusable -- and even that only reaches
+# 846 uA. clamp_current() has the arithmetic.
+#
+# So the requirement is a part: **Vf <= 0.32 V at 36 mA**, which is what
+# clamp_gain() shows the mixer's 7.84 dB of headroom will take. The BAT54 is a
+# 200 mA diode and its own table says 500 mV max at 30 mA -- 13.4 dB, over by
+# 5.5 dB. The clamp did not work, and every instrument in this repo agreed it
+# did, because all of them read CLAMP_VF.
+CLAMP_DIODE = "PMEG2010AEH"
+
+# **One constant used to name three different jobs**, and splitting it is half
+# of this correction. `CLAMP_DIODE = "BAT54"` was fitted at D801/D802 (the
+# pump), D8{1,2,3}3 (the coil flybacks) and D803 (the clamp) alike, so a part
+# change for one of them was a part change for all three -- and the three want
+# opposite things. The pump wants low leakage and does not care about drop; the
+# clamp wants low drop at 36 mA and does not care about leakage; the flybacks
+# care about neither. The BAT54 stays where its leakage is what is wanted.
+PUMP_DIODE = "BAT54"
+FLYBACK_DIODE = "BAT54"
+
+# OPA1644, SBOS484D page 8: "Voltage output swing from rail ... (V-)+0.35" at
+# RL = 2 kohm. The pessimistic row of the two, deliberately -- the other is
+# 0.2 V at RL = 10 kohm, and headroom arithmetic wants the bad number.
+OPAMP_SWING_HEADROOM = 0.35
+
+# Nexperia PMEG2010AEH, 20 V 1 A "very low VF" trench Schottky in SOD123F, data
+# sheet of 8 October 2024, Table 7, Tamb = 25 C, all **maxima** rather than
+# typicals:
+#
+#     IF          10 mA    100 mA     1 A
+#     VF max      220 mV   290 mV     430 mV
+#
+# A 1 A die run at 36 mA is the whole trick: same conduction, a thirtieth of
+# the current density. Leakage is the price -- 50 uA max at VR = 5 V against
+# the BAT54's 2 uA -- and it is free *here*, because D803's reverse leakage
+# lands on VREFN, which is a driven node inside U8's feedback loop, so the
+# amplifier absorbs it and the reference does not move. It would not be free in
+# the pump, where the same leakage would discharge the hold capacitor; see
+# PUMP_DIODE.
+CLAMP_VF_TABLE = ((10e-3, 0.220), (100e-3, 0.290), (1.0, 0.430))
+
+# OPA1644, SBOS484D page 8, OUTPUT section: I_SC source 36 mA. The sink figure
+# is -30 mA and is not the one that matters -- the fault drives VREFN positive.
+OPAMP_ISC_SOURCE = 36e-3
 
 
-def clamp_gain():
-    """What the VREFN clamp turns the fail-loud path into."""
+def _schottky_vf(current, table):
+    """Forward drop at a current, log-interpolated between datasheet points.
+
+    Between two tabulated points a Schottky's drop is close to linear in
+    log(I), which is what makes interpolation legitimate here rather than a
+    curve nobody read. **Points from the datasheet only** -- the function
+    refuses to run off the end of the table instead of extrapolating, because
+    an extrapolated Schottky drop is exactly the kind of plausible number
+    section 6 of the spec exists to forbid.
+    """
+    if current <= table[0][0]:
+        return table[0][1]
+    for (i0, v0), (i1, v1) in zip(table, table[1:]):
+        if current <= i1:
+            return v0 + (v1 - v0) * math.log10(current / i0) / math.log10(i1 / i0)
+    raise ValueError(
+        f"{current * 1e3:.1f} mA is off the end of a forward-voltage table "
+        f"that stops at {table[-1][0] * 1e3:.0f} mA -- read the datasheet "
+        f"further rather than extrapolating")
+
+
+def clamp_current(r_series=0.0):
+    """What D803 carries on the fault, and why a resistor cannot reduce it.
+
+    `r_series` is a resistor between U8's output and VREFN, which is the
+    obvious fix and does not work. Both the normal reference load and the fault
+    current cross it, so their ratio is set by the voltage ratio alone and R
+    cancels out of it. The only thing R buys is how far the amplifier has to
+    swing in normal operation, and it runs out of swing long before the fault
+    current is small enough to matter.
+    """
+    v_sat = MODULE_RAIL - OPAMP_SWING_HEADROOM
+    normal = CHANNELS * VREF / CV_ROFF_OHMS
+    if r_series <= 0.0:
+        return {"amps": OPAMP_ISC_SOURCE, "normal_amps": normal,
+                "limited_by": "the amplifier's own short-circuit current",
+                "normal_drop_v": 0.0}
+    drop = normal * r_series
+    return {
+        "amps": min(OPAMP_ISC_SOURCE,
+                    (v_sat - _schottky_vf(1e-3, CLAMP_VF_TABLE)) / r_series),
+        "normal_amps": normal,
+        "limited_by": f"{r_series / 1e3:.1f} k in series",
+        "normal_drop_v": drop,
+        "fits_swing": drop + VREF <= v_sat,
+    }
+
+
+def clamp_gain(r_series=0.0):
+    """What the VREFN clamp turns the fail-loud path into.
+
+    The clamped figure is now computed from the diode's own datasheet at the
+    current it actually carries, rather than from a constant. That is the whole
+    of this correction: the number used to be an input and is now a result.
+    """
     filt = cv_filter()
+    fault = clamp_current(r_series)
+    vf = _schottky_vf(fault["amps"], CLAMP_VF_TABLE)
     unclamped = -(filt["gain"] / CV_ROFF_OHMS * CV_R1_OHMS) * MODULE_RAIL
-    clamped = -(filt["gain"] / CV_ROFF_OHMS * CV_R1_OHMS) * CLAMP_VF
+    clamped = -(filt["gain"] / CV_ROFF_OHMS * CV_R1_OHMS) * vf
     headroom = 20 * math.log10(
         socket.clipping_peak() / socket.MEASURED["channel_peak"].value)
     return {
+        "clamp_amps": fault["amps"],
+        "clamp_vf": vf,
         "unclamped_vc": unclamped,
         "unclamped_db": max(min(control_law(unclamped), GAIN_MAX_DB),
                             GAIN_MIN_DB),
         "clamped_vc": clamped,
         "clamped_db": control_law(clamped),
         "headroom_db": headroom,
+        "margin_db": headroom - control_law(clamped),
         "fits": control_law(clamped) < headroom,
     }
+
+
+def clamp_vf_ceiling():
+    """The largest forward drop the mixer's headroom will accept. A requirement.
+
+    Stated as a function because it is what filters the part: any Schottky
+    whose datasheet maximum at clamp_current() is under this figure will do,
+    and one whose is not, will not. It is 0.32 V, which is a BAT54 at 1 mA and
+    a PMEG2010AEH at rather more than the 36 mA this circuit asks of it.
+    """
+    filt = cv_filter()
+    per_volt = control_law(-(filt["gain"] / CV_ROFF_OHMS * CV_R1_OHMS) * 1.0)
+    headroom = 20 * math.log10(
+        socket.clipping_peak() / socket.MEASURED["channel_peak"].value)
+    return headroom / per_volt
 
 
 # ---------------------------------------------------------------------------
@@ -2023,9 +2340,32 @@ LOGIC_REF = "U11"
 # de-energised has to be bypass -- see BYPASS_RELAYS. So the coil is A1/A2 and
 # there is no B pair, which is the whole difference between the two parts
 # expressed in a dict.
-RELAY_PINS = {"COIL+": "A1", "COIL-": "A2",
-              "COM_A": "11", "NC_A": "12", "NO_A": "14",
-              "COM_B": "21", "NC_B": "22", "NO_B": "24"}
+# **And now the part is chosen, so the standard is not the map any more.**
+# IEC 60947 numbering was the right thing to write while BYPASS_RELAY was None:
+# it named a convention instead of guessing a manufacturer's pinout. What it
+# was never going to be is the pin numbers on a real relay, and the G6S's are
+# its own -- 1, 3, 4, 5, 8, 9, 10, 12, with three positions of the twelve left
+# empty. Read off the Terminal Arrangement/Internal Connections diagram on
+# page 5 of Omron's own G6S data sheet, top view, single-side stable:
+#
+#            12 (-)      10    9    8         coil across 1 and 12
+#            [coil]       \    o    /         pole A pivots at 9
+#             1 (+)        3    4    5        pole B pivots at 4
+#
+# **The de-energised state is the one drawn**, which is what makes this map
+# check out against bypass_state(): the blade hangs from the pivot and rests on
+# the *outer left* contact, so 9-10 and 4-3 are closed with no coil current.
+# Those are the NC pair and they are the ones that must carry the link back to
+# the mixer. If they were the other way round the module would be in circuit
+# when it was dead, which is the failure this whole block exists to prevent and
+# is not visible in any netlist -- it is visible only in that drawing.
+#
+# The coil is polarised and the diagram marks it: pin 1 is +, pin 12 is -.
+# V5 goes to 1 and the sink to 12, which is also what puts the flyback diode
+# the right way round.
+RELAY_PINS = {"COIL+": "1", "COIL-": "12",
+              "COM_A": "9", "NC_A": "10", "NO_A": "8",
+              "COM_B": "4", "NC_B": "3", "NO_B": "5"}
 
 # Which relay and which pole carries each channel. Three DPDT, two channels
 # each, and the arithmetic is here rather than at the connect site so that
@@ -2183,6 +2523,36 @@ def _set_property(definition, key, value):
             item[2] = value
 
 
+def _renumber(definition, mapping):
+    """Renumber a borrowed symbol's pins, all at once.
+
+    **All at once, and that is the whole of it.** The map from IEC contact
+    numbers to the G6S's own has "12" on both sides -- it is the IEC coil's A2
+    and it is the relay's NC on pole A -- so renumbering pin by pin renames one
+    pin and then matches the renamed one. Collecting every pin first and
+    assigning afterwards is what makes the mapping a permutation rather than a
+    sequence of substitutions.
+    """
+    pins = []
+    for unit in definition:
+        if not (isinstance(unit, list) and str(unit[0]) == "symbol"):
+            continue
+        for pin in unit:
+            if not (isinstance(pin, list) and str(pin[0]) == "pin"):
+                continue
+            for item in pin:
+                if isinstance(item, list) and str(item[0]) == "number":
+                    pins.append((str(item[1]), item))
+    missing = sorted(set(mapping) - {number for number, _ in pins})
+    if missing:
+        raise AssertionError(
+            f"the symbol has no pins {missing}, which the renumbering map "
+            f"names -- the borrowed symbol has changed under this patch")
+    for number, item in pins:
+        if number in mapping:
+            item[1] = type(item[1])(mapping[number])
+
+
 def _repin(definition, number, kind, name=None):
     """Change a pin's electrical type, and its name if given, in place.
 
@@ -2260,6 +2630,28 @@ def patch_symbol(lib_id, definition):
                       "Quad current-in/current-out VCA, Blackmer core, SOP-16")
         for cell in VCA_CHANNEL_PINS.values():
             _repin(definition, cell["IOUT"], "passive")
+    elif lib_id.endswith(":Relay"):
+        # **The generic symbol is IEC-numbered and the chosen relay is not.**
+        # KiCad's Relay_DPDT carries A1/A2 and 11/12/14, 21/22/24, which was
+        # exactly right while BYPASS_RELAY was None: it named the standard
+        # instead of guessing a manufacturer. The G6S numbers its terminals
+        # 1/12 for the coil and 9/10/8, 4/3/5 for the poles, so the symbol has
+        # to be renumbered or the sheet and the footprint describe different
+        # parts -- and verify.py compares pin by pin precisely so that they
+        # cannot.
+        #
+        # Renumbering rather than substituting a G6S-specific symbol, because
+        # there is not one in KiCad's libraries and drawing one would be a
+        # second place for the pin map to be wrong. RELAY_PINS stays the single
+        # copy; this maps the borrowed symbol onto it.
+        _set_property(definition, "Description",
+                      "DPDT signal relay, single-side stable, "
+                      "bifurcated Au-alloy contacts")
+        _renumber(definition, {
+            iec: RELAY_PINS[role]
+            for role, iec in (("COIL+", "A1"), ("COIL-", "A2"),
+                              ("COM_A", "11"), ("NC_A", "12"), ("NO_A", "14"),
+                              ("COM_B", "21"), ("NC_B", "22"), ("NO_B", "24"))})
     return definition
 
 R_FP = "Resistor_SMD:R_0805_2012Metric"
@@ -2270,6 +2662,14 @@ SOIC14_FP = "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm"
 SOP16_FP = "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm"
 SOIC20_FP = "Package_SO:SOIC-20W_7.5x12.8mm_P1.27mm"
 SOD123_FP = "Diode_SMD:D_SOD-123"
+# SOD123F, the PMEG2010AEH's package: 4.40 mm of courtyard against
+# SOD-123's 4.70, so the low-drop clamp drops into the slot the BAT54
+# was placed in and no row moves.
+SOD123F_FP = "Diode_SMD:D_SOD-123F"
+# The DMG1012T's package and the G6S-2F's. Both arrived with the two parts
+# that were UNSPECIFIED; neither was a free choice.
+SOT523_FP = "Package_TO_SOT_SMD:SOT-523"
+RELAY_FP = "Relay_SMD:Relay_DPDT_Omron_G6S-2F"
 SOT23_FP = "Package_TO_SOT_SMD:SOT-23"
 LOOM_FP = socket.CHANNEL_POT_FP          # the mixer's own 1x03, mirrored
 PAD_FP = "TestPoint:TestPoint_Pad_D2.0mm"
@@ -2298,7 +2698,10 @@ ORDER_CODES = {
     OPAMP:            "OPA1644AIDR",
     PUMP_C:           "GRM2165C1H222JA01D",
     PUMP_HOLD_C:      "GRM21BR71C105KA01L",
-    CLAMP_DIODE:      "BAT54-7-F",
+    PUMP_DIODE:       "BAT54-7-F",
+    CLAMP_DIODE:      "PMEG2010AEH,115",
+    BYPASS_RELAY:     "G6S-2 DC5",
+    BYPASS_FET:       "DMG1012T-7",
     ENV_OPAMP:        "TL074CDR",
     ENV_DIODE:        "1N4148WS-7-F",
     "10k 1%":         "RC0805FR-0710KL",
@@ -2320,24 +2723,19 @@ ORDER_CODES = {
 # here now, and both are declared by the property that filters them rather than
 # by a guess at a part number -- which is section 6 obeyed rather than worked
 # around.
-UNSPECIFIED = {
-    BYPASS_RELAY: "non-latching signal DPDT, 5 V coil, IEC 60947 contact "
-                  "numbering, and every word of that is derived. Non-latching "
-                  "because de-energised must *be* bypass; DPDT because six "
-                  "changeovers is three parts; 5 V because that is the rail "
-                  "this module has; IEC because the pin map is pinned and the "
-                  "part is not -- see RELAY_PINS. What is not derivable is the "
-                  "coil current, which is a property of the part and which "
-                  "coil_budget() therefore states as an envelope.",
-    BYPASS_FET: "logic-level N-channel MOSFET, SOT-23, with Vgs(th) at most "
-                f"{FET_VGSTH_MAX:.1f} V and at least {FET_ID_MIN * 1e3:.0f} mA "
-                "of drain current. The threshold is the binding one and it is "
-                "computed: pump_timing() says the gate can only ever reach "
-                "1.83 V, because a two-diode pump off a 3.3 V GPIO gives "
-                "3.3 - 2*Vf and the bleed resistor divides that against the "
-                "pump's own source impedance. A 2.5 V-threshold part will not "
-                "turn on at all.",
-}
+# **Empty, and it held one entry when it should have held two.** The dict is
+# keyed by a part's *value*, and an unchosen part's value is None -- so
+# BYPASS_RELAY and BYPASS_FET were the same key and the relay's requirement,
+# every word of it derived, was overwritten at import for the life of the
+# block. Nothing noticed: every consumer asks `value not in UNSPECIFIED`, and a
+# membership test is answered just as well by one entry as by two. The pin map,
+# the reserved courtyards and the coil budget all came from elsewhere, so the
+# only thing lost was the declaration, which is the only part a person reads.
+#
+# Choosing both parts settles it rather than fixing it, and the shape of the
+# bug is worth keeping written down: **a dict keyed by the thing that is
+# missing collapses exactly when it is carrying the most.**
+UNSPECIFIED = {}
 
 # Pins deliberately left unconnected, declared beside the circuit rather than
 # buried in the checker -- the mixer's NO_CONNECT, same argument.
@@ -2925,12 +3323,12 @@ def fail_safe(design):
                description="Fail-safe pump: the AC coupling that makes a "
                            "stuck level -- high, low or hi-Z -- indistinguish"
                            "able from a dead MCU")
-    design.add(Part("D801", CLAMP_DIODE, SOD123_FP,
+    design.add(Part("D801", PUMP_DIODE, SOD123_FP,
                     description="Fail-safe pump clamp: anode MDGND, cathode "
                                 "FSAC"))
     design.connect("MDGND", ("D801", DIODE_PINS["A"]))
     design.connect("FSAC", ("D801", DIODE_PINS["K"]))
-    design.add(Part("D802", CLAMP_DIODE, SOD123_FP,
+    design.add(Part("D802", PUMP_DIODE, SOD123_FP,
                     description="Fail-safe pump rectifier: anode FSAC, cathode "
                                 "FSG"))
     design.connect("FSAC", ("D802", DIODE_PINS["A"]))
@@ -2942,7 +3340,7 @@ def fail_safe(design):
     _resistor(design, "R803", PUMP_BLEED_R, "FSG", "MDGND",
               description="Fail-safe bleed -- sets t_off, see pump_timing()")
 
-    design.add(Part(FET_REF, BYPASS_FET, SOT23_FP,
+    design.add(Part(FET_REF, BYPASS_FET, SOT523_FP,
                     description="Fail-safe sink: gate on the pump, drain on "
                                 "the coils, source on MDGND"))
     design.connect("FSG", (FET_REF, FET_PINS["G"]))
@@ -2953,14 +3351,14 @@ def fail_safe(design):
     # diode -- the coil is the only inductor on this board and the FET is the
     # only thing that switches it off.
     for index, ref in enumerate(BYPASS_RELAY_REFS, start=1):
-        design.add(Part(ref, BYPASS_RELAY, None, units=1,
+        design.add(Part(ref, BYPASS_RELAY, RELAY_FP, units=1,
                         description=f"Bypass relay {index} of {BYPASS_RELAYS}: "
                                     f"non-latching DPDT, de-energised is "
                                     f"bypass; contacts carry channel audio"))
         design.connect("V5", (ref, RELAY_PINS["COIL+"]))
         design.connect("FSD", (ref, RELAY_PINS["COIL-"]))
         diode = f"D{80 + index}3"
-        design.add(Part(diode, CLAMP_DIODE, SOD123_FP,
+        design.add(Part(diode, FLYBACK_DIODE, SOD123_FP,
                         description=f"{ref} coil flyback: anode FSD, cathode "
                                     f"V5"))
         design.connect("FSD", (diode, DIODE_PINS["A"]))
@@ -2971,7 +3369,7 @@ def fail_safe(design):
     # nothing; conducting at +0.3 V if the inverter's output heads for the
     # rail. See clamp_gain(): +20 dB becomes +7.4 dB, which the mixer's own
     # headroom covers and +20 dB does not.
-    design.add(Part("D803", CLAMP_DIODE, SOD123_FP,
+    design.add(Part("D803", CLAMP_DIODE, SOD123F_FP,
                     description="Reference inverter clamp: anode VREFN, "
                                 "cathode MAGND. Reverse-biased in normal "
                                 "operation"))
@@ -3638,6 +4036,19 @@ def _report():
     print(f"  coils cost            {c['low_ma']:>3.0f}-{c['high_ma']:.0f} mA  "
           f"continuous on {c['rail']}, against {c['rest_ma']:.0f} mA for every "
           f"amplifier and VCA ({c['ratio']:.1f}x)")
+    print()
+
+    supply = supply_requirement()
+    print("the supply -- what the deferred DC-DC has to deliver")
+    for name, rail in supply["load"].items():
+        print(f"  {name:<4} {rail['volts']:>+6.1f} V   "
+              f"typ {rail['typ_ma']:>5.1f} mA   max {rail['max_ma']:>5.1f} mA   "
+              f"({len(rail['parts'])} parts, counted off the netlist)")
+    print(f"  isolated, >= {supply['min_khz']:.0f} kHz, "
+          f"{supply['watts_max']:.2f} W at maximum")
+    print(f"  supply-decision.md estimated {supply['doc_estimate_ma']:.0f} mA "
+          f"per bipolar rail and the board draws "
+          f"{supply['load']['VA+']['max_ma']:.0f}: see supply_requirement()")
     print()
 
     print("assumptions still open here")

@@ -31,6 +31,7 @@ Every mutation below is a real fault rather than a synthetic one:
 
 import contextlib
 import copy
+import json
 import pathlib
 import sys
 import tempfile
@@ -64,7 +65,7 @@ def _design_restored():
     """
     saved = {name: copy.deepcopy(getattr(design, name))
              for name in ("NETS", "LOOM", "DEFERRED_PINS", "DEFERRED",
-                          "NO_CONNECT", "VCA_ROUT_OHMS")}
+                          "NO_CONNECT", "VCA_ROUT_OHMS", "CLAMP_VF_TABLE")}
     try:
         yield
     finally:
@@ -85,6 +86,69 @@ def _run(check, context):
         if function is check:
             return function(*[context[a] for a in args])
     raise KeyError(check)
+
+
+class _Watched(set):
+    """One net's members, which records a discard that removed nothing.
+
+    **This exists because three planted faults were silently disarmed and the
+    only reason anybody found out was luck.** They named the bypass relay's
+    contacts as IEC numbers -- "11", "14", "A2" -- which was right while
+    design.BYPASS_RELAY was None and wrong the moment a G6S was fitted, because
+    its terminals are 1/12 and 9/10/8, 4/3/5. `set.discard` on a member that is
+    not there is a no-op, so the mutation planted nothing, the check found
+    nothing wrong, and the case reported "caught" for exactly as long as it took
+    somebody to change a part for an unrelated reason.
+
+    That is this file's own failure mode, arriving one level up. `_run` proves a
+    check can fail; nothing proved the *fault* was still a fault. The naive
+    version of this test -- "did the mutation change anything?" -- passes all
+    forty cases and would have passed all three of those, because they also
+    `add` a pin, and adding one does change the set. What separates a live plant
+    from a dead one is the discard: you cannot remove what is not there, so a
+    discard that removes nothing is always a mutation that has lost its target.
+    """
+
+    def __init__(self, items, log, net):
+        super().__init__(items)
+        self._log = log
+        self._net = net
+
+    def discard(self, item):
+        if item not in self:
+            self._log.append(
+                f"{self._net}.discard({item!r}) removed nothing -- that pin is "
+                f"not on this net, so the fault is not planted")
+        super().discard(item)
+
+
+def dead_mutations(clean_nets, clean_values, clean_open, clean_erc, clean_drc):
+    """Every planted mutation still has a target. Returns the ones that do not.
+
+    Deliberately not part of CASES: it is a check on the cases rather than on
+    verify.py, and folding it in would make the file assert something about
+    itself in the same list it uses to assert things about the design.
+    """
+    dead = []
+    for label, _, mutate in CASES:
+        log = []
+        nets = {name: _Watched(members, log, name)
+                for name, members in copy.deepcopy(clean_nets).items()}
+        with _design_restored():
+            try:
+                # The real ERC and DRC objects, deep-copied. Stand-ins of the
+                # wrong shape make a mutation raise, which this would then
+                # report as a lost target -- a false alarm from the guard is
+                # the one thing that would get the guard switched off.
+                mutate(nets, dict(clean_values), set(clean_open),
+                       copy.deepcopy(clean_erc), copy.deepcopy(clean_drc),
+                       verify.PCB)
+            except Exception as error:
+                log.append(f"raised {error!r} -- a mutation that cannot run "
+                           f"plants nothing")
+        if log:
+            dead.append((label, log))
+    return dead
 
 
 CASES = []
@@ -197,24 +261,35 @@ def _(nets, values, open_pins, violations, drc, board):
     nets["SIN4"].add(("R431", "1"))
 
 
+# **These three carried the relay's pin numbers as literals, and choosing the
+# part silently disarmed them.** They read "11", "21", "14", "12", "A2" -- IEC
+# contact numbers, correct while design.BYPASS_RELAY was None and wrong the
+# moment a G6S was fitted, because its terminals are 1/12 and 9/10/8, 4/3/5. A
+# mutation that names a pin the netlist no longer has does not plant a fault:
+# `discard` on a missing member is a no-op and `add` puts a pin nobody checks
+# onto a net, so all three cases went on passing and stopped meaning anything.
+# Exactly the failure this file exists to catch, in this file.
+#
+# They go through RELAY_PINS now, which is the single copy of the map. A part
+# change moves them with it, and a *wrong* part change fails them.
 @case("channel 5 is bypassed to channel 6's pole",
       verify.check_sin_dc_by_construction)
 def _(nets, values, open_pins, violations, drc, board):
-    nets["SIN5"].discard(("K803", "11"))
-    nets["SIN5"].add(("K803", "21"))
+    nets["SIN5"].discard(("K803", design.RELAY_PINS["COM_A"]))
+    nets["SIN5"].add(("K803", design.RELAY_PINS["COM_B"]))
 
 
 @case("the module reaches the wiper through the normally *closed* contact",
       verify.check_sin_dc_by_construction)
 def _(nets, values, open_pins, violations, drc, board):
-    nets["IVOUT1"].discard(("K801", "14"))
-    nets["IVOUT1"].add(("K801", "12"))
+    nets["IVOUT1"].discard(("K801", design.RELAY_PINS["NO_A"]))
+    nets["IVOUT1"].add(("K801", design.RELAY_PINS["NC_A"]))
 
 
 @case("a coil returns to MDGND instead of the sink", verify.check_fail_safe)
 def _(nets, values, open_pins, violations, drc, board):
-    nets["FSD"].discard(("K802", "A2"))
-    nets["MDGND"].add(("K802", "A2"))
+    nets["FSD"].discard(("K802", design.RELAY_PINS["COIL-"]))
+    nets["MDGND"].add(("K802", design.RELAY_PINS["COIL-"]))
 
 
 @case("a flyback diode is fitted backwards", verify.check_fail_safe)
@@ -245,6 +320,26 @@ def _(nets, values, open_pins, violations, drc, board):
 @case("a second resistor lands on the hold node", verify.check_fail_safe)
 def _(nets, values, open_pins, violations, drc, board):
     nets["FSG"].add(("R999", "1"))
+
+
+# **The substitution that used to be the design.** D803 was a BAT54 for the
+# life of the fail-safe, and a BAT54 at the 36 mA it carries is 500 mV, which
+# is +13.4 dB on a summer with 7.84 dB of headroom. Nothing could see it: the
+# netlist was right, the polarity was right, ERC and DRC were silent, and
+# clamp_gain() returned "fits" because it read an assumed constant rather than
+# the fitted part. This is that exact board, planted.
+@case("D803 goes back to a BAT54, which cannot clamp at 36 mA",
+      verify.check_fail_safe)
+def _(nets, values, open_pins, violations, drc, board):
+    values["D803"] = "BAT54"
+
+
+@case("the clamp stops fitting inside the mixer's headroom",
+      verify.check_fail_safe)
+def _(nets, values, open_pins, violations, drc, board):
+    # Not a netlist fault at all: design.py itself drifting off the part that
+    # makes the arithmetic work. Restored by _design_restored().
+    design.CLAMP_VF_TABLE = ((10e-3, 0.420), (100e-3, 0.560), (1.0, 0.800))
 
 
 # The three faults check_rectifier_polarity() exists for. The first is the
@@ -358,10 +453,25 @@ def _(nets, values, open_pins, violations, drc, board):
         "items": [{"description": "Pad 1 of R101"}]})
 
 
-@case("routing goes backwards and the count is not put back up",
+# **This case changed direction when the board finished routing**, and the way
+# it changed is the point. It used to delete four of the sixty-seven unconnected
+# items, modelling "somebody routed four nets and left the declaration at 67".
+# At UNROUTED_ITEMS = 0 that mutation removes four items from an empty list and
+# plants nothing at all -- it stopped being a fault without stopping being a
+# case, and test_verify.py reported it MISSED on the first run after the board
+# closed, which is the file doing its job.
+#
+# There is only one direction left from zero, and it is the one that matters:
+# a connection that was made is no longer made. That is what a part moving, a
+# net appearing, or a router regression all look like from DRC's side.
+@case("a routed connection is lost and the count stays at zero",
       verify.check_board)
 def _(nets, values, open_pins, violations, drc, board):
-    drc["unconnected_items"] = drc["unconnected_items"][:-4]
+    drc["unconnected_items"].append({
+        "type": "unconnected_items", "severity": "error",
+        "description": "Missing connection between items",
+        "items": [{"description": "Pad 2 of R101"},
+                  {"description": "Pad 1 of C101"}]})
 
 
 # The router's own invariant, checked without KiCad: two nets on one point.
@@ -395,7 +505,36 @@ def main():
     print("test_verify: every section 5 check must be able to fail")
     print()
 
-    missed = []
+    # **The tally counts what ran, and it used to be arithmetic.** The closing
+    # line said `len(CASES) + len(DRAWING_FAULTS) + 2 + 3 + 4`, with the three
+    # literals standing for groups of faults planted further down -- so adding
+    # a fault below without remembering to increment one of them printed a
+    # number smaller than the number of lines above it, on the same screen.
+    # It did exactly that on the run that added the check_rules() faults: fifty
+    # planted, fifty caught, "all 50" printed with fifty-three lines above it.
+    # A count of the checks that is itself unchecked is the smallest possible
+    # version of this repository's own failure mode, and report() is the fix.
+    missed, ran = [], []
+
+    def report(label, found):
+        ran.append(label)
+        print(f"  {label:<52} {'caught' if found else '*** MISSED ***'}")
+        if not found:
+            missed.append(label)
+
+    # **Before running the cases, check the cases.** A mutation that has lost
+    # its target still reports "caught", because a check that finds nothing
+    # wrong with an unmutated netlist is indistinguishable from one that finds
+    # nothing wrong with a mutated one. This is what noticed nothing when the
+    # bypass relay was chosen and three faults quietly stopped being faults.
+    disarmed = dead_mutations(clean_nets, clean_values, clean_open,
+                              clean_erc, clean_drc)
+    report("every planted fault still has a target", not disarmed)
+    for label, why in disarmed:
+        print(f"      {label}")
+        for line in why:
+            print(f"          {line}")
+
     for label, check, mutate in CASES:
         context = {"nets": copy.deepcopy(clean_nets),
                    "values": dict(clean_values),
@@ -408,17 +547,13 @@ def main():
                      ("nets", "values", "open_pins", "violations",
                       "drc", "board")))
             found = _run(check, context)
-        print(f"  {label:<52} {'caught' if found else '*** MISSED ***'}")
-        if not found:
-            missed.append(label)
+        report(label, found)
 
     for label, mutate in DRAWING_FAULTS:
         nets = copy.deepcopy(clean_nets)
         mutate(nets)
         found = verify.compare(nets, design.NETS)
-        print(f"  {label:<52} {'caught' if found else '*** MISSED ***'}")
-        if not found:
-            missed.append(label)
+        report(label, found)
 
     # The router's own invariant, which is not a verify.py check and so cannot
     # be planted through CASES: gen_pcb.py runs it before it saves and refuses
@@ -428,9 +563,7 @@ def main():
         [("A", route.FRONT, [(1.0, 1.0), (1.5, 1.0)]),
          ("B", route.FRONT, [(1.5, 1.0), (2.0, 1.0)])], [], 0.5)
     label = "the router puts two nets on one point"
-    print(f"  {label:<52} {'caught' if shorts else '*** MISSED ***'}")
-    if not shorts:
-        missed.append(label)
+    report(label, shorts)
 
     # The pour overlap, which needs a *file* rather than a netlist: the whole
     # point of check_ground_split_on_the_board() is that it reads what was
@@ -446,10 +579,36 @@ def main():
         planted = pathlib.Path(handle.name)
     found = verify.check_ground_split_on_the_board(planted)
     label = "the two ground pours overlap on an inner layer"
-    print(f"  {label:<52} {'caught' if found else '*** MISSED ***'}")
-    if not found:
-        missed.append(label)
+    report(label, found)
     planted.unlink()
+
+    # check_rules() reads two files, so its faults are planted in copies of
+    # them. **The first of these three is not hypothetical**: it is exactly the
+    # state this project was in until the pass that wrote check_rules(), where
+    # gen_project.py's re-run after SaveBoard() put an empty rules block over
+    # the design rules gen_pcb.py had just set, and every DRC report since the
+    # board existed ran with KiCad's defaults. A check whose first planted fault
+    # is the bug it was written to find is a check that was needed.
+    for label, path, mutate in (
+            ("the project's DRC rules are emptied", verify.PROJECT,
+             lambda text: json.dumps(
+                 {**json.loads(text),
+                  "board": {"design_settings": {"drc_exclusions": [],
+                                                "rules": {}}}})),
+            ("a net class clearance drifts off rules.py", verify.PROJECT,
+             lambda text: text.replace('"clearance": 0.2', '"clearance": 0.15')),
+            ("the board carries a track of an undeclared width", verify.PCB,
+             lambda text: text.replace('(width 0.25)', '(width 0.2)', 1))):
+        with tempfile.NamedTemporaryFile("w", suffix=path.suffix,
+                                         delete=False) as handle:
+            handle.write(mutate(path.read_text()))
+            copy_path = pathlib.Path(handle.name)
+        if path == verify.PROJECT:
+            found = verify.check_rules(copy_path, verify.PCB)
+        else:
+            found = verify.check_rules(verify.PROJECT, copy_path)
+        report(label, found)
+        copy_path.unlink()
 
     # The declaration-only checks cannot be mutated through the netlist, so
     # they are exercised against TRIADS directly and restored afterwards.
@@ -460,9 +619,7 @@ def main():
         design.LOOM[2][field] = bad
         found = verify.check_triads(clean_nets)
         label = f"triad declaration: {field} = {bad!r}"
-        print(f"  {label:<52} {'caught' if found else '*** MISSED ***'}")
-        if not found:
-            missed.append(label)
+        report(label, found)
         design.LOOM[2][field] = original
 
     # And the contract. Nothing here may be exercised by modifying a mixer file:
@@ -522,16 +679,13 @@ def main():
             found = []
         except SystemExit:
             found = ["raised"]
-        print(f"  {label:<52} {'caught' if found else '*** MISSED ***'}")
-        if not found:
-            missed.append(label)
+        report(label, found)
 
     print()
     if missed:
         raise SystemExit(f"{len(missed)} checks did not fail when they should: "
                          + "; ".join(missed))
-    total = len(CASES) + len(DRAWING_FAULTS) + 2 + 3 + 4
-    print(f"all {total} faults caught -- the checks are checks")
+    print(f"all {len(ran)} faults caught -- the checks are checks")
 
 
 if __name__ == "__main__":

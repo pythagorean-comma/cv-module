@@ -38,10 +38,11 @@ What this pass does and does not do:
     area is committed even though the part is not;
   * draws the outline that placement.extents() derives, and the two ground
     zones either side of the split;
-  * **does not route.** Not one track. The unconnected count is reported and
-    verify.check_board() holds it against design.py's own net count, so
-    "unrouted" is a number this repo states rather than a thing somebody
-    notices later.
+  * stitches every ground pad to the plane under it, and routes everything
+    else through route.py -- **which now rips the board up and re-routes it in
+    a different order until nothing is missed.** This list used to end "does
+    not route. Not one track", then "routes all but 23 nets"; it is 0 now, and
+    verify.UNROUTED_ITEMS holds the number rather than the prose.
 """
 
 import os
@@ -53,28 +54,31 @@ HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE / "out"
 BOARD = OUT / "cv-module.kicad_pcb"
 
-# Design rules. Ordinary two-ounce-capable JLCPCB-class numbers rather than
-# anything clever: this board's constraint is area and part count, not track
-# width. They are here rather than in gen_project.py because the board is what
-# they govern, and gen_project.py imports them so the two cannot disagree.
-TRACK_MM = 0.25
-POWER_TRACK_MM = 0.5
-CLEARANCE_MM = 0.2
-VIA_DIAMETER_MM = 0.6
-VIA_DRILL_MM = 0.3
-EDGE_CLEARANCE_MM = 0.3
+# Design rules, and **they are not here any more.** They were, with a comment
+# claiming "gen_project.py imports them so the two cannot disagree" -- and
+# gen_project.py could not import them, because importing this file relaunches
+# it under KiCad's interpreter before any constant is reachable. So it wrote
+# its own copies as literals and the two agreed by hand. rules.py is the one
+# copy now, it derives the routing pitch rather than asserting it, and
+# verify.check_rules() reads the project and the board back off disk to hold
+# all three together. That check was named in this docstring before it
+# existed; see rules.py.
+sys.path.insert(0, str(HERE))
+import rules                                                      # noqa: E402
 
-# The routing grid, and it is derived rather than chosen: two tracks on
-# adjacent cells are PITCH - TRACK apart edge to edge, which has to clear
-# CLEARANCE. 0.5 - 0.25 = 0.25 against 0.2, which is the tightest pitch these
-# rules allow and therefore the one that routes.
-ROUTE_PITCH_MM = 0.5
+TRACK_MM = rules.TRACK_MM
+CLEARANCE_MM = rules.CLEARANCE_MM
+VIA_DIAMETER_MM = rules.VIA_DIAMETER_MM
+VIA_DRILL_MM = rules.VIA_DRILL_MM
+EDGE_CLEARANCE_MM = rules.EDGE_CLEARANCE_MM
+ROUTE_PITCH_MM = rules.route_pitch()
 
-# A signal DPDT relay's envelope, and the only reason it is a number here is
-# that design.BYPASS_RELAY is None. 14 x 9 mm is what floorplan.py used for the
-# coarse pad's relays before they were struck; it is an envelope for the class
-# and it is reserved rather than placed.
-RESERVED_MM = {"K801": (14.0, 9.0), "K802": (14.0, 9.0), "K803": (14.0, 9.0)}
+# **Empty, and the reserve() machinery below is kept.** This carried a 14 x 9 mm
+# envelope for each bypass relay while design.BYPASS_RELAY was None. Both
+# UNSPECIFIED parts are chosen now, so all 225 parts have a footprint and
+# nothing is reserved -- but a repo that defers blocks will reserve area again,
+# and what is worth keeping is the mechanism rather than this instance of it.
+RESERVED_MM = {}
 
 
 def _relaunch():
@@ -433,7 +437,59 @@ class Board:
         pcbnew.SaveBoard(str(path), self.board)
 
 
+def check_courtyards(board):
+    """placement.SIZE agrees with the footprints KiCad actually loaded.
+
+    **This file is the only place the two exist at once**, which is exactly why
+    they were allowed to disagree. placement.py cannot import pcbnew -- that is
+    the rule that keeps its arithmetic checkable -- so it carries a table of
+    courtyard sizes, and that table had every multi-pin package transposed:
+    SOIC-14 at (9.2, 6.6) against KiCad's 7.40 x 9.16, the 1x05 header at
+    (13.4, 6.2) against 3.54 x 13.70.
+
+    Nothing caught it because every consumer was transposed in the same way.
+    check_overlaps() compares those boxes to each other, so two parts modelled
+    sideways collide with each other just as they would upright; the board's
+    own outline came from KiCad's boxes here and placement.main() printed a
+    different one from the table, and the two numbers were 8 mm apart in
+    print, on two lines of the same build log, for as long as the board has
+    existed.
+
+    KiCad's BBox() includes the courtyard line, and placement.SIZE is the
+    outline centreline, so the model is expected to sit *inside* the bounding
+    box by placement.COURTYARD_TOLERANCE_MM on each edge -- and by no more,
+    which is the half that makes this a check rather than a bound.
+    """
+    problems = []
+    allowed = placement.COURTYARD_TOLERANCE_MM
+    for ref, left, top, right, bottom in board.courtyards:
+        if ref in RESERVED_MM:
+            continue
+        modelled = placement.courtyard(ref)
+        if modelled is None:
+            problems.append(f"{ref} has a footprint and no entry in "
+                            f"placement.SIZE")
+            continue
+        for name, mine, theirs, sign in (("left", modelled[0], left, 1),
+                                         ("top", modelled[1], top, 1),
+                                         ("right", modelled[2], right, -1),
+                                         ("bottom", modelled[3], bottom, -1)):
+            inset = sign * (mine - theirs)
+            if not 0.0 <= inset <= allowed:
+                problems.append(
+                    f"{ref}: placement.py puts the {name} courtyard edge at "
+                    f"{mine:.3f} and KiCad's footprint at {theirs:.3f}, "
+                    f"{inset:+.3f} mm inside it against an allowance of "
+                    f"0 to {allowed} -- check the SIZE entry, and check it is "
+                    f"not on the wrong axis")
+    return problems
+
+
 def build():
+    # Before anything is placed: the rules this board is about to be built to
+    # are inside what the fabricator publishes. Cheap, and it fails at the top
+    # rather than at DRC.
+    rules.check_fab_class()
     board = Board()
     board.rules()
 
@@ -446,6 +502,11 @@ def build():
             board.reserve(ref, x, y, *RESERVED_MM[ref])
         else:
             board.place(ref, x, y, rotation)
+
+    mismatched = check_courtyards(board)
+    if mismatched:
+        raise SystemExit("placement.SIZE disagrees with KiCad's footprints:\n  "
+                         + "\n  ".join(mismatched[:8]))
 
     rectangle = placement.extents([
         ((left + right) / 2, (top + bottom) / 2, right - left, bottom - top)

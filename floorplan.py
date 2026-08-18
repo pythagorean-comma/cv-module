@@ -97,7 +97,15 @@ fault above with the offset moved somewhere harder to see.
 DOMAINS = (
     (r"^J[1-6]$", ANALOGUE, "loom to the mixer: audio in, audio out"),
     (r"^J7$", ANALOGUE, "the ground bond pad and the shield terminations"),
-    (r"^J8$", DIGITAL, "supply inlet from the DC-DC secondary"),
+    # **STRADDLE, and it was DIGITAL.** J8 carries VA+, VA-, MAGND, V5 and
+    # MDGND: both rails and both grounds, which is the definition this file
+    # applies to the '541, the relays and the stars. It was filed as digital
+    # because it is a header and the other three headers are, and the
+    # consequence was physical -- placement.py put it 18 mm inside the digital
+    # pour, so its MAGND pin's barrel crossed four layers and met the analogue
+    # plane on none of them. See the note at placement.SHARED["J8"].
+    (r"^J8$", "STRADDLE", "supply inlet from the DC-DC secondary: both rails "
+                          "and both grounds"),
     (r"^J9$|^J10$|^J11$", DIGITAL, "PWM and OE from the controller"),
     (r"^R[1-6]0[12]$", ANALOGUE, "front-end inverting stage"),
     (r"^R[1-6]1[15]$", ANALOGUE, "R_IN and the VCA input RC"),
