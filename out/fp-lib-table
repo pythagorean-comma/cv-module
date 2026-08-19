@@ -3,6 +3,7 @@
   (lib (name "Capacitor_SMD")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/Capacitor_SMD.pretty")(options "")(descr ""))
   (lib (name "Connector_PinHeader_2.54mm")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/Connector_PinHeader_2.54mm.pretty")(options "")(descr ""))
   (lib (name "Diode_SMD")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/Diode_SMD.pretty")(options "")(descr ""))
+  (lib (name "Fuse")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/Fuse.pretty")(options "")(descr ""))
   (lib (name "Inductor_SMD")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/Inductor_SMD.pretty")(options "")(descr ""))
   (lib (name "Module")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/Module.pretty")(options "")(descr ""))
   (lib (name "Package_SO")(type "KiCad")(uri "${KICAD10_FOOTPRINT_DIR}/Package_SO.pretty")(options "")(descr ""))

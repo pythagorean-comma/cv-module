@@ -390,7 +390,7 @@ None. All 48 were the twelve pad relays' coils, and they went with the pad — s
 
 ## Prices
 
-Of 63 BOM lines, **5 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 56 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
+Of 64 BOM lines, **6 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 56 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
 
 The totals in `docs/SHOPPING.md` are therefore a range, and the range is honest rather than decorative. They are also a floor: none of the deferred blocks is costed.
 

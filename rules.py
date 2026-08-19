@@ -364,7 +364,9 @@ def pad_reach(pin_pitch=TSSOP_PIN_PITCH_MM, pad_width=TSSOP_PAD_WIDTH_MM,
     channels. **That is no longer load-bearing and the note is kept for the
     arithmetic**: the fan-out closes the pads that lose, so which two rows they
     are is free again. See track_offset_limit(), and route.Grid.escape() in
-    the history -- route.py is deleted and this arithmetic outlived it.
+    the history -- route.py was deleted for a pass and this arithmetic
+    outlived it; the router is back as a one-shot seed and the board is
+    hand-laid either way.
     """
     grid = route_pitch() if grid is None else grid
     widest = pin_pitch - clearance
@@ -390,36 +392,91 @@ def pad_reach(pin_pitch=TSSOP_PIN_PITCH_MM, pad_width=TSSOP_PAD_WIDTH_MM,
 # **These are the fabricator's own figures and they were not in this file at
 # all.** gen_pcb.rules() sets the minimum track, via, copper clearance and edge
 # clearance, and verify.check_rules() holds all four; nothing said anything about
-# a drill, so KiCad's own default -- 0.25 mm, quoted by the DRC report as "board
-# setup constraints hole clearance 0.2500 mm" -- has been enforcing it unowned.
-# Read first-hand from the same JLCPCB capabilities page as the class above:
+# a drill, so KiCad's own defaults -- 0.25 mm on both hole rules, quoted by the
+# DRC report as "board setup constraints hole clearance 0.2500 mm" -- were
+# enforcing it unowned.
 #
-#     "Via Hole-to-Hole Spacing: 0.2mm"
-#     "Pad Hole-to-Hole Spacing: 0.45mm"
-#     "Via hole to Track: 0.2mm"
-#     "PTH to Track: 0.28mm" (0.35 mm recommended)
+# **They were read off JLCPCB's page and the board goes to PCBWay**, which is
+# docs/fabrication-class.md's own correction arriving one table along. The old
+# text is kept because the reasoning in it is right and the numbers in it are
+# somebody else's process:
 #
-# **The point that matters is that none of these is a function of the copper
-# class.** A hole clearance is drill positioning, not etching, so taking the
-# track and clearance from 0.25/0.20 down to 0.09/0.09 buys nothing here -- and
-# at some point on the way down the hole rule *overtakes* the copper rule and
-# becomes the binding one. via_exclusion() is where that crossover is computed
-# rather than discovered: at the fitted class the copper rule wins by 0.10 mm,
-# and at 0.09/0.09 the hole rule wins by 0.01.
+#     Read first-hand from the same JLCPCB capabilities page as the class
+#     above: "Via Hole-to-Hole Spacing: 0.2mm" / "Pad Hole-to-Hole Spacing:
+#     0.45mm" / "Via hole to Track: 0.2mm" / "PTH to Track: 0.28mm" (0.35 mm
+#     recommended).
 #
-# **What is enforced is deliberately not changed here.** KiCad's 0.25 mm default
-# is stricter than the 0.20 mm this fabricator publishes, and routing at
-# 0.09/0.09 produced 49 violations against it. Declaring 0.20 would make those
-# 49 disappear with no copper moving, which is indistinguishable from relaxing a
-# check to make it pass -- so the figures are recorded, the router is held to the
-# **stricter** of the two, and what DRC enforces is left alone. Choosing to
-# design to the fabricator's real limit is a decision, and it belongs to whoever
-# takes the class decision.
-VIA_HOLE_TO_HOLE_MM = 0.20
-PAD_HOLE_TO_HOLE_MM = 0.45
-VIA_HOLE_TO_TRACK_MM = 0.20
-# KiCad's own default, named as such because it is what has been in force.
+# **PCBWay's, capabilities page read 2026-08-19, converted from mil.** Their
+# page grades every row by difficulty and what is quoted here is the "normal
+# process" column, because a board ordered at a difficulty tier is a board
+# quoted at a different price:
+#
+#     component hole to hole   ">=16MIL"  = 0.406 mm  (14-16 medium,
+#                                                      13-14 high, <13 refused)
+#     via to via, dia <=0.45   ">=11MIL"  = 0.279 mm
+#     inner hole to circuit,   ">=7MIL"   = 0.178 mm  (6-7 medium, 5-6 high)
+#       4 layers
+#
+# **And the decision this settles is not the one that was open.** The open item
+# read "whether to design to the fabricator's published 0.20 mm hole clearance
+# rather than KiCad's 0.25 mm default" -- a question with JLCPCB's number in
+# it, asked about a board going to PCBWay. Asked of the right page it does not
+# survive contact: PCBWay's hole-to-hole is **0.406 mm, sixty percent stricter
+# than the KiCad default the question called strict**, and their copper-to-hole
+# is 0.178, looser. There was never one number to compare.
+#
+# **The rule stays "the stricter of published and KiCad's own", and it now
+# points both ways**, which is the only reason it is worth having: 0.406 for
+# hole-to-hole is the fabricator's, 0.25 for copper-to-hole is KiCad's. Neither
+# costs anything at this class -- via_exclusion() below shows the copper rule
+# winning all three distances -- so adopting the stricter figure is free, and
+# the trap the old text names is avoided by construction rather than by
+# refusing to choose: **nothing here makes a violation disappear, because the
+# number that moved moved the wrong way for that.**
+#
+# **The point that matters is still that none of these is a function of the
+# copper class.** A hole clearance is drill positioning, not etching, so taking
+# the track and clearance down buys nothing here -- and at some point on the
+# way down the hole rule *overtakes* the copper rule and becomes the binding
+# one. via_exclusion() is where that crossover is computed rather than
+# discovered.
+#
+# **The 0.7 mm via is above PCBWay's own qualifier and is read as a component
+# hole.** Their 11 mil row says "via spacing (<=0.45mm diameter)" and this
+# board's vias are 0.7; nothing on the page says what a 0.7 mm via costs, so it
+# is taken as the 16 mil component-hole row. That is the reading that cannot be
+# wrong in the direction that matters, and it is 0.127 mm of difference on a
+# rule the copper already dominates.
+HOLE_LIMITS = {
+    # (component hole to hole, via to via, hole to copper), millimetres
+    "JLCPCB": (0.45, 0.20, 0.20),
+    "PCBWay": (16 * 0.0254, 11 * 0.0254, 7 * 0.0254),
+}
+# KiCad's own defaults, named as such because they are what has been in force
+# and because the rule below is "the stricter of these and the fabricator's".
 KICAD_HOLE_CLEARANCE_MM = 0.25
+KICAD_HOLE_TO_HOLE_MM = 0.25
+
+
+def hole_rules(fabricator=None):
+    """The two hole numbers DRC is set to, each the stricter of two sources.
+
+    KiCad has one hole-to-hole setting and the fabricator publishes two rows
+    -- component holes and vias -- so what goes in is the stricter row, which
+    is the component one on every fabricator this file carries.
+
+        min_hole_to_hole    max(published component row, KiCad's default)
+        min_hole_clearance  max(published hole-to-copper, KiCad's default)
+
+    Returned as the project's own key names, so that gen_project.
+    design_rules() spreads it and verify.check_rules() compares it key by key
+    without either of them holding a second opinion about which rule is which.
+    """
+    pad, via, copper = HOLE_LIMITS[fabricator or FABRICATOR]
+    return {
+        "min_hole_to_hole": max(pad, via, KICAD_HOLE_TO_HOLE_MM),
+        "min_hole_clearance": max(copper, KICAD_HOLE_CLEARANCE_MM),
+    }
 
 
 def via_exclusion(track=TRACK_MM, clearance=CLEARANCE_MM,
@@ -436,11 +493,14 @@ def via_exclusion(track=TRACK_MM, clearance=CLEARANCE_MM,
         to a pad's copper     via/2 + clearance             |  drill/2 + hole
 
     The left column is copper and shrinks with the class; the right is drill and
-    does not. `hole` is the stricter of this fabricator's published figure and
-    KiCad's default, for the reason in the comment above.
+    does not. Both hole figures come from hole_rules(), which is the stricter
+    of the fabricator's published row and KiCad's own default -- so this
+    function has no opinion of its own about which number is in force, which
+    is the whole reason that lives in one place.
     """
-    hole = max(VIA_HOLE_TO_TRACK_MM, KICAD_HOLE_CLEARANCE_MM)
-    hole_pair = max(VIA_HOLE_TO_HOLE_MM, KICAD_HOLE_CLEARANCE_MM)
+    fitted = hole_rules()
+    hole = fitted["min_hole_clearance"]
+    hole_pair = fitted["min_hole_to_hole"]
     return {
         "to_track_mm": max(via / 2 + track / 2 + clearance, drill / 2 + hole),
         "to_via_mm": max(via + clearance, drill + hole_pair),
@@ -844,6 +904,11 @@ FAB_LIMITS = {
 # via as a diameter/hole pair rather than a ring, and 0.25/0.15 is a 0.05 mm
 # ring, so its published floor is the looser of the two and PCBWay binds again.
 ANNULAR_RING_MM = {"JLCPCB": 0.05, "PCBWay": 0.15}
+# The smallest hole either will drill, and they agree: PCBWay's page says
+# "Min drill size is 0.15mm" and JLCPCB's table bottoms out at the same
+# figure. One constant rather than a table, because a table with two equal
+# rows invites somebody to believe the rows were read separately.
+MIN_DRILL_MM = 0.15
 
 
 def check_fab_class(fabricator=None):
@@ -874,15 +939,25 @@ def check_fab_class(fabricator=None):
             f"the via's annular ring is {ring:.3f} mm "
             f"(({VIA_DIAMETER_MM} - {VIA_DRILL_MM}) / 2) against "
             f"{fabricator}'s published {ANNULAR_RING_MM[fabricator]} mm")
-    if VIA_DIAMETER_MM < 0.25 or VIA_DRILL_MM < 0.15:
+    # **Both fabricators publish 0.15 mm as the smallest drill**, so this one
+    # is not conditional. The 0.25 mm via diameter beside it was JLCPCB's, and
+    # PCBWay's page gives the via as a range from 0.15 mm with the ring rule
+    # above doing the real work -- which it does: a 0.15 mm drill needs a
+    # 0.45 mm pad to make 0.15 mm of ring.
+    if VIA_DRILL_MM < MIN_DRILL_MM:
         raise AssertionError(
-            f"via {VIA_DIAMETER_MM}/{VIA_DRILL_MM} mm is below the published "
-            f"0.25/0.15 mm minimum")
-    if VIA_DRILL_MM in (0.2, 0.25) and VIA_DIAMETER_MM < 0.45:
+            f"a {VIA_DRILL_MM} mm drill is below the {MIN_DRILL_MM} mm both "
+            f"fabricators publish as their smallest")
+    # **JLCPCB's, and it applies when the board goes there.** Their page names
+    # two drill/diameter combinations as surcharges; PCBWay's says nothing of
+    # the kind, so asserting it against a PCBWay board would be this file's
+    # own wrong-page fault repeated on purpose.
+    if (fabricator == "JLCPCB" and VIA_DRILL_MM in (0.2, 0.25)
+            and VIA_DIAMETER_MM < 0.45):
         raise AssertionError(
             f"a {VIA_DRILL_MM} mm hole with a {VIA_DIAMETER_MM} mm via is one "
-            f"of the two combinations the capabilities page says will cost "
-            f"more -- if that is intended, say so here")
+            f"of the two combinations JLCPCB's capabilities page says will "
+            f"cost more -- if that is intended, say so here")
     if route_pitch() - TRACK_MM < CLEARANCE_MM:
         raise AssertionError(
             f"the routing pitch {route_pitch()} mm puts two adjacent tracks "
@@ -932,7 +1007,8 @@ def write():
         "**So the corridor opens only at JLCPCB's finest multilayer class, "
         "which is available at 1 oz outer copper and not at 2 oz.** That is "
         "not a routing decision, it is a decision to give up 2 oz as an "
-        "option -- and both are history: route.py is deleted and the board is "
+        "option -- and both are history: route.py runs once as a seed and the "
+        "board is "
         "hand-laid. `route_all()` finished it without a finer grid, by ripping "
         "up and re-routing the nets that are in the way, so this board is "
         "ordered at the fitted class.\n")
@@ -972,6 +1048,22 @@ def _report():
     print(f"  routing pitch {pitch} mm = track + clearance + "
           f"{PITCH_MARGIN_MM} mm margin; adjacent tracks "
           f"{pitch - TRACK_MM:.2f} mm apart against {CLEARANCE_MM} mm")
+    holes = hole_rules()
+    exclusion = via_exclusion()
+    pad, via_row, copper = HOLE_LIMITS[FABRICATOR]
+    print(f"  holes: {holes['min_hole_to_hole']:.3f} mm hole to hole and "
+          f"{holes['min_hole_clearance']:.3f} mm hole to copper, each the "
+          f"stricter of {FABRICATOR}'s published figure and KiCad's default")
+    print(f"      {FABRICATOR} publishes {pad:.3f} / {via_row:.3f} / "
+          f"{copper:.3f} mm (component hole, via, hole to copper) against "
+          f"KiCad's {KICAD_HOLE_TO_HOLE_MM} / {KICAD_HOLE_CLEARANCE_MM} -- so "
+          f"the fabricator is stricter on one and looser on the other, and "
+          f"the open question that asked which of two numbers to take had "
+          f"the wrong page's number in it")
+    print(f"      and neither binds: a via needs "
+          f"{exclusion['to_track_mm']:.3f} / {exclusion['to_via_mm']:.3f} / "
+          f"{exclusion['to_pad_mm']:.3f} mm to a track, a via and a pad, and "
+          f"copper sets all three at this class")
     ring = via_neighbours()
     print(f"  a via clears a track by {ring['orthogonal_mm']:.3f} mm "
           f"orthogonally ({'blocks' if ring['orthogonal_blocks'] else 'clears'})"

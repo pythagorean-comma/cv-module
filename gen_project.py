@@ -114,6 +114,14 @@ def design_rules():
         "min_track_width": rules.TRACK_MM,
         "min_via_diameter": rules.VIA_DIAMETER_MM,
         "min_copper_edge_clearance": rules.EDGE_CLEARANCE_MM,
+        # **The two hole rules, which were the fifth and sixth "left alone
+        # deliberately".** They were not named here, so DRC ran them at
+        # KiCad's 0.25 mm defaults -- which is not zero and so never showed up
+        # as the missing-rule fault the paragraph above records, but is still
+        # a number nobody in this repo had chosen. rules.hole_rules() is where
+        # the choice lives and it returns these key names so that neither file
+        # decides which rule is which.
+        **rules.hole_rules(),
     }
 
 

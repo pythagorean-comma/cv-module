@@ -142,6 +142,8 @@ DOMAINS = (
     # the raw inlet: two pins, neither of them referenced to anything this
     # module calls ground. See design.supply().
     (r"^J8$", ISOLATED, "the shared DC inlet, primary side"),
+    (r"^F801$", ISOLATED, "the inlet fuse, in the live conductor ahead of "
+                          "the choke -- see design.inlet_fuse()"),
     (r"^L801$", ISOLATED, "the common-mode choke in the inlet pair -- the "
                          "second half of design.barrier_return()"),
     (r"^D804$", ISOLATED, "inlet reverse protection"),
@@ -673,6 +675,15 @@ def check_crossings():
     for name, entries in sorted(design.NETS.items()):
         domains = {domain_of(ref) for ref, _ in entries}
         domains.discard("STRADDLE")
+        # **None is discarded here and check_domains() is why that is safe.**
+        # A part with no DOMAINS row makes domain_of() return None, and this
+        # loop then sorted a set holding a string and a None -- which raises,
+        # in main(), *after* check_domains() has correctly built the message
+        # naming the part. Fitting F801 was what ran it: the right diagnosis
+        # was computed and never printed, because the next check in the same
+        # expression crashed on the same fault. A check that cannot report is
+        # not covered by a check that can.
+        domains.discard(None)
         # BARRIER for the same reason and one boundary out: U15 has primary
         # pins and secondary pins by construction, and C810 is the declared
         # bridge. Excluding them here is what leaves check_isolation() below

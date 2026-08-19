@@ -4900,7 +4900,23 @@ MIDI_BRIDGE = ("C836",)
 # as a set literal: a part added to the primary and not to that literal is a
 # check that quietly stops covering the thing it names. L801 is the part that
 # found it.
-PRIMARY_PARTS = ("J8", "L801", "D804", "C807", "C808", "C809")
+# F801 is a literal here and INLET_FUSE_REF thirty lines below, because
+# this list is declared before the fuse's own block. One of the two has
+# to be a string and this is the one nothing computes from.
+PRIMARY_PARTS = ("J8", "F801", "L801", "D804", "C807", "C808", "C809")
+# **The primary's nets, and this moved here from verify.py because a second
+# file needed it.** gen_pcb.py reserves the primary's corner of the board and
+# admits only these nets into it; verify.check_isolation_gap() measures the
+# same region against the same list. Those were two literals in two files that
+# cannot import each other, agreeing because one person typed them twice --
+# which is the fault PRIMARY_PARTS' own comment above records, one net class
+# along. Fitting F801 is what would have separated them: the reservation would
+# have kept VIN_F out of the region its own part sits in.
+#
+# Four nets and a reference: IGND is the primary's 0 V, and the live conductor
+# is cut twice, by the fuse and by the choke, so it is three nets rather than
+# one. A net that spans a part is a net that says the part is not there.
+PRIMARY_NETS = frozenset({"IGND", "IGND_J", "VIN", "VIN_F", "VIN_J", "VIN_P"})
 
 # ON Semiconductor NCP1117, publication NCP1117/D revision 25, June 2013, read
 # first-hand. The 5.0 V fixed part:
@@ -5038,6 +5054,122 @@ INLET_CHOKE_DATASHEET = ("https://www.we-online.com/components/products/"
 # Getting this pairing wrong -- 1-2 and 4-3 -- draws identically, passes ERC,
 # and puts 1 mH in series with the supply current instead of across it.
 INLET_CHOKE_PINS = {"L1_IN": 1, "L2_IN": 2, "L2_OUT": 3, "L1_OUT": 4}
+
+# ---------------------------------------------------------------------------
+# The inlet fuse, which was derived for four passes and not fitted
+# ---------------------------------------------------------------------------
+#
+# **It is fitted now and nothing about the requirement changed.** The
+# converter's datasheet has said "Recommended Input Fuse, 24 Vin models:
+# 1'600 mA (slow blow)" since the part was chosen, and supply()'s own
+# assessment -- that a shared inlet with a *fabricated* board carrying no fuse
+# of its own wants one -- has stood unopposed for as long. What blocked it was
+# neither of those: it was that no order code had been verified and KiCad
+# shipped no land pattern for the families that were looked at. Section 6 of
+# the spec forbids inventing a value and an order code is a value, so the
+# requirement was recorded and the part left off.
+#
+# **SCHURTER UMT 250, datasheet dated 21/07/2026, read first-hand.** It is a
+# ceramic surface-mount fuse, 3 x 10.1 mm, and its own headline is the whole
+# specification: "Surface Mount Fuse, 3 x 10.1 mm, Time-Lag T, 250 VAC,
+# 125 VDC". The 1.6 A variant, from the Variants table on page 4:
+#
+#     Rated current        1.6 A
+#     Rated voltage        250 VAC, 125 VDC
+#     Breaking capacity    note 2) -- IEC 200 A @ 250 VAC, 100 A @ 125 VDC
+#     Characteristic       Time-Lag T, IEC 60127-4
+#     Voltage drop 1.0 In  300 mV max, 124 mV typ
+#     Power dissipation    1000 mW max at 1.25 In
+#     Melting I2t 10 In    5.89 A2s typ
+#     Order number         3403.0168.11 (bag) / 3403.0168.24 (tape)
+#
+# and from the Technical Data on page 1: ceramic housing, copper-alloy
+# tin-plated terminals, -55 to 125 C, reflow and wave.
+#
+# **1.6 A and not the 1.5 A this file used to name.** supply()'s note read "a
+# 1.5 A slow-blow -- below the datasheet's figure and four times the load --
+# is the part", which was a number reached by dividing rather than by opening
+# a catalogue: IEC 60127 fuses come in an E-series and 1.5 A is not one of the
+# eighteen this family offers. The converter's vendor states 1.6 A for this
+# exact model, the series has 1.6 A, and STYLE.md rule 10's own form applies
+# -- where the vendor states a value it is used, and where it states a range a
+# function here derives one. **A derived value that falls between two catalogue
+# steps is a derivation that never met a catalogue.**
+INLET_FUSE_REF = "F801"
+INLET_FUSE = "1.6A T 250V"
+INLET_FUSE_MPN = "3403.0168.11"
+INLET_FUSE_A = SUPPLY_FUSE_A
+INLET_FUSE_VDC = 125.0
+# Voltage drop at rated current, the maximum and the typical. Divided by the
+# rating these are a resistance -- 187 and 78 milliohms -- and both are the
+# *hot* element: the figure is measured at 1.0 In, where the wire is close to
+# melting. At the 24 % of rating this inlet runs at, the element is at ambient
+# and its resistance is lower, so using the hot number in the headroom
+# arithmetic is pessimistic in the direction headroom wants.
+INLET_FUSE_DROP_MAX_V = 0.300
+INLET_FUSE_DROP_TYP_V = 0.124
+# Pre-arcing time, page 3, for the 0.08-6.3 A rows. The first is the reason
+# inlet_fuse() can say what it says about the brick.
+INLET_FUSE_PREARC = {1.25: "60 min min", 2.0: "120 s max",
+                     10.0: "10 ms min, 100 ms max"}
+INLET_FUSE_DATASHEET = "https://www.schurter.com/en/datasheet/typ_umt_250.pdf"
+
+
+def inlet_fuse():
+    """The inlet fuse against the load it passes and the fault it opens for.
+
+    Three questions and the third is the one that decides what this part is
+    worth.
+
+        R_fuse   = V_drop(1.0 In) / In          # hot, so pessimistic here
+        drop     = R_fuse x I_working
+        headroom = V_brick_min - Vf(D804) - I x (2 R_choke + R_fuse) - 9 V
+
+    **It passes the load with the margin a fuse wants.** inlet_budget() gives
+    the working current, and 1.6 A against it is the ratio below. A fuse run
+    near its rating opens on nothing in particular; run at a quarter of it,
+    the derating curve (page 3, 100 % at 23 C, ~95 % at 40 C) is not in play
+    at all.
+
+    **Its drop comes out of the converter's input headroom** and is added to
+    the choke's two windings there, which is why inlet_budget() takes a fuse
+    resistance rather than this function reporting a drop nobody consumes.
+
+    **And what it protects against is bounded by a part this project does not
+    choose.** The pre-arcing table says 1.25 x In takes at least an hour and
+    2 x In up to two minutes; ten times opens in 10 to 100 ms. So the fuse is
+    protection only when the brick can source several amps into a fault. A
+    24 V supply that current-limits at 2 A is 1.25 In and this fuse never
+    opens -- the brick's own limit is the protection, and the fuse is
+    insurance against the case where somebody plugs in a larger one.
+    inlet_budget() already records that the brick is a system-level part
+    nobody here has ordered; this is the second thing that turns on it.
+
+    **Which is not an argument against fitting it.** The asymmetry is total:
+    the part costs 11.4 mm of one row and a few pence, and the case it covers
+    -- a converter failing short on an inlet shared with a fabricated board --
+    is one where the alternative is whatever the brick does when asked for
+    everything it has.
+    """
+    resistance_max = INLET_FUSE_DROP_MAX_V / INLET_FUSE_A
+    resistance_typ = INLET_FUSE_DROP_TYP_V / INLET_FUSE_A
+    working_a = inlet_budget()["worst_ma"] / 1e3
+    return {
+        "rating_a": INLET_FUSE_A,
+        "working_a": working_a,
+        "headroom_x": INLET_FUSE_A / working_a,
+        "resistance_max": resistance_max,
+        "resistance_typ": resistance_typ,
+        "drop_max_v": resistance_max * working_a,
+        "drop_typ_v": resistance_typ * working_a,
+        "opens_fast_a": 10.0 * INLET_FUSE_A,
+        "opens_slow_a": 2.0 * INLET_FUSE_A,
+        "never_opens_a": 1.25 * INLET_FUSE_A,
+        "prearc": INLET_FUSE_PREARC,
+        "rated_vdc": INLET_FUSE_VDC,
+        "inlet_max_v": INLET_UNLOADED_MAX,
+    }
+
 
 
 def supply_fit(include_mcu=True):
@@ -5481,23 +5613,41 @@ def inlet_budget():
     **The choke is in this budget twice and only one of them costs anything.**
     Its rated current has to clear the working current, which it does by 2.1x;
     and both of its windings carry that current, so the DC loop gains
-    2 x RDC of series resistance. That drop comes out of the converter's own
+    2 x RDC of series resistance. **F801 joins that loop and not this
+    sentence's first half**: a fuse's rating is a fault threshold rather than
+    a continuous limit, so it is inlet_fuse() that asks whether 1.6 A clears
+    382 mA and this function only carries its resistance. That drop comes out of the converter's own
     input headroom, which is 9 V against a 12 V brick -- so the number worth
     printing is not the drop but what is left of the margin after it.
     """
     fit = supply_fit()
     watts_in = fit["watts"] / SUPPLY_EFFICIENCY
     low, high = INLET_VOLTS
+    # **Three series resistances now, and they get three names.** Both choke
+    # windings carry the current and so does F801, so what the quadratic
+    # below needs is the loop -- and the moment the fuse joined it, `choke_r`
+    # stopped being the choke's resistance while every key built from it went
+    # on being called `choke_*`. That is barrier_return()'s fault verbatim, in
+    # the function one block along: an expression that was right only while
+    # two different quantities were the same number. The loop is `loop_r` and
+    # the two parts keep their own.
+    #
+    # The fuse's is its *hot* resistance, 187 mohm against the choke's 414,
+    # taken at a quarter of rated current where the element is at ambient and
+    # the real figure is lower. Pessimistic in the direction headroom wants --
+    # see inlet_fuse().
     choke_r = 2 * INLET_CHOKE_RDC
+    fuse_r = INLET_FUSE_DROP_MAX_V / INLET_FUSE_A
+    loop_r = choke_r + fuse_r
     # Solved rather than iterated: the converter is a constant-power load, so
-    # V_in x I = W with V_in = V_brick - Vf - I x R_choke gives a quadratic in
+    # V_in x I = W with V_in = V_brick - Vf - I x R_loop gives a quadratic in
     # I. R x I^2 - (V - Vf) x I + W = 0, and the root that matters is the
     # small one.
     module_ma = {}
     for volts in (low, high):
         head = volts - INLET_DIODE_VF
-        disc = head * head - 4 * choke_r * watts_in
-        current = (head - math.sqrt(disc)) / (2 * choke_r)
+        disc = head * head - 4 * loop_r * watts_in
+        current = (head - math.sqrt(disc)) / (2 * loop_r)
         module_ma[volts] = current * 1e3
     worst = max(module_ma.values())
     return {
@@ -5510,16 +5660,20 @@ def inlet_budget():
         "mixer_range": socket.SUPPLY_RANGE,
         "fuse_a": SUPPLY_FUSE_A,
         "diode_watts": worst * 1e-3 * INLET_DIODE_VF,
-        # The choke's own two lines.
+        # The choke's own lines, and they are the choke's again.
         "choke_ohms": choke_r,
         "choke_drop_v": worst * 1e-3 * choke_r,
         "choke_watts": (worst * 1e-3) ** 2 * choke_r,
         "choke_rated_ma": INLET_CHOKE_IR_MA,
         "choke_margin": INLET_CHOKE_IR_MA / worst,
+        # The fuse's, and what the loop is once both are in it.
+        "fuse_ohms": fuse_r,
+        "fuse_drop_v": worst * 1e-3 * fuse_r,
+        "loop_ohms": loop_r,
         # What the converter's +Vin pin sees at the bottom of the brick range,
         # against its own 9 V minimum.
         "converter_vin_low": (low - INLET_DIODE_VF
-                              - module_ma[low] * 1e-3 * choke_r),
+                              - module_ma[low] * 1e-3 * loop_r),
         "converter_vin_min": SUPPLY_VIN[0],
     }
 
@@ -6051,6 +6205,7 @@ LIBS = {
                                     "RaspberryPi_Pico", None),
     "Isolator:TLP2761": ("Isolator", "Isolator", "TLP2761", None),
     "Device:L": ("Device", "Device", "L", None),
+    "Device:Fuse": ("Device", "Device", "Fuse", None),
     # The 3.3 V switcher, borrowed from the LMR50410 -- **and the borrowing is
     # a pin map rather than a resemblance.** Both are TI SOT-23-6 buck
     # converters whose pinout is 1 CB, 2 GND, 3 FB, 4 EN, 5 VIN, 6 SW; the
@@ -6311,6 +6466,11 @@ SOT23_FP = "Package_TO_SOT_SMD:SOT-23"
 # the API *returns*. The distinction is invisible from the .kicad_mod source,
 # which is where the polylines are, and takes one call to settle.
 CHOKE_FP = "Inductor_SMD:L_CommonMode_Wuerth_WE-SL2"
+# The inlet fuse, and it is a stock footprint under the part's own name --
+# the cheapest kind. KiCad's own descr line for it reads "Surface Mount
+# Fuse, 3 x 10.1 mm, Time-Lag T, 250 VAC, 125 VDC", which is the datasheet's
+# headline word for word, so the two agree without either being asked to.
+FUSE_FP = "Fuse:Fuse_Schurter_UMT250"
 # The ADC's own body. 20-lead TSSOP, 4.4 x 6.5 mm, which is the leaded option
 # of the two the datasheet offers -- the other is a 3 x 3 mm UQFN with a
 # thermal pad. Leaded on purpose and it is the same argument the DPAK made at
@@ -6466,6 +6626,11 @@ ORDER_CODES = {
     # is only sold on tape, so the T is part of the code rather than a choice.
     V3V3_PART:        V3V3_MPN,
     "10u/50V X7R":    "GRM32ER71H106KA12L",
+    # SCHURTER print the rating and the packaging in one code: 3403.0168 is
+    # the 1.6 A UMT 250 and the .11 is a hundred in a bag rather than two
+    # thousand on a reel. Off the Variants table on page 4 of the datasheet,
+    # which is the whole reason this part is fitted -- see INLET_FUSE.
+    INLET_FUSE:       INLET_FUSE_MPN,
 }
 
 # Parts and blocks this pass does not place, each with the reason. Declared so
@@ -7054,6 +7219,10 @@ NET_DC["VIN_P"] = (0.0, INLET_UNLOADED_MAX - INLET_DIODE_VF)
 # choke's differential drop is 160 mV -- and the names carry the J because
 # what distinguishes them is which side of the choke they are on.
 NET_DC["VIN_J"] = (0.0, INLET_UNLOADED_MAX)
+# Between the fuse and the choke. A third net on one conductor for the
+# reason there is a second: F801 is a part, and a net that spans a fuse
+# is a net that says the fuse is not there.
+NET_DC["VIN_F"] = (0.0, INLET_UNLOADED_MAX)
 NET_DC["IGND_J"] = 0.0
 # The converter's own output pins, ahead of the rail filter and of the 5 V
 # regulator. Named RAW because that is what they are: 75 mVp-p of 580 kHz on
@@ -7874,6 +8043,23 @@ def supply(design):
     design.connect("VIN_J", ("J8", 1))
     design.connect("IGND_J", ("J8", 2))
 
+    # -- the inlet fuse, ahead of everything -------------------------------
+    #
+    # **In series with the live conductor and ahead of the choke**, so that
+    # what it protects includes the choke. A fuse is a two-terminal element in
+    # one leg of the pair and shunts nothing across it, which is why it can
+    # sit in front of the winding without being the fault the check below
+    # exists for: what must not go there is anything that *commons* the two
+    # conductors. See inlet_fuse() for the part, the rating and the honest
+    # limit on what a fuse is worth here.
+    design.add(Part(INLET_FUSE_REF, INLET_FUSE, FUSE_FP, mpn=INLET_FUSE_MPN,
+                    description=(
+                        "Inlet fuse, 1.6 A time-lag, in the live conductor "
+                        "ahead of L801: the converter datasheet's own "
+                        "recommended input fuse for 24 Vin models")))
+    design.connect("VIN_J", (INLET_FUSE_REF, 1))
+    design.connect("VIN_F", (INLET_FUSE_REF, 2))
+
     # -- the common-mode choke, and it goes first for a reason ------------
     #
     # Everything else on the primary -- D804, the three decoupling
@@ -7889,29 +8075,28 @@ def supply(design):
                         "Common-mode choke in the inlet pair, 2 x 1 mH, "
                         "800 mA: the second half of barrier_return(). "
                         "Windings are 1-4 and 2-3 -- see INLET_CHOKE_PINS")))
-    design.connect("VIN_J", (INLET_CHOKE_REF, INLET_CHOKE_PINS["L1_IN"]))
+    design.connect("VIN_F", (INLET_CHOKE_REF, INLET_CHOKE_PINS["L1_IN"]))
     design.connect("VIN", (INLET_CHOKE_REF, INLET_CHOKE_PINS["L1_OUT"]))
     design.connect("IGND_J", (INLET_CHOKE_REF, INLET_CHOKE_PINS["L2_IN"]))
     design.connect("IGND", (INLET_CHOKE_REF, INLET_CHOKE_PINS["L2_OUT"]))
 
-    # **There is no fuse here and the datasheet asks for one, so this is the
-    # place to say why.** Its own line reads "Recommended Input Fuse, 24 Vin
-    # models: 1'600 mA (slow blow)", followed by "the need of an external fuse
-    # has to be assessed in the final application". The assessment is that one
-    # is wanted: the inlet is shared with a *fabricated* board that has no fuse
-    # of its own, so a converter failing short is limited by the brick alone
-    # and takes the mixer with it. inlet_budget() gives the working current as
-    # 382 mA, so a 1.5 A slow-blow -- below the datasheet's figure and four
-    # times the load -- is the part.
+    # **The fuse above closes an entry that stood open for four passes**, and
+    # what closed it was not the requirement. The old note here read: "It is
+    # not fitted because no part number was verified this session. The obvious
+    # families do not hold: Littelfuse's 453 Nano2 is ultra-fast rather than
+    # Slo-Blo, its 154 series is a 2410 body and not the 1206 this was drawn
+    # around, and KiCad ships a land pattern for neither of the parts that
+    # would fit." Every clause of that is true and the conclusion drawn from
+    # it -- that the part could not be fitted -- was a fact about one
+    # manufacturer. SCHURTER's UMT 250 is time-lag by construction, KiCad
+    # ships its land pattern under the part's own name, and the 1.6 A variant
+    # has an order number on page 4 of a datasheet this repo has now read.
     #
-    # It is not fitted because **no part number was verified this session.**
-    # The obvious families do not hold: Littelfuse's 453 Nano2 is ultra-fast
-    # rather than Slo-Blo, its 154 series is a 2410 body and not the 1206 this
-    # was drawn around, and KiCad ships a land pattern for neither of the parts
-    # that would fit. Section 6 of the spec forbids inventing a value, and an
-    # order code is a value: a plausible MPN in ORDER_CODES is worse than an
-    # absent part, because check_orderable() would pass it and somebody would
-    # buy it. The requirement is derived and recorded; the part is a purchase.
+    # **The search was for a footprint that fitted a shape already drawn**, and
+    # that is the reusable half: "the 1206 this was drawn around" is the
+    # reason a 2410 body was a disqualification rather than a dimension. There
+    # was no board to fit it to -- the row it goes in is packed by
+    # placement.pack_east() and simply got 11.4 mm longer.
 
     # Reverse protection. Series rather than shunt, and the mixer's part for
     # the mixer's reason -- see INLET_DIODE. No TVS: the module's own input is

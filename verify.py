@@ -998,25 +998,29 @@ def check_fail_safe(nets, values):
 #
 #     **down as copper is laid, up only with the nets named.**
 #
-# **2, and the board it counts is the routed one, before the sync.** The board
-# on disk is the committed 55,854-segment board from bfa4483 -- the RP2040's,
-# fully routed -- and 2 is what DRC reports against its own embedded netlist.
-# It is *not* a claim that this design is two connections from finished:
-# check_board_is_the_design() is the instrument that says so, and it fails,
-# naming D806 as missing and 26 RP2040-periphery parts as present.
+# **Zero, and the board it counts is the seeded one.** `gen_pcb.py
+# --discard-routing --seed-routing` was run once: 290 footprints, 151 ground
+# stitches, 1652 track runs and 595 vias, **0 unconnected items and 0 DRC
+# violations**. The stale bfa4483 board this number used to describe is gone,
+# and with it check_board_is_the_design()'s failure -- the board is the design
+# for the first time.
 #
-# **The number will go up when the sync is run and that is the reason being
-# named in advance**, so that it is not read as a regression: KiCad's Update
-# PCB from Schematic will bring the controller zone's 27 nets and about 94
-# connections onto the board as unrouted. 263 of the 288 shared parts are at
-# identical coordinates, so the copper over the six channels, the CV rows, the
-# envelope rows, the ADC and the fail-safe is still exactly where it belongs.
+# **Zero at the start of hand-routing is not the same claim as zero at the end
+# of it, and the ratchet is what keeps the two apart.** What is on disk is a
+# *seed*: legal, closed, and laid by a maze router that optimises path cost
+# and knows nothing about which nets are audio, where a return current wants
+# to go, or which of two equal paths runs beside the switcher. Every one of
+# those is a reason to move copper, and moving copper can leave a connection
+# open. So this number may go up -- and only with the nets named here, which
+# is the rule it has always run on:
 #
-# **Zero is still the gate on fabrication**, and it is now the only thing
-# standing between this repository and a gerber set: design.DEFERRED and
+#     **down as copper is laid, up only with the nets named.**
+#
+# **It is still the gate on fabrication.** design.DEFERRED and
 # design.UNSPECIFIED are both empty, every part has a footprint, and
-# gen_plots.orderable() reads both. What it does not read is this.
-UNROUTED_ITEMS = 2
+# gen_plots.orderable() reads both -- and now this as well, which is the one
+# thing between this repository and a gerber set.
+UNROUTED_ITEMS = 0
 
 
 def read_drc(board, destination):
@@ -1478,7 +1482,15 @@ def check_open_pins(open_pins):
 # choke splits the inlet pair into a jack side and a converter side, and both
 # are primary: a check that named only the converter side would let the whole
 # inlet chain be re-routed out of the isolated region without complaining.
-PRIMARY_NETS = frozenset({"IGND", "IGND_J", "VIN", "VIN_J", "VIN_P"})
+# VIN_F is the same argument once more for F801, which splits the live
+# conductor again.
+#
+# **It lives in design.py now and this is the name that reads it**, because
+# gen_pcb.py needs the same list to reserve the primary's corner from the
+# router and the two files cannot import each other. Kept as a module-level
+# name here rather than spelled design.PRIMARY_NETS at each use, so that what
+# moved is where the list is declared and not which checks consult it.
+PRIMARY_NETS = design.PRIMARY_NETS
 
 # How far non-primary copper has to stay out of the primary's region. Not a
 # creepage figure -- at 20 V across a barrier rated 1600 VDC, creepage is not
@@ -1562,7 +1574,7 @@ def check_supply(nets, values):
 
     choke = design.INLET_CHOKE_REF
     choke_expected = {
-        str(design.INLET_CHOKE_PINS["L1_IN"]): "VIN_J",
+        str(design.INLET_CHOKE_PINS["L1_IN"]): "VIN_F",
         str(design.INLET_CHOKE_PINS["L1_OUT"]): "VIN",
         str(design.INLET_CHOKE_PINS["L2_IN"]): "IGND_J",
         str(design.INLET_CHOKE_PINS["L2_OUT"]): "IGND",
@@ -1592,14 +1604,22 @@ def check_supply(nets, values):
     # allow-list below says which parts may touch a primary net and says
     # nothing about *which* primary net, so moving C807 across the winding
     # changed nothing any instrument could see.
-    inlet_side = {"VIN_J", "IGND_J"}
-    for net in sorted(inlet_side):
-        strangers = sorted({part for part, _ in nets.get(net, ())}
-                           - {"J8", choke})
+    #
+    # **F801 is the one part added to that side and it is allowed by name.**
+    # The mechanism is *commoning*, not presence: a fuse is a two-terminal
+    # element in one leg and shunts nothing across the pair, so it can sit in
+    # front of the winding where a capacitor cannot. The allow-list is per net
+    # rather than shared for the same reason -- the fuse belongs on the live
+    # conductor and a fuse in the return would be a different circuit.
+    inlet_side = {"VIN_J": {"J8", design.INLET_FUSE_REF},
+                  "VIN_F": {design.INLET_FUSE_REF, choke},
+                  "IGND_J": {"J8", choke}}
+    for net, allowed in sorted(inlet_side.items()):
+        strangers = sorted({part for part, _ in nets.get(net, ())} - allowed)
         if strangers:
             problems.append(
                 f"{net} is on the jack side of {choke} and reaches "
-                f"{strangers} -- only the inlet and the choke may, or the "
+                f"{strangers} -- only {sorted(allowed)} may, or the "
                 f"choke's own decoupling shorts the pair in front of it and "
                 f"the common-mode current never sees the winding")
 
@@ -1777,20 +1797,31 @@ def check_isolation_gap(board):
         raise SystemExit(f"{board} does not exist -- run gen_pcb.py")
     iso_x = placement.ISOLATION_X
     iso_y = placement.ISOLATION_Y
+    # **The region has a southern edge and it did not use to**, which is
+    # placement.isolation_south()'s own note: this was a quadrant with no
+    # bottom, true only while the supply band was the southernmost thing on
+    # the board. It stopped being that when the Pico got a strip below it, and
+    # this check duly reported D806's VSYS and VMOD copper -- 27 mm south, in
+    # the digital domain -- as inside the primary's region. It was right about
+    # the region and the region was wrong.
+    iso_south = placement.isolation_south()
     allowed = set(design.ISOLATION_BRIDGE) | {design.SUPPLY_REF}
     problems = []
     seen = 0
     for net, reference, x, y in _board_copper(board):
         if net in PRIMARY_NETS:
             seen += 1
-            if x > iso_x + ISOLATION_MM or y < iso_y - ISOLATION_MM:
+            if (x > iso_x + ISOLATION_MM or y < iso_y - ISOLATION_MM
+                    or y > iso_south + ISOLATION_MM):
                 problems.append(
                     f"{net} has copper at ({x:.2f}, {y:.2f}), outside the "
-                    f"primary's region (x <= {iso_x:.2f}, y >= {iso_y:.2f}) "
+                    f"primary's region (x <= {iso_x:.2f}, "
+                    f"{iso_y:.2f} <= y <= {iso_south:.2f}) "
                     f"-- the isolated side is a place on this board, not a "
                     f"set of net names")
         elif reference not in allowed:
-            if x < iso_x - ISOLATION_MM and y > iso_y + ISOLATION_MM:
+            if (x < iso_x - ISOLATION_MM and y > iso_y + ISOLATION_MM
+                    and y < iso_south - ISOLATION_MM):
                 problems.append(
                     f"{net} has copper at ({x:.2f}, {y:.2f}), inside the "
                     f"primary's region -- only {sorted(allowed)} may be "

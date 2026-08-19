@@ -271,17 +271,51 @@ drawing blocks early and badly rather than late and well.
 Three things about the block that must survive compaction:
 
 * **The isolation barrier is a place, not a net name.** The primary side —
-  `IGND`, `VIN`, `VIN_P` — lives west of `placement.ISOLATION_X` and south of
-  `ISOLATION_Y`, with **no ground pour under it at all**. `gen_pcb.build()`
-  pours the southern MDGND as an overlapping *L* for that reason, and
-  `verify.check_isolation_gap()` measures the region rather than a clearance.
-  `C810` is the one declared bridge and it is in `design.ISOLATION_BRIDGE`.
+  `IGND`, `VIN_J`, `VIN_F`, `VIN`, `VIN_P`, listed in `design.PRIMARY_NETS` —
+  lives west of `placement.ISOLATION_X`, south of `ISOLATION_Y` and **north of
+  `placement.isolation_south()`**, with **no ground pour under it at all**.
+  `gen_pcb.build()` pours the southern MDGND as three overlapping rectangles
+  for that reason, and `verify.check_isolation_gap()` measures the region
+  rather than a clearance. `C810` is the one declared bridge and it is in
+  `design.ISOLATION_BRIDGE`.
+
+  **The southern edge is new and its absence is the finding.** The region was
+  a quadrant with no bottom, which was true for exactly as long as the supply
+  band was the southernmost thing on the board — and it stopped being that
+  when the Pico got a strip below it. Two consequences at once: the check
+  reported `D806`'s VSYS and VMOD copper, 27 mm south and squarely digital, as
+  *inside the primary's region*; and the pour that leaves that region bare
+  left **the module strip's western third over no ground plane at all**. The
+  check was right about the region, and the region had grown a tail.
 * **The `>=300 kHz` rule is a fundamental-only rule.** `design.supply_beat()`
   shows the pump's 12th, 13th and 14th harmonics all fall inside the chosen
   part's own 522–638 kHz band, so the nearest beat is **5 kHz** and no
   switching frequency clears every harmonic. What makes it safe is the
   isolation — this module shares no rail with the mixer — and the fact that the
   product is second order. Do not re-derive the rule and stop there.
+* **The inlet fuse is fitted and the blocker was a catalogue.** SCHURTER
+  UMT 250, 1.6 A time-lag, `3403.0168.11`, in the live conductor between `J8`
+  and the choke -- so `VIN_J` reaches only the inlet and the fuse, and `VIN_F`
+  only the fuse and the choke. A fuse is a series element in one leg and
+  shunts nothing across the pair, which is why it may sit in front of the
+  winding where a capacitor may not. Three things to carry: **1.6 A and not
+  the 1.5 A this repo derived**, because 1.5 A is not one of the eighteen an
+  IEC 60127 series offers and a value that falls between two catalogue steps
+  is a derivation that never met a catalogue; **`inlet_budget()`'s series
+  resistance got three names**, because the moment the fuse joined the loop
+  `choke_r` stopped being the choke's and every `choke_*` key built from it
+  went on being called that -- `barrier_return()`'s fault, one block along;
+  and **what a fuse is worth here is bounded by a part nobody has chosen**,
+  since 1.25 x In takes an hour to open and a 2 A brick is 1.25 In.
+* **The two hole rules are owned, at `rules.hole_rules()`**, and the open
+  question about them did not survive being asked of the right page. It read
+  *"whether to design to the fabricator's published 0.20 mm rather than
+  KiCad's stricter 0.25 mm default"* -- **JLCPCB's number, on a PCBWay
+  board**. PCBWay publishes 0.406 mm hole-to-hole and 0.178 mm hole-to-copper,
+  so the fabricator is stricter on one and looser on the other and there was
+  never one comparison to make. The rule is the stricter of published and
+  KiCad's own, pointing both ways, and neither binds: `via_exclusion()` shows
+  the *copper* rule setting all three of a via's distances at this class.
 * **Summing rail powers understates a linear rail.** `supply_requirement()`
   says 3.11 W and the converter has to deliver 3.89, because V5 is made from
   VA+ and leaves the converter at twelve volts. `supply_fit()` counts from the
@@ -338,13 +372,30 @@ of them disagreed. That list is at the head of the ADC section in `design.py`.
 
 ## The board is hand-laid now, and that is the rule to read first
 
-**`gen_pcb.py` places and pours. It does not route.** `route.py` is deleted --
-a maze router with rip-up and retry, a fan-out escape and a three-way
-via-exclusion model, which closed this board at 0 unrouted and 0 DRC. The
-problem it existed for went with the RP2040's QFN-56; what it cost is the thing
-to carry, and it was never the copper. It was that the **board had to be a
-function of `design.py`**, so no question about geometry could be asked of a
-layout until it had been answered in Python first.
+**`gen_pcb.py` places and pours. It does not route.** `route.py` -- a maze
+router with rip-up and retry, a fan-out escape and a three-way via-exclusion
+model -- closed this board at 0 unrouted and 0 DRC. The problem it existed for
+went with the RP2040's QFN-56; what it cost is the thing to carry, and it was
+never the copper. It was that the **board had to be a function of `design.py`**,
+so no question about geometry could be asked of a layout until it had been
+answered in Python first.
+
+**`route.py` was deleted for one pass and is restored, and the restoration is
+a narrower claim than the deletion was.** It runs **once**, as
+`gen_pcb.py --seed-routing`, and what it produces is a starting point somebody
+edits in KiCad -- not an output the build reproduces. Running it once does not
+put the board back under `design.py`; re-running it on every build would, and
+`gen_pcb_guard.refuse_to_discard_routing()` already stops that by accident. The
+reason to have it is the person: a board handed over with 486 airwires and a
+board handed over with a legal route to adjust are two different jobs, and only
+the second one is editing.
+
+Two things about it that are worth not re-deriving. **The board is inside its
+competence rather than at the edge of it**: it closed the QFN board at
+0.09/0.09 on a 0.23 mm grid, and the fitted class is 0.20/0.20 on 0.45 mm with
+the MCP3564's 0.65 mm TSSOP as the finest pitch left. And **nothing in the file
+changed to come back** -- it imports nothing from this repo and takes its rules
+as an argument, which is why deleting and restoring it cost one `git show`.
 
 **The workflow consequence, and nobody may be allowed to discover it by
 accident:**
@@ -363,13 +414,60 @@ accident:**
   every one of those questions is asked *of the board*, by reading it back.
   None of them ever needed the board to have been written by us;
 * **`verify.UNROUTED_ITEMS` is a progress marker and the check around it is a
-  ratchet.** 485 is a freshly generated board: every connection unmade. It
-  comes down as copper is laid and may go up only with the reason written
-  there -- the same rule it always ran on, applied to a person instead of to a
-  router. Zero is the gate on gerbers, and `gen_plots.orderable()` reads it;
+  ratchet.** It is **0**: the seed closed every net, DRC reports nothing, and
+  `check_board_is_the_design()` passes for the first time. Zero at the *start*
+  of hand-routing is not the same claim as zero at the end of it -- the seed is
+  laid by a maze router that optimises path cost and knows nothing about which
+  nets are audio or where a return current wants to go, so moving copper is
+  expected and moving copper can open a connection. The rule is unchanged:
+  **down as copper is laid, up only with the nets named there.** Zero is the
+  gate on gerbers, and `gen_plots.orderable()` reads it;
 * **the stitching is not routing and stays.** A plane connection is a hole to
   the copper already underneath, and it is the one piece of geometry a person
-  would otherwise reproduce 151 times by hand.
+  would otherwise reproduce 151 times by hand. **It needs two distances and
+  not one**: two vias on different nets keep the copper rule, and two on the
+  *same* net keep only the hole rule, because there is no clearance between
+  them and there are still two drills. Using the copper figure for both is
+  0.2 mm of margin invented on a rule that does not exist, and the bypass
+  field is packed tightly enough that inventing it costs a stitch.
+
+## The placement is packed, not nudged, and the two functions are the rule
+
+**`placement.check_courtyard_gap()` is at zero.** It was 41 two passes ago and
+23 at the start of this one, and the attempts in between went 41 → 23 → 19 →
+12-with-three-overlaps before reverting. Every step was a number going down and
+no step could say *why* a part was where it ended up. What replaced them:
+
+* **`pack_east(chain, start_x)`** lays a row west to east, each part one
+  `required_gap()` from the last. It does not choose the order -- that is the
+  design, and the inlet is at the west edge because it is an inlet.
+* **`clear_south(north, south, dx)`** gives each of the seven bands south of
+  the relays a y that is the band above it plus the clearance of **one named
+  pair**. That pair is a claim and not an assertion: `check_courtyard_gap()`
+  walks all 290 parts, so a band derived from the wrong neighbour fails and
+  says which pair it should have been. It earned that the same day -- fitting
+  `F801` moved `C810` out from under an 0805 and under a 1210, and the check
+  said "C810 and C840 are 0.00 mm apart".
+
+**The board may grow and that is what makes this cheap.** The whole pass cost
+3.6 mm of length and 1.7 mm of width, on a board already 3.8x the enclosure it
+does not fit. Millimetres in y are the cheapest thing this design has and
+assembly comfort is what they buy. **The cost written down at `SUPPLY_Y` --
+"moving them costs 11 nets and 114 connections of re-routing" -- is dated**: it
+was true of the routed board on disk at the time, and the same edit made over
+hand-laid copper is expensive again. A cost that depends on the state of an
+artefact somewhere else has to be re-read, not quoted.
+
+**And the one that will happen again: a fix that asks what the two parts in the
+violation need and never asks what the rest of the row already has.** `R901`
+and `C701` were 0.07 mm apart; the fix moved the 24-capacitor bypass field
+0.6 mm east, with the reason written down as *"the field is 24 parts with
+nothing east of them for 1.5 mm"*. There is something east of them -- the ADC's
+input column -- and every one of those capacitors needs a ground stitch beside
+its pad. The last one missed `R656` by **0.03 mm** and the build stopped. The
+star moved instead. What is different from the previous instances is that the
+wrong reason was written as a checkable claim, and a generator checked it three
+edits later.
 
 **And two invariants moved in worth without moving in content.** `PDF_EPOCH`
 exists so a tracked plot is a function of the board -- and the board itself
@@ -545,7 +643,9 @@ what has to survive compaction is this.
 **It deletes about 25 parts and one whole class of problem.** U20, Y801 with
 R824/C832/C833, J14 with R820-R823, twelve supply capacitors and the BOOT and
 SWD headers. 314 parts became 289 and 201 nets became 184. 0.40 mm of pin pitch
-became 2.54, which is why `route.py` is gone.
+became 2.54, which is why `route.py` stopped being load-bearing -- it is
+restored and runs once as a seed, and the QFN is the reason it no longer
+has to close a board nobody could close by hand.
 
 **`docs/fabrication-class.md` was re-opened, re-decided at 0.15/0.15 on 2 oz,
 and put back to 0.09/0.09 on 1 oz -- and the round trip is the finding.** The
@@ -931,15 +1031,22 @@ cv-module/
   delta.py               this module's effect, via the mixer's own functions
   floorplan.py           zones, ground domains, boundary crossings
   rules.py               the fabrication rules, and the arithmetic behind them
-  placement.py           the floorplan as coordinates. No KiCad import
+  placement.py           the floorplan as coordinates. No KiCad import.
+                         pack_east() lays a row, clear_south() stacks the
+                         bands, and check_courtyard_gap() is at zero
+  route.py               the maze router. RESTORED, and it runs once: it is
+                         gen_pcb.py --seed-routing and nothing else calls it
   verify.py              the constraints, checked against KiCad's own netlist
   test_verify.py         plants faults to prove verify.py's checks can fail
 
   gen_pcb.py             -> out/cv-module.kicad_pcb, through pcbnew. Relaunches
                          itself under KiCad's Python, then re-runs gen_project.
-                         PLACE AND POUR ONLY: re-running it discards hand-routed
-                         copper. Sync a netlist change with KiCad's own Update
-                         PCB from Schematic instead
+                         PLACE AND POUR by default: re-running it discards
+                         hand-routed copper, and gen_pcb_guard refuses unless
+                         --discard-routing. --seed-routing adds one pass of
+                         route.py, which is how the handover board was made.
+                         Sync a netlist change with KiCad's own Update PCB
+                         from Schematic instead
   gen_netlist.py         -> out/cv-module.net
   gen_sch.py             -> out/cv-module.kicad_sch
   gen_project.py         -> out/cv-module.kicad_pro, the lib tables,
@@ -992,7 +1099,14 @@ edited in KiCad:
 ```bash
 python3 gen_pcb.py                 # refuses if the board carries signal copper
 python3 gen_pcb.py --discard-routing   # and this is how you mean it
+python3 gen_pcb.py --discard-routing --seed-routing   # ...with one router pass
 ```
+
+The third form is how the handover board was made: place, pour, stitch, and
+then **one** run of `route.py` so that what somebody opens is a legal route to
+adjust rather than a ratsnest. It is a starting point and not an output --
+nothing downstream reads it, and the guard refuses the next run whether the
+copper came from the router or from a person.
 
 The refusal is `gen_pcb_guard.refuse_to_discard_routing()` and it is enforced
 rather than documented, because for one pass it was documented in three files

@@ -17,6 +17,7 @@ C843,22u/16V X5R,Capacitor_SMD:C_1210_3225Metric,GRM21BR61C226ME44L,1,5,0.08,0.3
 "D801,D802,D813,D823,D833",BAT54,Diode_SMD:D_SOD-123,BAT54-7-F,5,6,0.05,0.15,GBP,100,band,"typical distributor band, not read this session"
 "D803,D806",PMEG2010AEH,Diode_SMD:D_SOD-123F,"PMEG2010AEH,115",2,3,0.10,0.30,GBP,100,band,"typical distributor band, not read this session"
 D804,B340A,Diode_SMD:D_SMA,B340A-13-F,1,5,0.20,0.60,GBP,10,band,"typical distributor band, not read this session"
+F801,1.6A T 250V,Fuse:Fuse_Schurter_UMT250,3403.0168.11,1,5,1.80,1.80,USD,1,read,https://www.digikey.com/en/products/detail/schurter-inc/3403-0168-11/957690
 J1,CH1,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
 J2,CH2,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
 J3,CH3,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"

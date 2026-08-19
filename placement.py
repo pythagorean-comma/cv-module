@@ -101,7 +101,15 @@ GAP_CLASS = (
     ("RaspberryPi_Pico", "module"),
     ("PinHeader", "through_hole"),
     ("TRACO", "tall"), ("Relay_", "tall"), ("L_CommonMode", "tall"),
-    ("TO-252", "tall"), ("L_Bourns", "tall"), ("Fuse_", "tall"),
+    ("TO-252", "tall"), ("L_Bourns", "tall"),
+    # **("Fuse_", "tall") was here and it was wrong the moment it was
+    # used.** GAP_MM["tall"] is about a part that blocks a neighbour's
+    # approach angle -- a relay, the converter brick, the choke, the
+    # DPAK, all 6.5 mm and up. The fitted fuse is a 3 mm ceramic tube,
+    # the height of a 1210 capacitor, placed with tweezers and soldered
+    # at its outer ends: a passive, which is the default, so the row is
+    # deleted rather than corrected. It cost nothing while no fuse was
+    # fitted, which is exactly why it survived to be used.
     ("TSSOP", "ic"), ("SOIC", "ic"), ("SO-6L", "ic"), ("SOP-16", "ic"),
     ("TestPoint", "passive"),
 )
@@ -196,7 +204,14 @@ SIZE = {
     # design.CHOKE_FP.
     "L_CommonMode_Wuerth_WE-SL2": (10.00, 6.50),
     "TSSOP-20": (7.70, 7.00),
-    "TO-252-2": (11.10, 7.00), "Fuse_1206": (4.56, 2.26), "D_SMA": (7.00, 3.50),
+    "TO-252-2": (11.10, 7.00), "D_SMA": (7.00, 3.50),
+    # **The inlet fuse, and "Fuse_1206": (4.56, 2.26) was here instead.**
+    # That entry was written when a 1206 fuse was the shape being drawn
+    # around, and no fuse was ever fitted -- so a table row described a
+    # part nothing had, for four passes, and could not be wrong. The part
+    # that arrived is a 3 x 10.1 mm ceramic tube, near enough three times
+    # the length. Read off KiCad's own F.CrtYd like every other row here.
+    "Fuse_Schurter_UMT250": (11.40, 4.26),
     "SOIC-20W": (11.86, 13.30),
     "PinHeader_1x02": (3.54, 6.09), "PinHeader_1x03": (3.54, 8.62),
     "PinHeader_1x05": (3.54, 13.70),
@@ -245,6 +260,123 @@ ANCHOR = {"PinHeader_1x02": (0.0, 1.275), "PinHeader_1x03": (0.0, 2.54),
 # both numbers exist at once, and it is what would have caught the transposed
 # entries the first time the board was built.
 COURTYARD_TOLERANCE_MM = 0.06
+
+
+# ---------------------------------------------------------------------------
+# The two packers, and they are what check_courtyard_gap() failed for
+# ---------------------------------------------------------------------------
+#
+# **Both exist because the fix for a gap violation is arithmetic and was being
+# done by hand.** The last pass moved seven columns by odd amounts and got 41
+# violations to 23; what it could not do is answer "and why is *that* part
+# where it is", because the answer was "it was nudged until the number went
+# down". These two functions are that nudging, written out: a row is laid west
+# to east with each part one required_gap() from the last, and a band sits as
+# far north as the band above it allows. Every coordinate they produce names
+# the pair that set it.
+#
+# **They are deliberately not a solver.** Nothing here searches, minimises or
+# scales: a chain is packed in the order it is declared, and a band is pushed
+# by exactly one named neighbour. The dead ends the last pass paid for were
+# both the other thing -- sweeping ROW_PITCH took 41 to 53, and a blanket
+# column scale cleared violations while moving parts that were fine, which
+# expresses nothing about why any of them moved.
+
+
+def _extent(ref, rotation):
+    """(dx, dy, width, height) of a part's courtyard about its own anchor.
+
+    The half of courtyard() that does not need a position, so that a packer
+    can ask how big a part is before deciding where to put it. Splitting it
+    out is what stops the packers holding a second opinion about a footprint's
+    size -- the fault gen_pcb.escape_plan() was written out of, one repo pass
+    ago, where two files computed the same criterion and disagreed.
+    """
+    footprint = design.PARTS[ref].footprint
+    if footprint is None:
+        raise KeyError(f"{ref} has no footprint, so it has no extent")
+    # **Longest token first, and that is not tidiness.** These are substring
+    # matches, and "D_SOD-123" is a substring of "D_SOD-123F" -- so with plain
+    # dict order the low-drop clamp at D803 would silently be measured as the
+    # 0.3 mm wider package it replaced, and the only thing that would ever
+    # have said so is gen_pcb.check_courtyards(). Matching the most specific
+    # token means the table can gain a variant without its position in the
+    # dict becoming load-bearing.
+    for token in sorted(SIZE, key=len, reverse=True):
+        if token in footprint:
+            width, height = SIZE[token]
+            offset = ANCHOR.get(token, (0.0, 0.0))
+            break
+    else:
+        raise KeyError(f"{ref}: nothing in SIZE matches {footprint}")
+    radians = math.radians(rotation)
+    cosine, sine = math.cos(radians), math.sin(radians)
+    if rotation % 180:
+        width, height = height, width
+    return (offset[0] * cosine + offset[1] * sine,
+            -offset[0] * sine + offset[1] * cosine, width, height)
+
+
+def pack_east(chain, start_x):
+    """Lay a row west to east, each part one required_gap from the one before.
+
+    `chain` is ((ref, rotation), ...) in west-to-east order and the first
+    part's x is `start_x`; every other x is the previous part's east edge plus
+    the gap the larger of the two classes asks for. The result is a dict, so
+    the row reads as coordinates and is still a function of GAP_MM.
+
+    **What it does not do is decide the order.** That is the design -- the
+    inlet is at the west edge because it is an inlet, and the choke is next to
+    it because design.supply() says the decoupling has to be on the converter
+    side of it. This spaces a sequence somebody else chose.
+    """
+    positions, edge, previous = {}, None, None
+    for ref, rotation in chain:
+        dx, _, width, _ = _extent(ref, rotation)
+        if previous is None:
+            x = start_x
+        else:
+            x = edge + required_gap(previous, ref) + width / 2 - dx
+        positions[ref] = x
+        previous, edge = ref, x + dx + width / 2
+    return positions
+
+
+def east_edge_at(ref, rotation, edge_x):
+    """The x that puts a part's own east courtyard edge on a given line.
+
+    For the one class of part whose position is the *outline* rather than a
+    neighbour: a receptacle has to be reachable by a plug, so what is declared
+    is which line it sits on and the coordinate follows. check_edge_parts()
+    is the other half and the reason this cannot be a literal -- a connector
+    placed as far east as anything else is still five millimetres inside the
+    board, and it draws, routes and passes DRC exactly like one that works.
+    """
+    dx, _, width, _ = _extent(ref, rotation)
+    return edge_x - dx - width / 2
+
+
+def clear_south(north, south, dx=0.0):
+    """Centre-to-centre y separation two parts need, at a horizontal offset.
+
+    Each argument is a `(ref, rotation)` pair. `dx` is how far apart the two
+    courtyards already are in x, because check_courtyard_gap() measures the
+    diagonal -- two parts one class apart in x need no separation in y at all,
+    and the packing arithmetic has to agree with the check or it is solving a
+    different problem.
+
+    Used to stack the bands south of the relay row, one band per line, each
+    naming the single pair that sets it. That the *named* pair is the binding
+    one is not asserted here and does not need to be: check_courtyard_gap()
+    walks every pair on the board, so a band derived from the wrong neighbour
+    fails immediately and says which pair it should have been.
+    """
+    _, north_dy, _, north_h = _extent(*north)
+    _, south_dy, _, south_h = _extent(*south)
+    need = required_gap(north[0], south[0])
+    reach = math.sqrt(max(need * need - dx * dx, 0.0))
+    return north_dy + north_h / 2 + reach + south_h / 2 - south_dy
+
 
 # West to east, and the order is floorplan.ZONES' own. Each entry is a column
 # of one part per channel; the comment names the zone it implements.
@@ -317,6 +449,64 @@ SHARED_Y = CV_ROW_0 + design.CHANNELS * ROW_PITCH + 10.0
 SPLIT_Y = SHARED_Y + 30.0
 GROUND_GAP = 2.0
 
+# ---------------------------------------------------------------------------
+# The southern band stack: seven rows, each as far north as the one above
+# allows
+# ---------------------------------------------------------------------------
+#
+# **Everything south of the bypass relays is one stack and it was over-packed
+# by seven millimetres.** The rows were placed one at a time over five passes,
+# each against the parts that happened to be there, and by the time the module
+# and the inlet choke were in it there were 23 courtyard-gap violations spread
+# across six rows -- with no way to say which row was in the wrong place,
+# because every row's y was an absolute number.
+#
+# Each anchor below is the row above it plus `clear_south()` of the one pair
+# that binds, so the answer to "why is this row here" is the pair named on its
+# own line. What that costs is board length: the stack is 3.66 mm longer than
+# it was and the module goes 1.05 mm further south with it, for 109 mm2 --
+# **0.5 % of a board already 3.8x the enclosure it does not fit.** Millimetres
+# in y are the cheapest thing this design has, and assembly comfort is what
+# they are being spent on.
+#
+# **The pair on each line is a claim, not an assertion, and that is deliberate.**
+# check_courtyard_gap() walks all 290 parts against each other, so a row
+# derived from the wrong neighbour is a failure with the right pair named in
+# it. Deriving *and* asserting the same fact from the same table would be one
+# instrument covering for another.
+#
+# **It has already earned that once.** The supply row's pair was C841 / C810
+# until F801 was fitted; the fuse lengthened the row, U15 and ISOLATION_X went
+# east with it, and C810 slid out from under an 0805 and under a 1210 -- which
+# is 0.6 mm taller on each side. The check said "C810 and C840 are 0.00 mm
+# apart" on the first run after the part went in, which is the pair, the
+# distance and the direction in one line.
+#
+# **Reading the stack downward, with what each push actually was:**
+#
+#   | band     | binding pair            | moved  |
+#   |----------|-------------------------|--------|
+#   | failsafe | -- (the relays clear it)| 0      |
+#   | pulldown | D801 / R812             | 0.03   |
+#   | header   | R811 / J19              | 0.52   |
+#   | panel    | J16 / R827              | 0.05   |
+#   | switcher | C838 / C840             | 0.15   |
+#   | supply   | C840 / C810             | 4.26   |
+#   | module   | U15 / U19               | 1.65   |
+#
+# **The supply row's 3.66 mm is the interesting one and it is a chain of
+# three.** The primary row needs 1.2 mm more than it had, so U15 moves east;
+# ISOLATION_X is derived from U15's own pin 3-to-5 gap so it moves with it;
+# and C810, the one declared bridge, sits on that line -- which walks it east
+# into the switcher block and under C841. The band moves south to give it back
+# the 0.6 mm an 0805 beside an 0805 wants. Three coordinates, one edit,
+# because doing them in sequence is three placements of which two are wrong.
+FAILSAFE_Y = SPLIT_Y + 10.0
+PULLDOWN_Y = FAILSAFE_Y + clear_south(("D801", 90), ("R812", 90))
+HEADER_Y = PULLDOWN_Y + clear_south(("R811", 90), ("J19", 0))
+PANEL_Y = HEADER_Y + clear_south(("J16", 0), ("R827", 90))
+SWITCHER_Y = PANEL_Y + clear_south(("C838", 90), ("C840", 90))
+
 # Zone P, and it is the only block on this board with **two** boundaries
 # through it. The ground split at SPLIT_Y separates two returns that meet at
 # R902; the isolation barrier separates two returns that meet nowhere, and the
@@ -350,11 +540,62 @@ GROUND_GAP = 2.0
 # The module goes in new board area instead -- see CONTROLLER below. Growing
 # the outline is free here in a way that shuffling is not, which is a property
 # of a hand-laid board and not of this one in particular.
-SUPPLY_Y = SPLIT_Y + 39.56             # 197.0, the band's own row
-SUPPLY_U15_X = 35.0                    # pad 1, and the pins run east from it
+#
+# **And the cost that argument is built on has expired, which is worth marking
+# rather than deleting.** "Moving them costs 11 nets and 114 connections of
+# re-routing" was true of the board on disk at the time, which was
+# `bfa4483`'s, routed. That copper is discarded by the one
+# `gen_pcb.py --discard-routing` this pass runs, so for the length of this
+# pass a placement move costs nothing at all -- and this row does move, 4.68
+# mm east and 4.26 south, for gaps a person's iron needs. **The conclusion
+# was right and its reason is dated**: the same edit made a week later, over
+# hand-laid copper, is the expensive one again. A cost that depends on the
+# state of an artefact somewhere else is a cost that has to be re-read, not
+# quoted.
+# **The row is packed west to east now and its x coordinates are a function
+# of GAP_MM.** They were fourteen numbers on a 3-to-4 mm pitch, and the parts
+# plus the gaps they ask for come to 91.6 mm against the 90.4 they had -- so
+# six of the 23 violations were this row being 1.2 mm short of itself, in six
+# different places. pack_east() lays it from the inlet, which is the one part
+# whose x is a decision: J8 is at the west edge because it is the inlet.
+SUPPLY_ROW = (("J8", 0), ("F801", 90), ("L801", 0), ("D804", 90),
+              ("C807", 90), ("C808", 90), ("C809", 90), ("U15", 0),
+              ("R804", 90), ("C811", 90), ("R805", 90), ("C812", 90),
+              ("C813", 90), ("U16", 0), ("C814", 90))
+INLET_X = 6.0
+SUPPLY_X = pack_east(SUPPLY_ROW, INLET_X)
 # Between pin 3 and pin 5, which are 5.08 mm apart because pin 4 does not
-# exist. Computed rather than typed so that moving the package moves the line.
-ISOLATION_X = SUPPLY_U15_X + 3 * 2.54
+# exist. Computed rather than typed so that moving the package moves the line
+# -- and this pass is the one where that mattered: the packer moved U15 4.68
+# mm east and the barrier went with it.
+ISOLATION_X = SUPPLY_X["U15"] + 3 * 2.54
+# **C810 sits one tall-class gap north of the converter's own courtyard**, and
+# that is the whole of its y. It was ISOLATION_Y + 1.5, which put it 0.77 mm
+# off a 22 mm brick -- a number chosen when the barrier was drawn and never
+# asked about again, on the one part that has to be exactly where it is.
+ISOLATION_BRIDGE_DY = -clear_south(("C810", 0), ("U15", 0))
+# The band's own row, and it is the last link of the chain the stack comment
+# above describes: U15 east, ISOLATION_X east, C810 east into C841's column,
+# and the band south by what an 0805 beside an 0805 asks for.
+SUPPLY_Y = SWITCHER_Y + clear_south(("C840", 90), ("C810", 0)) \
+    - ISOLATION_BRIDGE_DY
+# **The strip the module sits in, south of everything.** U15 is 9.6 mm of
+# brick and the module wants a whole iron shaft beside its castellations, so
+# this is the largest single clearance on the board.
+MODULE_Y = SUPPLY_Y + clear_south(("U15", 0), ("U19", 270))
+# **The board's east edge, and the supply row sets it now.** outline() leaves
+# MARGIN off the side an edge part faces, so the east edge is simply the
+# furthest east courtyard on the board -- and fitting F801 moved that from
+# U19 to C814 at the end of the packed supply row. U19 was at a literal
+# x = 75.0, which was the edge until it was not: the row grew 5.9 mm and the
+# module went from touching the outline to 3.8 mm inside it, which is a USB
+# socket no plug reaches. Derived from the row that sets it, so the next part
+# added to that row moves the module with it.
+# MARGIN is on it because extents() puts it there: the outline is the
+# non-edge parts plus a margin, and an edge part reaches *that* -- it does
+# not set it. Leaving the margin off here is the circularity the check
+# was written to break, arriving from the other side.
+BOARD_EAST_X = SUPPLY_X["C814"] + _extent("C814", 90)[2] / 2 + MARGIN
 # The band's northern edge. Nothing referenced to IGND sits north of this, and
 # the MDGND pour stops here on the primary's side of ISOLATION_X.
 ISOLATION_Y = SUPPLY_Y - 7.0
@@ -363,6 +604,34 @@ ISOLATION_Y = SUPPLY_Y - 7.0
 # claims, and this repo has been caught before by one instrument covering for
 # another.
 ISOLATION_BRIDGE = ("C810",)
+def isolation_south():
+    """The primary's region has a southern edge, and it did not use to.
+
+    **`check_isolation_gap()` measured a quadrant: west of ISOLATION_X and
+    south of ISOLATION_Y, with no bottom to it.** That was true for as long as
+    the supply band was the southernmost thing on the board, which it was for
+    every pass until the Pico needed a strip below it. It is not true now:
+    D806 sits at x = 44, y = 221 -- 27 mm south of the supply row, in the
+    digital domain, on VSYS and VMOD -- and the check reported its copper as
+    *inside the primary's region*, correctly, against a region that had grown
+    a tail.
+
+    **And the pour had the same tail, which is the half that mattered.**
+    gen_pcb.build() pours the southern MDGND as two overlapping rectangles so
+    that the primary's corner is left bare; with no southern edge, "the
+    primary's corner" was everything west of the line all the way down, so the
+    module strip's western end had **no ground plane under it at all**. A
+    module whose return is a plane, over board with no plane.
+
+    The edge is one GROUND_GAP south of the southernmost primary courtyard.
+    Derived rather than declared for the reason ISOLATION_X is: the row is
+    packed by pack_east() and its parts move, and a boundary that has to be
+    re-typed when they do is a boundary that will be wrong.
+    """
+    return max(courtyard(ref)[3]
+               for ref in design.PRIMARY_PARTS) + GROUND_GAP
+
+
 # How far east of the line a ground stitch has to be pushed to find copper.
 # **Not the same number as GROUND_GAP / 2 and that is why it exists.** The pour
 # starts one gap east of the line; a via placed exactly there is half its own
@@ -377,34 +646,50 @@ ISOLATION_STITCH_MM = 3.0
 SUPPLY = {
     # -- primary, west of ISOLATION_X, no pour beneath ---------------------
     #
-    # **The whole row moved east by 2 mm to fit L801 and the board did not
-    # grow.** The choke is 10.09 mm of courtyard and the gap between J8 and
-    # D804 was 9.48, so something had to give; what gave is the 3 mm of slack
-    # between U15's east edge and R804, which is now 1 mm, plus 2 mm taken out
-    # of the secondary's own spacing. The alternative was to grow the band
-    # eastwards, which is the one direction that costs board *width* -- the
-    # supply band is the south edge, so it is free to grow in y and not in x.
-    "J8": (6.0, SUPPLY_Y - 3.0, 0),
-    # Immediately at the inlet, ahead of everything else on the primary. See
-    # design.supply(): the decoupling has to be on the converter side of it or
-    # the choke sees the inlet pair already commoned.
-    "L801": (13.0, SUPPLY_Y, 0),
-    "D804": (20.0, SUPPLY_Y, 90),
-    "C807": (24.5, SUPPLY_Y, 90),
-    "C808": (28.5, SUPPLY_Y, 90),
-    "C809": (31.5, SUPPLY_Y, 90),
-    "U15": (SUPPLY_U15_X, SUPPLY_Y, 0),
+    # **The row's x comes from SUPPLY_X and its order from SUPPLY_ROW.** The
+    # note this replaces said the row "moved east by 2 mm to fit L801 and the
+    # board did not grow", and described where the two millimetres were taken
+    # from: 2 mm out of the secondary's spacing and 2 of the 3 mm between
+    # U15's east edge and R804. Both of those were gaps GAP_MM asks 2.0 for,
+    # so what that pass actually did was spend the assembly clearance to avoid
+    # spending board -- and it did it without an instrument, because
+    # check_courtyard_gap() did not exist yet. The trade is the other way
+    # round now and it is stated where it is made: this row grows east into
+    # board that is free, and the band it is in grows south for the same
+    # reason.
+    #
+    # J8 is 3 mm north of the row because a 1x02's anchor is pad 1 and the
+    # part is the only through-hole one here; the choke immediately follows it
+    # because design.supply() puts the decoupling on the converter's side of
+    # the winding, and putting it first is worth 0 dB.
+    "J8": (SUPPLY_X["J8"], SUPPLY_Y - 3.0, 0),
+    # **On end, and the rotation is worth 10 mm of board width.** The fuse is
+    # 3 x 10.1 mm of ceramic and the row runs west to east, so lying it along
+    # the row costs 11.4 mm of row and 11 % of the board's area; standing it
+    # across the row costs 4.26 mm of row and 1.95 mm of the band's northern
+    # shoulder, which the stack above gives back in y. It is also what every
+    # other small part in this row does -- D804 and the five capacitors are
+    # all at 90 -- so the odd one out would have been the flat one.
+    "F801": (SUPPLY_X["F801"], SUPPLY_Y, 90),
+    "L801": (SUPPLY_X["L801"], SUPPLY_Y, 0),
+    "D804": (SUPPLY_X["D804"], SUPPLY_Y, 90),
+    "C807": (SUPPLY_X["C807"], SUPPLY_Y, 90),
+    "C808": (SUPPLY_X["C808"], SUPPLY_Y, 90),
+    "C809": (SUPPLY_X["C809"], SUPPLY_Y, 90),
+    "U15": (SUPPLY_X["U15"], SUPPLY_Y, 0),
     # On the line, and the only thing that is. Offset east by half a pad so
-    # that its MDGND end lands inside the pour and its IGND end does not.
-    "C810": (ISOLATION_X + 0.6, ISOLATION_Y + 1.5, 0),
+    # that its MDGND end lands inside the pour and its IGND end does not; its
+    # y is ISOLATION_BRIDGE_DY, which is the converter's courtyard and not the
+    # band edge.
+    "C810": (ISOLATION_X + 0.6, SUPPLY_Y + ISOLATION_BRIDGE_DY, 0),
     # -- secondary, east of the package ------------------------------------
-    "R804": (58.0, SUPPLY_Y, 90),
-    "C811": (62.0, SUPPLY_Y, 90),
-    "R805": (66.0, SUPPLY_Y, 90),
-    "C812": (70.0, SUPPLY_Y, 90),
-    "C813": (75.0, SUPPLY_Y, 90),
-    "U16": (84.0, SUPPLY_Y, 0),
-    "C814": (93.0, SUPPLY_Y, 90),
+    "R804": (SUPPLY_X["R804"], SUPPLY_Y, 90),
+    "C811": (SUPPLY_X["C811"], SUPPLY_Y, 90),
+    "R805": (SUPPLY_X["R805"], SUPPLY_Y, 90),
+    "C812": (SUPPLY_X["C812"], SUPPLY_Y, 90),
+    "C813": (SUPPLY_X["C813"], SUPPLY_Y, 90),
+    "U16": (SUPPLY_X["U16"], SUPPLY_Y, 0),
+    "C814": (SUPPLY_X["C814"], SUPPLY_Y, 90),
 }
 
 SHARED = {
@@ -421,7 +706,11 @@ SHARED = {
 
     # Zone A0, the bond and the one bridge constraint 2 allows.
     "J7": (6.0, SHARED_Y + 10.0, 0),
-    "R901": (6.0, SHARED_Y + 16.0, 90),
+    # **5.47 and not 6.0, which is C701's west edge less a passive gap.**
+    # 7.02 - GAP_MM["passive"] - 0.95 = 5.47. It comes off the x = 6.0 column
+    # J7 and R902 share, which is alignment and not a requirement -- see
+    # BYPASS_X for the version of this that moved the other part instead.
+    "R901": (5.47, SHARED_Y + 16.0, 90),
 
     # On the line: the two straddling kinds and the module's own star.
     "U11": (20.0, SPLIT_Y, 90),
@@ -442,15 +731,15 @@ SHARED = {
 
     # Zone F south of the line: the pump, the sink and the flybacks. The coils
     # are north of them at the relays; nothing here carries audio.
-    "C805": (40.0, SPLIT_Y + 10.0, 90),
-    "D801": (44.0, SPLIT_Y + 10.0, 90),
-    "D802": (48.0, SPLIT_Y + 10.0, 90),
-    "C806": (52.0, SPLIT_Y + 10.0, 90),
-    "R803": (56.0, SPLIT_Y + 10.0, 90),
-    "Q801": (60.0, SPLIT_Y + 10.0, 0),
-    "D813": (66.0, SPLIT_Y + 10.0, 90),
-    "D823": (70.0, SPLIT_Y + 10.0, 90),
-    "D833": (74.0, SPLIT_Y + 10.0, 90),
+    "C805": (40.0, FAILSAFE_Y, 90),
+    "D801": (44.0, FAILSAFE_Y, 90),
+    "D802": (48.0, FAILSAFE_Y, 90),
+    "C806": (52.0, FAILSAFE_Y, 90),
+    "R803": (56.0, FAILSAFE_Y, 90),
+    "Q801": (60.0, FAILSAFE_Y, 0),
+    "D813": (66.0, FAILSAFE_Y, 90),
+    "D823": (70.0, FAILSAFE_Y, 90),
+    "D833": (74.0, FAILSAFE_Y, 90),
 
     # **J8 was here, and it moved twice for opposite reasons.** It was filed
     # with J9-J11 as a connector, was found to be a straddler carrying both
@@ -565,8 +854,14 @@ SHARED = {
 # switcher as this band allows, and that is the one piece of separation here
 # that is about noise rather than about length: it is the only block on the
 # board whose ground is somebody else's.
-CONTROLLER_Y = SPLIT_Y + 20.6           # 178.0, the package's own row
-CONTROLLER_X = 82.0
+# **CONTROLLER_X and CONTROLLER_Y were here and nothing read them.** They
+# were the QFN's own row and column, and when the part became a module in a
+# strip of new board they stopped describing anything -- 178.0 was a row with
+# no part on it and 82.0 a column with no part in it, both still declared,
+# both still correct-looking. That is design.RAILS' "V3V3" one file along: a
+# declaration nothing is obliged to use cannot be wrong, and this repo has now
+# found the same shape four times. Deleted rather than fixed, because the
+# module's position is one line in CONTROLLER and does not want a constant.
 
 CONTROLLER = {
     # -- the module, in a strip of new board south of the supply row --------
@@ -586,12 +881,12 @@ CONTROLLER = {
     # three 0.29 mm edge-clearance violations against a 0.30 mm rule, and
     # check_edge_parts() could not have, because it asks whether the courtyard
     # reaches the outline and both rotations do.
-    "U19": (75.0, 220.0, 270),
+    "U19": (east_edge_at("U19", 270, BOARD_EAST_X), MODULE_Y, 270),
     # The ORing diode, on the module's own side of the run from U22.
-    "D806": (44.0, 220.0, 90),
+    "D806": (44.0, MODULE_Y, 90),
 
     # -- the reset link ----------------------------------------------------
-    "J19": (38.0, 176.0, 0),
+    "J19": (38.0, HEADER_Y, 0),
 
     # -- the 5 V switcher, exactly where it already is ---------------------
     #
@@ -602,43 +897,65 @@ CONTROLLER = {
     # coils. Re-siting the switcher to sit beside the module would have been
     # tidier on the sheet and would have cost eight parts' worth of routing
     # for nothing.
-    "U22": (58.0, 190.5, 0),
-    "L802": (66.0, 190.5, 0),
-    "C840": (52.0, 190.5, 90),
-    "C841": (48.0, 190.5, 90),
-    "C842": (58.0, 186.0, 90),
-    "C843": (73.0, 190.5, 90),
-    "R850": (77.0, 190.5, 90),
-    "R851": (80.0, 190.5, 90),
+    "U22": (58.0, SWITCHER_Y, 0),
+    "L802": (66.0, SWITCHER_Y, 0),
+    "C840": (52.0, SWITCHER_Y, 90),
+    "C841": (48.0, SWITCHER_Y, 90),
+    # U22's own input capacitor, so it is in the switcher band and 4.5 mm
+    # north of it rather than on the panel row it happened to share a y
+    # with. The two bands no longer move together and a bypass that stayed
+    # behind would be a bypass at whatever distance the stack left it.
+    "C842": (58.0, SWITCHER_Y - 4.5, 90),
+    # 73.1 and not 73.0: the choke is a tall part and wants 2.0 mm, and at
+    # 73.0 it had 1.90.
+    "C843": (73.1, SWITCHER_Y, 90),
+    "R850": (77.0, SWITCHER_Y, 90),
+    "R851": (80.0, SWITCHER_Y, 90),
 
     # -- the panel headers, on the south edge where a loom can reach them --
-    "J15": (14.0, 176.0, 0),
-    "J16": (20.0, 176.0, 0),
-    "J17": (26.0, 176.0, 0),
-    "J18": (32.0, 176.0, 0),
+    "J15": (14.0, HEADER_Y, 0),
+    "J16": (20.0, HEADER_Y, 0),
+    "J17": (26.0, HEADER_Y, 0),
+    "J18": (32.0, HEADER_Y, 0),
 
     # -- the MIDI receiver, west, on somebody else's ground ---------------
-    "U21": (14.0, 187.0, 0),
-    # 4.5 mm south of U21 rather than 4.5 north: DRC's silkscreen check found
-    # the reference field of U21 clipped by this pad's solder mask, which is a
+    "U21": (14.0, PANEL_Y + 1.0, 0),
+    # South of U21 rather than north: DRC's silkscreen check found the
+    # reference field of U21 clipped by this pad's solder mask, which is a
     # legibility fault rather than an electrical one and is still a fault --
     # a designator that cannot be read is a part somebody fits by counting.
     # Its own datasheet distance is what constrains it: "within 1 cm of each
     # pin", and check_midi_bypass() holds that.
-    "C835": (10.0, 191.5, 90),
-    "R827": (22.0, 186.0, 90),
-    "D805": (25.0, 186.0, 90),
-    "C836": (28.0, 186.0, 90),
-    "R828": (31.0, 186.0, 90),
-    "R829": (34.0, 186.0, 90),
+    #
+    # **It was at x = 10 and 4.5 mm south, and both numbers were nearly wrong
+    # at once.** 4.5 mm put its courtyard 0.63 mm from the opto's, against
+    # the 1.5 an SO-6L's pin row wants; and the pins this capacitor is for --
+    # 6 and 4, VCC and GND -- are both on the package's *east* face at
+    # x = 18.75, so from x = 10 the far one measured **9.99 mm against a
+    # 10.0 mm limit**. check_midi_bypass() passed by ten microns and would
+    # have failed on any southward move made to fix the courtyard. Two
+    # constraints on one part, pulling opposite ways, with only one of them
+    # instrumented.
+    #
+    # So it goes on the pins' own x, where the datasheet's distance is 5.7 mm
+    # rather than 9.99, and one ic-class gap south of the courtyard, which is
+    # what clear_south() returns.
+    "C835": (18.75, PANEL_Y + 1.0 + clear_south(("U21", 0), ("C835", 90)), 90),
+    # 22.15 and not 22.0: the first part east of the opto is beside an ic
+    # and wants a drag-solder lane, which is 1.5 mm and was 1.40.
+    "R827": (22.15, PANEL_Y, 90),
+    "D805": (25.0, PANEL_Y, 90),
+    "C836": (28.0, PANEL_Y, 90),
+    "R828": (31.0, PANEL_Y, 90),
+    "R829": (34.0, PANEL_Y, 90),
 
     # -- the panel networks -----------------------------------------------
-    "R830": (37.0, 186.0, 90),
-    "R831": (40.0, 186.0, 90),
-    "C837": (43.0, 186.0, 90),
-    "R832": (46.0, 186.0, 90),
-    "R833": (49.0, 186.0, 90),
-    "C838": (52.0, 186.0, 90),
+    "R830": (37.0, PANEL_Y, 90),
+    "R831": (40.0, PANEL_Y, 90),
+    "C837": (43.0, PANEL_Y, 90),
+    "R832": (46.0, PANEL_Y, 90),
+    "R833": (49.0, PANEL_Y, 90),
+    "C838": (52.0, PANEL_Y, 90),
 }
 
 
@@ -671,7 +988,6 @@ ADC_ROW_PITCH = 4.0
 # so they sit between the package and the '541 on the row above the panel
 # headers, which is the same sentence with the connector replaced by the part.
 PULLDOWN_X = 40.0
-PULLDOWN_Y = SPLIT_Y + 14.6
 
 # Designators that have to move, with the reason each one does. The mixer keeps
 # the same table and for the same cause: KiCad puts a reference above the body,
@@ -685,7 +1001,12 @@ PULLDOWN_Y = SPLIT_Y + 14.6
 # which has to be there, because it is the one part that sits on the isolation
 # line. So this move is the barrier's cost in silkscreen, and moving the
 # capacitor instead would be moving the thing that is placed for a reason.
-REFERENCE_MOVES = {"U9": (8.0, 0.0), "U10": (8.0, 0.0), "U15": (0.0, -4.0)}
+# **U15's is -6.0 and it was -4.0**, which put the field on C840's pad once
+# the band stack moved the switcher row: DRC's silkscreen check found it,
+# on the first board this repo built with the reference already moved once
+# for the same reason. A silkscreen offset is a number about two parts'
+# positions, and it goes stale when either of them moves.
+REFERENCE_MOVES = {"U9": (8.0, 0.0), "U10": (8.0, 0.0), "U15": (0.0, -6.0)}
 
 # **Empty, and that is the whole of choosing the last two parts.** This held a
 # 14 x 9 mm envelope for each of the three bypass relays, because
@@ -698,6 +1019,25 @@ RESERVED = {}
 
 # Rail decoupling, two rows of twelve rather than one of twenty-four: a single
 # row is 84 mm long and would set the board's width on its own.
+# **8.0, and it was moved to 8.6 for one build and moved back.** R901 and
+# C701 were 0.07 mm apart -- the tightest pair on the board -- and the first
+# fix moved the 24-capacitor field east by 0.6 mm, with the reason written
+# down as *"the field moves rather than the star, because the star is on the
+# west column with J7 and R902 and the field is 24 parts with nothing east of
+# them for 1.5 mm."*
+#
+# **The last clause was false and gen_pcb.stitch_grounds() is what said so.**
+# There is something east of them: the ADC's own input column at x = 50, and
+# every one of those 24 capacitors needs a ground stitch beside its pad. The
+# eastern column's stitch landed **0.57 mm from R656 against the 0.60 it
+# needs** -- 0.03 mm -- and its fallback collided with the previous
+# capacitor's stitch. The build stopped, correctly, at C724.
+#
+# So the star moves and the field does not. That is this repo's oldest fault
+# in a new place: the fix asked what the two parts in the violation needed and
+# not what the rest of the row already had, and it was written as a claim
+# about the row -- which made it checkable, and it was checked, by a
+# generator, three edits later.
 BYPASS_X = 8.0
 BYPASS_Y = SHARED_Y + 16.0
 
@@ -828,20 +1168,34 @@ def extents(courtyards):
     none of it on the side it faces, and adding it anyway is what made the
     first attempt at this circular -- the connector pushed the outline out by
     five millimetres and then failed to reach it, for ever.
+
+    **On the side it faces, and this used to be all four.** EDGE_PARTS declares
+    a side -- `{"U19": "east"}` -- and the first version read that declaration
+    only in check_edge_parts(); here it dropped the margin on every edge the
+    part happened to be extreme on. The module is 53.85 mm long and it is the
+    southernmost thing on the board as well as the easternmost, so its
+    *south* edge became the board's south edge too, and its twenty castellated
+    pads sat exactly on the cut line: **DRC reported 20 pads and 4 stitch vias
+    at 0.000 mm of edge clearance**, and four of those vias were outside the
+    outline entirely.
+
+    Nothing here could have caught it, which is the part worth keeping. The
+    declaration was right, the check that reads it was right, and the geometry
+    was wrong on the three sides nobody had declared anything about -- the
+    board drew, poured and passed placement.py. It took a router laying copper
+    at the module and KiCad measuring the result.
     """
-    boxes = [(ref, left, top, right, bottom)
-             for ref, left, top, right, bottom in courtyards]
-    plain = [box for box in boxes if box[0] not in EDGE_PARTS]
-    left = min(b[1] for b in plain) - MARGIN
-    top = min(b[2] for b in plain) - MARGIN
-    right = max(b[3] for b in plain) + MARGIN
-    bottom = max(b[4] for b in plain) + MARGIN
-    for ref, box_left, box_top, box_right, box_bottom in boxes:
-        if ref in EDGE_PARTS:
-            left, top = min(left, box_left), min(top, box_top)
-            right = max(right, box_right)
-            bottom = max(bottom, box_bottom)
-    return (round(left, 2), round(top, 2), round(right, 2), round(bottom, 2))
+    sides = ("west", "north", "east", "south")
+    reach = []
+    for ref, left, top, right, bottom in courtyards:
+        facing = EDGE_PARTS.get(ref)
+        margins = [0.0 if facing == side else MARGIN for side in sides]
+        reach.append((left - margins[0], top - margins[1],
+                      right + margins[2], bottom + margins[3]))
+    return (round(min(b[0] for b in reach), 2),
+            round(min(b[1] for b in reach), 2),
+            round(max(b[2] for b in reach), 2),
+            round(max(b[3] for b in reach), 2))
 
 
 def check_placed():
@@ -866,33 +1220,18 @@ def courtyard(ref):
     if spot is None:
         return None
     x, y, rotation = spot
-    footprint = design.PARTS[ref].footprint
-    offset = (0.0, 0.0)
-    if footprint is None:
+    if design.PARTS[ref].footprint is None:
         width, height = RESERVED.get(ref, (14.0, 9.0))
-    else:
-        # **Longest token first, and that is not tidiness.** These are substring
-        # matches, and "D_SOD-123" is a substring of "D_SOD-123F" -- so with
-        # plain dict order the low-drop clamp at D803 would silently be
-        # measured as the 0.3 mm wider package it replaced, and the only thing
-        # that would ever have said so is gen_pcb.check_courtyards(). Matching
-        # the most specific token means the table can gain a variant without
-        # its position in the dict becoming load-bearing.
-        for token in sorted(SIZE, key=len, reverse=True):
-            if token in footprint:
-                width, height = SIZE[token]
-                offset = ANCHOR.get(token, (0.0, 0.0))
-                break
-        else:
-            return None
-    radians = math.radians(rotation)
-    cosine, sine = math.cos(radians), math.sin(radians)
-    centre_x = x + offset[0] * cosine + offset[1] * sine
-    centre_y = y - offset[0] * sine + offset[1] * cosine
-    if rotation % 180:
-        width, height = height, width
-    return (centre_x - width / 2, centre_y - height / 2,
-            centre_x + width / 2, centre_y + height / 2)
+        if rotation % 180:
+            width, height = height, width
+        return (x - width / 2, y - height / 2,
+                x + width / 2, y + height / 2)
+    try:
+        dx, dy, width, height = _extent(ref, rotation)
+    except KeyError:
+        return None
+    return (x + dx - width / 2, y + dy - height / 2,
+            x + dx + width / 2, y + dy + height / 2)
 
 
 # Parts that must sit on the board's edge rather than inside it, with the

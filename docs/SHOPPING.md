@@ -39,6 +39,7 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | D801–D833 | BAT54 | `BAT54-7-F` | 5 | 6 | GBP 0.05–0.15 | band | [search](https://www.mouser.co.uk/c/?q=BAT54-7-F) |
 | D803, D806 | PMEG2010AEH | `PMEG2010AEH,115` | 2 | 3 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=PMEG2010AEH,115) |
 | D804 | B340A | `B340A-13-F` | 1 | 5 | GBP 0.20–0.60 | band | [search](https://www.mouser.co.uk/c/?q=B340A-13-F) |
+| F801 | 1.6A T 250V | `3403.0168.11` | 1 | 5 | USD 1.80 | read | [search](https://www.mouser.co.uk/c/?q=3403.0168.11) |
 | J1 | CH1 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J2 | CH2 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J3 | CH3 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
@@ -88,7 +89,7 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 ## Totals, per currency, fitted quantities
 
 - **GBP 60.78 – 97.24**
-- **USD 27.96 – 49.80**
+- **USD 29.76 – 51.60**
 
 Kept per currency rather than converted: two lines were priced in dollars because that is the currency the figures were found in, and folding them into a sterling total at a rate nobody looked up would turn two honest figures into one invented one.
 
@@ -129,6 +130,8 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 **D803, D806** — PMEG2010AEH in SOD123F, and it is the one diode on this board chosen by a number rather than a class. It is a 1 A part carrying 36 mA, which is the whole trick: 259 mV max there against the BAT54's 545 mV, and design.clamp_vf_ceiling() says the mixer's headroom will take 320 mV. The BAT54 that used to be fitted here missed by 5.5 dB. Higher leakage is the price and it is free on a node inside an op-amp's feedback loop.
 
 **D804** — B340A-13-F, SMA. The mixer's own reverse-protection part, chosen there for a forward drop that falls as the diode is run below its rating -- see design.INLET_DIODE.
+
+**F801** — page fetched: $1.80 at 1, $1.38 at 10, $1.145 at 50, $1.056 at 100, $0.807 at 1000, 16,067 in stock. The listing's 1.6 A, 250 VAC, 125 VDC, Slow Blow and 10.10 x 3.00 x 3.00 mm all agree with the datasheet read for design.INLET_FUSE -- and the 3.00 mm height is what put it in GAP_MM's passive class rather than the tall one. **Its "Breaking Capacity: 200 A AC, 35 A DC" is the datasheet's worst row and not this application's**: note 2) on page 5 gives 35 A only at 250 VDC, against 200 A at 63 VAC/DC, and this inlet is 24 V. A distributor's summary field flattens a table, and the row it keeps is the one that sells the part conservatively.
 
 **J1** — Wurth WR-PHD 1x02 vertical, gold-plated: CONN_MPN[2]. Two ways because the loom is a shielded pair -- the shield lands at the mixer end only, so it has no pin here. See design.FRONT_R.
 

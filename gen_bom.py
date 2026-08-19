@@ -161,6 +161,20 @@ PRICES = {
         "fetched; the 336 C/W this design uses is from DS21826B, which "
         "publishes the minimum-pad figure revision F drops."),
 
+    design.INLET_FUSE: read(
+        1.80, "USD", 1,
+        "https://www.digikey.com/en/products/detail/schurter-inc/"
+        "3403-0168-11/957690",
+        "page fetched: $1.80 at 1, $1.38 at 10, $1.145 at 50, $1.056 at 100, "
+        "$0.807 at 1000, 16,067 in stock. The listing's 1.6 A, 250 VAC, "
+        "125 VDC, Slow Blow and 10.10 x 3.00 x 3.00 mm all agree with the "
+        "datasheet read for design.INLET_FUSE -- and the 3.00 mm height is "
+        "what put it in GAP_MM's passive class rather than the tall one. "
+        "**Its \"Breaking Capacity: 200 A AC, 35 A DC\" is the datasheet's "
+        "worst row and not this application's**: note 2) on page 5 gives "
+        "35 A only at 250 VDC, against 200 A at 63 VAC/DC, and this inlet is "
+        "24 V. A distributor's summary field flattens a table, and the row it "
+        "keeps is the one that sells the part conservatively."),
     design.INLET_CHOKE: read(
         1.97, "GBP", 1,
         "https://www.digikey.co.uk/en/products/detail/"

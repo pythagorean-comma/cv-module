@@ -33,12 +33,22 @@ def refuse_to_discard_routing(board, argv=None, out_name=None):
     gen_pcb.py already makes about the router and the isolation region.
 
     **What counts as hand-routed is a net name and not a count.** Everything
-    gen_pcb.py lays is a ground stitch -- a via and a stub on MAGND or MDGND --
-    so a segment on any other net is copper a person drew. That is exact in
-    both directions: a freshly generated board has none, and a board with one
-    routed net has one. A threshold on the segment count would have been the
-    obvious thing and it would have had to be re-tuned every time the stitch
-    count moved.
+    gen_pcb.py lays by default is a ground stitch -- a via and a stub on MAGND
+    or MDGND -- so a segment on any other net is copper somebody else put
+    there. That is exact in both directions: a freshly generated board has
+    none, and a board with one routed net has one. A threshold on the segment
+    count would have been the obvious thing and it would have had to be
+    re-tuned every time the stitch count moved.
+
+    **`--seed-routing` puts signal copper on the board and this still refuses
+    it afterwards, which is the behaviour that is wanted and not an
+    oversight.** The seed is laid once and is a starting point somebody edits;
+    from the moment it lands, the board carries copper that re-running would
+    destroy, and whether the first pass of it came from route.py or from a
+    person is not a distinction this guard should be able to draw. It is
+    deliberately not told which -- "the board has copper on it" is the whole
+    question, and a guard that exempted the router's own output would exempt
+    exactly the board most likely to have been edited since.
 
     `--discard-routing` is the way past it, spelled so that nobody types it by
     accident and so that it appears in a shell history as what it was.
@@ -60,11 +70,15 @@ def refuse_to_discard_routing(board, argv=None, out_name=None):
         f"{len(signal)} nets ({', '.join(sorted(signal)[:6])}"
         f"{', ...' if len(signal) > 6 else ''}).\n"
         f"\n"
-        f"gen_pcb.py places and pours and lays no signal copper, so writing "
-        f"it would discard every one of those tracks. There is no undo.\n"
+        f"gen_pcb.py writes a fresh board -- placed, poured and stitched -- "
+        f"so writing it would discard every one of those tracks. There is no "
+        f"undo.\n"
         f"\n"
         f"  * to move a *netlist* change onto the routed board, use KiCad's\n"
         f"    Tools -> Update PCB from Schematic against "
         f"out/cv-module.kicad_sch;\n"
         f"  * to start the layout again from placement.py, deliberately:\n"
-        f"        python3 gen_pcb.py --discard-routing\n")
+        f"        python3 gen_pcb.py --discard-routing\n"
+        f"    adding --seed-routing runs route.py once for a first pass of\n"
+        f"    copper to adjust, which is what the handover board was made\n"
+        f"    with. Either way the tracks above are gone.\n")

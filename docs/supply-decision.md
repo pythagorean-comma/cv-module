@@ -162,6 +162,47 @@ a ground loop, whose area depends on how the wiring was dressed on the day.
 
 ---
 
+## The inlet fuse — fitted, and what closed it was a catalogue
+
+**SCHURTER UMT 250, 1.6 A time-lag, order number 3403.0168.11**, in the live
+conductor between `J8` and the choke. `design.inlet_fuse()` is the arithmetic
+and `design.INLET_FUSE` carries the datasheet reading.
+
+**Nothing about the requirement changed.** The converter's own line has read
+*"Recommended Input Fuse, 24 Vin models: 1'600 mA (slow blow)"* since the part
+was chosen, and `design.supply()`'s assessment — that an inlet shared with a
+*fabricated* board carrying no fuse of its own wants one — has stood unopposed
+for four passes. What blocked it was that no order code had been verified and
+KiCad shipped no land pattern for the families that had been looked at. That
+was a fact about one manufacturer's catalogue, written as though it were a
+fact about the part class:
+
+> Littelfuse's 453 Nano2 is ultra-fast rather than Slo-Blo, its 154 series is a
+> 2410 body and not the 1206 this was drawn around, and KiCad ships a land
+> pattern for neither of the parts that would fit.
+
+Every clause true. **"The 1206 this was drawn around" is the giveaway** — the
+search was for a footprint that fitted a shape already drawn, and there was no
+board to fit it to. The row it goes in is packed by `placement.pack_east()` and
+simply got longer.
+
+**Three numbers came out of fitting it, and two were corrections:**
+
+| | |
+|---|---|
+| **1.6 A, not the 1.5 A this repo had derived** | 1.5 A was reached by dividing rather than by opening a catalogue: IEC 60127 runs on an E-series and 1.5 A is not one of the eighteen this family offers. The vendor states 1.6 A for this exact converter and the series has it. **A derived value that falls between two catalogue steps is a derivation that never met a catalogue** |
+| **the loop resistance gained a name** | `inlet_budget()` called its series resistance `choke_r` and built five `choke_*` keys from it. Adding the fuse made that expression right and its name wrong — `barrier_return()`'s own fault, in the function one block along. Three names now: `choke_ohms`, `fuse_ohms`, `loop_ohms` |
+| **what a fuse is worth here is bounded by a part nobody has chosen** | The pre-arcing table says 1.25 × In takes at least an hour and 2 × In up to two minutes; ten times opens in 10–100 ms. A 24 V brick that current-limits at 2 A is 1.25 In and this fuse never opens. `inlet_budget()` already records that the brick is a system-level part nobody here has ordered; this is the second thing that turns on it — and it is not an argument against fitting, because the case it covers is the one where the brick gives everything it has |
+
+It costs **73 mV** of the converter's input headroom at the pessimistic (hot)
+resistance, on a loop that already spends 161 mV in the choke, leaving 2.4 V of
+the 9 V minimum. `verify.check_supply()` holds the wiring: `VIN_J` reaches only
+the inlet and the fuse, `VIN_F` only the fuse and the choke, and a fuse in the
+return leg or bridged across its own pads is a planted fault in
+`test_verify.py`.
+
+---
+
 ## ~~Look this up before finalising~~ — looked up, and the inference held
 
 **Done.** `contract/socket.py` reads all of it from the mixer at the pinned

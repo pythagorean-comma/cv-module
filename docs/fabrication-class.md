@@ -333,14 +333,52 @@ first prose written about the decision said reversing it "costs the RP2040",
 which reads "this router cannot" as "cannot be done" — the same substitution the
 four overturned predictions above were made of.
 
-## What is not decided here
+## ~~What is not decided here~~ — decided, and the question did not survive being asked properly
 
-**What DRC enforces for hole clearance is deliberately unchanged.** JLCPCB
-publishes *"Via Hole-to-Hole Spacing: 0.2mm"* and *"Via hole to Track: 0.2mm"*;
-KiCad's own default is 0.25 mm and is what has been in force, unowned, the same
-way `min_track_width` once sat at zero. The published figures are recorded in
-`rules.py` and the router is held to the stricter of the two. Declaring 0.20 would
-have made 49 violations disappear with no copper moving, which is
-indistinguishable from relaxing a check to make it pass — so designing to the
-fabricator's real limit is left as a separate decision, to be taken deliberately
-or not at all.
+**It is decided.** DRC now enforces `rules.hole_rules()`, written into the
+project as `min_hole_to_hole` and `min_hole_clearance` and held by
+`verify.check_rules()` like every other rule. What the question turned out to
+be is the interesting part, and the original text is below.
+
+**The open item asked which of two numbers to take — and one of them was
+JLCPCB's, on a board that goes to PCBWay.** Same fault as this whole page's
+top block, one table along, and it survived the fabricator moving because a
+hole rule looks like a fact about drills rather than a fact about a supplier.
+
+PCBWay's own capabilities page, read 2026-08-19, normal-process column,
+converted from mil:
+
+| | published | KiCad's default | in force |
+|---|---|---|---|
+| component hole to hole | **0.406 mm** (16 mil) | 0.25 mm | **0.406**, the fabricator's |
+| via to via, ⌀ ≤ 0.45 | 0.279 mm (11 mil) | 0.25 mm | — |
+| hole to copper, 4 layers | 0.178 mm (7 mil) | **0.25 mm** | **0.25**, KiCad's |
+
+**So the fabricator is stricter on one and looser on the other, and there was
+never a single comparison to make.** The rule stays "the stricter of the
+published figure and KiCad's own", which is only worth having now that it
+points both ways. The board's 0.7 mm vias are above PCBWay's own `⌀ ≤ 0.45`
+qualifier, so they are read as component holes — the reading that cannot be
+wrong in the direction that matters, and 0.127 mm on a rule that does not bind.
+
+**Neither number binds at this class**, which is what makes adopting them free.
+`rules.via_exclusion()` gives a via 0.650 / 0.900 / 0.550 mm to a track, another
+via and a pad's copper, and the *copper* rule sets all three. The trap the
+original text names is avoided by construction rather than by refusing to
+choose: **nothing here makes a violation disappear**, because the number that
+moved moved the wrong way for that — 0.406 is 62 % stricter than what DRC has
+been running.
+
+> ### The original, kept
+>
+> **What DRC enforces for hole clearance is deliberately unchanged.** JLCPCB
+> publishes *"Via Hole-to-Hole Spacing: 0.2mm"* and *"Via hole to Track:
+> 0.2mm"*; KiCad's own default is 0.25 mm and is what has been in force,
+> unowned, the same way `min_track_width` once sat at zero. The published
+> figures are recorded in `rules.py` and the router is held to the stricter of
+> the two. Declaring 0.20 would have made 49 violations disappear with no
+> copper moving, which is indistinguishable from relaxing a check to make it
+> pass — so designing to the fabricator's real limit is left as a separate
+> decision, to be taken deliberately or not at all.
+>
+> Every clause of that is right except the page the numbers came from.

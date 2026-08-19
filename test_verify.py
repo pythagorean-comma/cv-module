@@ -125,6 +125,17 @@ class _Watched(set):
         super().discard(item)
 
 
+def _widen_first_segment(text):
+    """Give the first routed segment a width nothing declares."""
+    match = re.search(r'\(segment\b(?:[^()]|\([^()]*\))*\)', text)
+    if match is None:
+        return text
+    block = match.group(0)
+    changed = block.replace(f"(width {rules.TRACK_MM})",
+                            f"(width {rules.TRACK_MM / 2})", 1)
+    return text[:match.start()] + changed + text[match.end():]
+
+
 def dead_mutations(clean_nets, clean_values, clean_open, clean_erc, clean_drc):
     """Every planted mutation still has a target. Returns the ones that do not.
 
@@ -510,6 +521,40 @@ def _(nets, values, open_pins, violations, drc, board):
 def _(nets, values, open_pins, violations, drc, board):
     nets["IGND"].discard(("C807", "2"))
     nets["IGND_J"].add(("C807", "2"))
+
+
+# **The fuse shorted out**, which is what fitting it "for later" looks like:
+# both its pads on the same net, the choke still fed, the board still working,
+# and no fuse in the circuit at all. It is the one fault of this part that
+# leaves every other instrument happy -- ERC counts two pins on a net, DRC
+# sees copper, and inlet_fuse() goes on computing a rating for a part whose
+# element nothing passes through.
+@case("the inlet fuse is bridged on the jack side", verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    ref = design.INLET_FUSE_REF
+    nets["VIN_F"].discard((ref, "2"))
+    nets["VIN_J"].add((ref, "2"))
+    nets["VIN_F"].add(("J8", "1"))
+
+
+# And the fuse in the return rather than the live conductor -- the same two
+# parts, the same two nets, drawn without looking at which. It is caught by
+# the per-net allow-list and by nothing else: the loop is electrically
+# identical and the module runs.
+@case("the inlet fuse is in the return leg", verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    ref = design.INLET_FUSE_REF
+    choke = design.INLET_CHOKE_REF
+    l1_in = str(design.INLET_CHOKE_PINS["L1_IN"])
+    l2_in = str(design.INLET_CHOKE_PINS["L2_IN"])
+    nets["VIN_J"].discard((ref, "1"))
+    nets["VIN_F"].discard((ref, "2"))
+    nets["VIN_F"].discard((choke, l1_in))
+    nets["IGND_J"].discard((choke, l2_in))
+    nets["VIN_J"].add((choke, l1_in))
+    nets["IGND_J"].add((ref, "1"))
+    nets["VIN_F"].add((ref, "2"))
+    nets["VIN_F"].add((choke, l2_in))
 
 
 # **The module's own star, and the fault is the tidy way to wire a DGND pin.**
@@ -920,6 +965,17 @@ def main():
             ("a net class clearance drifts off rules.py", verify.PROJECT,
              lambda text: text.replace(f'"clearance": {rules.CLEARANCE_MM}',
                                        f'"clearance": {rules.CLEARANCE_MM / 2}')),
+            # **The hole rule falls back to KiCad's default**, which is the
+            # exact move rules.hole_rules()' own comment refuses: 0.406 mm is
+            # PCBWay's published component-hole figure and 0.25 is what DRC
+            # used while nobody owned the rule, so this mutation is a board
+            # going quietly back to being checked against a number no
+            # fabricator published. It reads the value out of rules.py rather
+            # than naming 0.4064, for the reason the two above record.
+            ("the hole rule reverts to KiCad's default", verify.PROJECT,
+             lambda text: text.replace(
+                 f'"min_hole_to_hole": {rules.hole_rules()["min_hole_to_hole"]}',
+                 f'"min_hole_to_hole": {rules.KICAD_HOLE_TO_HOLE_MM}')),
             # **This one normalises before it mutates, and it has to.** The
             # board on disk is hand-laid, so its tracks are whatever width the
             # person drawing them used -- and while it is at a stale class,
@@ -932,11 +988,19 @@ def main():
             # rules.TRACK_MM, which is the state check_rules() is supposed to
             # accept -- and then one track is given a width nothing declares.
             # That tests the check rather than the board.
+            # **Inside a `(segment ...)` block, and it has to say so.** This
+            # normalised every `(width ...)` in the file and then changed the
+            # first one -- which was a track on the committed board and is a
+            # graphic on a generated one, because gen_pcb.py writes the
+            # outline and the silkscreen before any copper. check_rules()
+            # reads segment widths, so the mutation moved off its own target
+            # and reported MISSED: a live mutation aimed at the wrong object,
+            # which is one worse than a dead one. It now finds the first
+            # segment and rewrites the width in that.
             ("the board carries a track of an undeclared width", verify.PCB,
-             lambda text: re.sub(r'\(width [\d.]+\)',
-                                 f'(width {rules.TRACK_MM})', text)
-                            .replace(f'(width {rules.TRACK_MM})',
-                                     f'(width {rules.TRACK_MM / 2})', 1))):
+             lambda text: _widen_first_segment(
+                 re.sub(r'\(width [\d.]+\)', f'(width {rules.TRACK_MM})',
+                        text)))):
         # **A text mutation that changes nothing is a mutation with no target**,
         # which is dead_mutations()' discriminator one object along: you cannot
         # remove what is not there, and you cannot replace what does not match.

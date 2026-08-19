@@ -975,6 +975,14 @@
 			(property "InBOM" yes)
 		)
 		(comp
+			(ref "F801")
+			(value "1.6A T 250V")
+			(footprint "Fuse:Fuse_Schurter_UMT250")
+			(property "MPN" "3403.0168.11")
+			(property "Description" "Inlet fuse, 1.6 A time-lag, in the live conductor ahead of L801: the converter datasheet's own recommended input fuse for 24 Vin models")
+			(property "InBOM" yes)
+		)
+		(comp
 			(ref "J1")
 			(value "CH1")
 			(footprint "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical")
@@ -6145,10 +6153,10 @@
 		)
 		(net
 			(code 176)
-			(name "VIN_J")
+			(name "VIN_F")
 			(node
-				(ref "J8")
-				(pin "1")
+				(ref "F801")
+				(pin "2")
 			)
 			(node
 				(ref "L801")
@@ -6157,6 +6165,18 @@
 		)
 		(net
 			(code 177)
+			(name "VIN_J")
+			(node
+				(ref "F801")
+				(pin "1")
+			)
+			(node
+				(ref "J8")
+				(pin "1")
+			)
+		)
+		(net
+			(code 178)
 			(name "VIN_P")
 			(node
 				(ref "C807")
@@ -6180,7 +6200,7 @@
 			)
 		)
 		(net
-			(code 178)
+			(code 179)
 			(name "VMCU")
 			(node
 				(ref "C835")
@@ -6208,7 +6228,7 @@
 			)
 		)
 		(net
-			(code 179)
+			(code 180)
 			(name "VMOD")
 			(node
 				(ref "C843")
@@ -6252,7 +6272,7 @@
 			)
 		)
 		(net
-			(code 180)
+			(code 181)
 			(name "VNR")
 			(node
 				(ref "C801")
@@ -6264,7 +6284,7 @@
 			)
 		)
 		(net
-			(code 181)
+			(code 182)
 			(name "VN_RAW")
 			(node
 				(ref "R805")
@@ -6276,7 +6296,7 @@
 			)
 		)
 		(net
-			(code 182)
+			(code 183)
 			(name "VREF")
 			(node
 				(ref "C802")
@@ -6312,7 +6332,7 @@
 			)
 		)
 		(net
-			(code 183)
+			(code 184)
 			(name "VREFN")
 			(node
 				(ref "D803")
@@ -6352,7 +6372,7 @@
 			)
 		)
 		(net
-			(code 184)
+			(code 185)
 			(name "VSYS")
 			(node
 				(ref "D806")

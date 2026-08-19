@@ -936,6 +936,19 @@ def supply_block(sch, y):
         sch.wire((px, py), (px + 7.62, py))
         sch.label(net, px + 7.62, py)
 
+    # The inlet fuse, between the jack and the choke and in the live
+    # conductor only. HORIZ because the current runs left to right along this
+    # row and a fuse standing on end in the middle of it is a part a reader
+    # has to stop at; the return conductor runs straight past underneath.
+    fuse = sch.place(circuit.INLET_FUSE_REF, "Device:Fuse",
+                     circuit.PARTS[circuit.INLET_FUSE_REF].value, 57 * G, y,
+                     footprint=circuit.PARTS[
+                         circuit.INLET_FUSE_REF].footprint, angle=HORIZ)
+    for pin, net, side in (("1", "VIN_J", -1), ("2", "VIN_F", 1)):
+        px, py = fuse.pin(pin)
+        sch.wire((px, py), (px + side * 7.62, py))
+        sch.label(net, px + side * 7.62, py)
+
     # The common-mode choke, drawn with the jack side on the left and the
     # converter side on the right, which is also the order the current takes.
     # **The two windings are 1-4 and 2-3**, and the symbol is chosen for that:
@@ -947,7 +960,7 @@ def supply_block(sch, y):
                       circuit.INLET_CHOKE, 75 * G, y,
                       footprint=circuit.PARTS[
                           circuit.INLET_CHOKE_REF].footprint)
-    for role, net, side in (("L1_IN", "VIN_J", -1), ("L2_IN", "IGND_J", -1),
+    for role, net, side in (("L1_IN", "VIN_F", -1), ("L2_IN", "IGND_J", -1),
                             ("L1_OUT", "VIN", 1), ("L2_OUT", "IGND", 1)):
         px, py = choke.pin(str(circuit.INLET_CHOKE_PINS[role]))
         sch.wire((px, py), (px + side * 7.62, py))
