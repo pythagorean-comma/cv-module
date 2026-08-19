@@ -703,7 +703,7 @@ def shared_block(sch, y):
         k = sch.place(ref, "cv:Relay", "DPDT", (640 + 40 * index) * G,
                       fy + 45.72, footprint="")
         pins = circuit.RELAY_PINS
-        wiring = [(pins["COIL+"], "V5"), (pins["COIL-"], "FSD")]
+        wiring = [(pins["COIL+"], "VMOD"), (pins["COIL-"], "FSD")]
         for channel in (2 * index + 1, 2 * index + 2):
             _, com, nc, no = circuit.bypass_contact(channel)
             wiring += [(com, f"SIN{channel}"), (nc, f"PIN{channel}"),
@@ -729,7 +729,7 @@ def shared_block(sch, y):
         d = sch.place(flyback, "Device:D", part.value,
                       (640 + 40 * index) * G, fy + 76.2,
                       footprint=part.footprint, angle=HORIZ)
-        for pin, net in ((str(circuit.DIODE_PINS["K"]), "V5"),
+        for pin, net in ((str(circuit.DIODE_PINS["K"]), "VMOD"),
                          (str(circuit.DIODE_PINS["A"]), "FSD")):
             px, py = d.pin(pin)
             side = -5.08 if px < (640 + 40 * index) * G else 5.08
@@ -877,13 +877,23 @@ def shared_block(sch, y):
     # R805 from the pins that drive them, so the rail *net* still has nothing
     # but passives on it. And the primary side gains two, because IGND and
     # VIN_P feed power_in pins from a connector.
-    # **VMCU is the seventh and it is here for VA+'s exact reason.** The 3.3 V
-    # rail is driven by U22's SW pin through L802, so the *net* called VMCU
-    # has nothing but passives and power inputs on it -- an inductor is not a
-    # driver. ERC found it the first time the block was drawn, on U19 pin 1.
-    # VCORE deliberately gets no flag: VREG_VOUT is a `power_out` pin on the
-    # net, so a flag there would be the second-driver complaint instead.
-    for index, net in enumerate(("VA+", "VA-", "IGND", "VIN_P", "VMCU",
+    # **The seventh moved from VMCU to VSYS, and the module is why.** The flag
+    # was on VMCU for VA+'s exact reason: U22 drove that rail through L802, and
+    # an inductor is not a driver, so the *net* had nothing but passives and
+    # power inputs on it. It is now the module's own 3V3 pin that drives VMCU,
+    # and that pin is a `power_out` -- so the flag became a second driver and
+    # ERC said so. VSYS is where the argument moved to: U22 drives VMOD, and
+    # VSYS is on the other side of D806, which is a diode and therefore
+    # passive.
+    #
+    # **VMOD gets no flag either**, and the pair is worth reading together:
+    # VMOD has U22's SW pin on it through L802 -- passive again -- but it also
+    # has three relay coils and their flybacks, all passive, and no power_in
+    # pin at all. ERC only complains about a net that feeds a power *input*
+    # with no output on it, and VMOD feeds none: the coils are passive and
+    # D806 is passive. A flag there would be asserting a driver ERC never
+    # asked for.
+    for index, net in enumerate(("VA+", "VA-", "IGND", "VIN_P", "VSYS",
                                  "MAGND", socket.AGND)):
         fx = 640 * G + index * 16 * G
         flag = sch.place(f"#FLG{index + 1:02d}", "power:PWR_FLAG", "PWR_FLAG",
@@ -1186,161 +1196,71 @@ def _label_out(sch, part, pin, net, dx=0.0, dy=0.0):
 
 
 def controller_block(sch, y):
-    """The RP2040, its flash and crystal, USB, MIDI, the panel and U22.
+    """The Pico, DIN MIDI, the panel and U22.
 
     **Drawn as one block because it is one zone** -- floorplan.ZONES entry D2 --
     and the sheet and the board agree about what a block is, which is the rule
     adc_block()'s own docstring states.
 
+    **Four sub-blocks became one part.** The crystal, the QSPI flash, the USB
+    receptacle with its two 27 ohm terminations and its VBUS divider, and
+    twelve decoupling capacitors are all inside the module now. What is left on
+    this sheet is the module, the things that are specific to *this* box --
+    MIDI, the footswitch, the pedal -- and the switcher that feeds it.
+
     Two things about the geometry rather than the circuit:
 
-      * **the package's four rows all leave along their own axis first.** The
-        symbol is a 57-pin rectangle with pins 2.54 mm apart on every side, so
-        a wire that turns before it is clear of the row runs through its
-        neighbours -- the fault _drop_out() records at the op-amp inputs, with
-        fifty-six chances to happen instead of two;
-      * **the six IOVDD pins are one point on the symbol and six pins in the
-        netlist.** KiCad stacks them, which is the usual idiom for a part with
-        six pins of one supply, so one wire and one label carry all six. That
-        is why the decoupling capacitors are drawn in a row of their own below
-        rather than one beside each pin: the sheet cannot say which is which
-        and placement.py can.
+      * **the seven ground pins are one point on the symbol.** KiCad stacks
+        them the way it stacked the QFN's six IOVDD pins, so one wire and one
+        drop carry all seven. The netlist still names each, which is what
+        placement.py and the board need;
+      * **the three power pins leave north and the two supply nets are not the
+        same net.** VSYS goes in and 3V3 comes out, and drawing them as one
+        rail is exactly the mistake pico_backdrive() exists to refuse. They are
+        labelled separately and the labels are 5.08 mm apart on the symbol, so
+        each leaves along its own axis before it turns.
     """
-    P = circuit.CONTROLLER_PINS
-    mcu = sch.place(circuit.CONTROLLER_REF, "MCU_RaspberryPi:RP2040",
+    P = circuit.CONTROLLER_MODULE_PINS
+    mcu = sch.place(circuit.CONTROLLER_REF, "MCU_Module:RaspberryPi_Pico",
                     circuit.CONTROLLER, 300 * G, y,
                     footprint=circuit.PARTS[circuit.CONTROLLER_REF].footprint)
 
-    # -- the GPIO column, east ---------------------------------------------
+    # -- the GPIO, east and west --------------------------------------------
+    #
+    # The symbol puts GPIO0-15 down the west side and GPIO16-22 and the three
+    # ADC pins down the east, which is the module's own pin order. So which
+    # way a net leaves is a property of the symbol rather than a choice, and
+    # the map is read rather than restated.
+    west = {P[name] for name in P if name.startswith("GPIO")
+            and P[name] <= 20}
     for row in circuit.controller_pin_map():
-        _label_out(sch, mcu, row["pin"], row["net"], dx=15.24)
+        _label_out(sch, mcu, row["pin"], row["net"],
+                   dx=-15.24 if row["pin"] in west else 15.24)
 
-    # -- the west column: QSPI, crystal, USB, debug, reset ------------------
+    # -- supplies, north; the seven grounds, south --------------------------
     #
-    # Every one of these leaves west by 15.24 except the two USB pins, which go
-    # further so that their series resistors sit in a column of their own.
-    for name, net in (("QSPI_SD3", "QSD3"), ("QSPI_SCLK", "QSCK"),
-                      ("QSPI_SD0", "QSD0"), ("QSPI_SD2", "QSD2"),
-                      ("QSPI_SD1", "QSD1"), ("QSPI_SS", "QSCS"),
-                      ("XIN", "XIN"), ("XOUT", "XOUT"),
-                      ("SWCLK", "SWCLK"), ("SWDIO", "SWDIO"),
-                      ("RUN", "RUN"),
-                      ("USB_DM", "UDM"), ("USB_DP", "UDP")):
-        _label_out(sch, mcu, P[name], net, dx=-15.24)
-    # TESTEN is the one pin whose net is a ground, and Table 619 makes it a
-    # value rather than a choice: "Test enable (connect to Gnd)".
-    _label_out(sch, mcu, P["TESTEN"], "MDGND", dx=-20.32)
+    # Staggered lengths, because the three north pins are 5.08 mm apart and a
+    # label anchor landing on a neighbour's wire is a merge.
+    for index, (name, net) in enumerate((("VSYS", "VSYS"), ("3V3", "VMCU"))):
+        _label_out(sch, mcu, P[name], net, dy=-(12.7 + index * 7.62))
+    _drop(sch, mcu, str(circuit.CONTROLLER_MODULE_GND_PINS[0]), "MDGND",
+          dy=7.62)
+    # AGND leaves east along its own axis first: it is the bottom pin of that
+    # column and its neighbour is 5.08 mm above it.
+    _drop_out(sch, mcu, str(P["AGND"]), "MDGND", dx=10.16, dy=7.62)
+    # RUN, west, to the reset link.
+    _label_out(sch, mcu, P["RUN"], "RUN", dx=-20.32)
 
-    # -- supplies, north; the exposed pad, south ---------------------------
-    #
-    # Staggered lengths, because the six supply pins on the north row are as
-    # close as 2.54 mm and a label anchor landing on a neighbour's wire is a
-    # merge. The stagger is what keeps each anchor in clear space.
-    for index, (name, net) in enumerate((
-            ("USB_VDD", "VMCU"), ("ADC_AVDD", "VMCU"),
-            ("VREG_VIN", "VMCU"), ("VREG_VOUT", "VCORE"))):
-        _label_out(sch, mcu, P[name], net, dy=-(12.7 + index * 5.08))
-    # The two stacks: IOVDD is pins 1, 10, 22, 33, 42 and 49 at one point and
-    # DVDD is 23 and 50 at another.
-    _label_out(sch, mcu, circuit.CONTROLLER_IOVDD_PINS[0], "VMCU", dy=-33.02)
-    _label_out(sch, mcu, circuit.CONTROLLER_DVDD_PINS[0], "VCORE", dy=-38.1)
-    _drop(sch, mcu, str(P["GND"]), "MDGND", dy=7.62)
-
-    # -- the decoupling, in a row -----------------------------------------
-    #
-    # Twelve capacitors, one per supply pin plus the regulator's two, drawn as
-    # a row under the package. Which capacitor serves which pin is a placement
-    # statement and not a schematic one -- see placement.py, where the six
-    # IOVDD ones are placed at the six pins.
-    caps = [(f"C{820 + n}", "VMCU") for n in range(6)]
-    caps += [(f"C{826 + n}", "VCORE") for n in range(2)]
-    caps += [("C828", "VMCU"), ("C829", "VCORE"),
-             ("C830", "VMCU"), ("C831", "VMCU")]
-    for index, (ref, net) in enumerate(caps):
-        cap = _c(sch, ref, (150 + index * 12) * G, y + 60 * G, angle=VERT)
-        cx, cy = cap.pin("1")
-        sch.wire((cx, cy - 6.35), (cx, cy))
-        sch.label(net, cx, cy - 6.35)
-        _drop(sch, cap, "2", "MDGND", dy=5.08)
-
-    # -- the crystal -------------------------------------------------------
-    xtal = sch.place(circuit.CRYSTAL_REF, "Device:Crystal_GND24",
-                     circuit.CRYSTAL, 120 * G, y - 40 * G,
-                     footprint=circuit.PARTS[circuit.CRYSTAL_REF].footprint,
-                     angle=VERT)
-    for pin, net in ((circuit.CRYSTAL_PINS["XIN"], "XIN"),
-                     (circuit.CRYSTAL_PINS["XOUT"], "XTAL")):
-        px, py = xtal.pin(str(pin))
-        side = -7.62 if py < xtal.pin(str(circuit.CRYSTAL_PINS["XOUT"]))[1] \
-            else 7.62
-        sch.wire((px, py), (px, py + side))
-        sch.label(net, px, py + side)
-    # The case pins are 2 and 4 and they are one net; each gets its own drop,
-    # sideways first, because they sit either side of the body.
-    for pin, dx in ((circuit.CRYSTAL_PINS["CASE_A"], -10.16),
-                    (circuit.CRYSTAL_PINS["CASE_B"], 10.16)):
-        _drop_out(sch, xtal, str(pin), "MDGND", dx=dx, dy=7.62)
-    for ref, left, right in (("R824", "XOUT", "XTAL"),):
-        res = _r(sch, ref, 150 * G, y - 55 * G, angle=HORIZ)
-        for pin, net, side in (("1", left, -6.35), ("2", right, 6.35)):
-            px, py = res.pin(pin)
-            sch.wire((px, py), (px + side, py))
-            sch.label(net, px + side, py)
-    for ref, net, dx in (("C832", "XIN", 0), ("C833", "XTAL", 24)):
-        cap = _c(sch, ref, (100 + dx) * G, y - 25 * G, angle=VERT)
-        cx, cy = cap.pin("1")
-        sch.wire((cx, cy - 6.35), (cx, cy))
-        sch.label(net, cx, cy - 6.35)
-        _drop(sch, cap, "2", "MDGND", dy=5.08)
-
-    # -- the flash ---------------------------------------------------------
-    F = circuit.FLASH_PINS
-    flash = sch.place(circuit.FLASH_REF, "Memory_Flash:W25Q128JVS",
-                      circuit.FLASH, 120 * G, y + 20 * G,
-                      footprint=circuit.PARTS[circuit.FLASH_REF].footprint)
-    for name, net, dx in (("CS", "QSCS", -12.7), ("CLK", "QSCK", -12.7),
-                          ("DI_IO0", "QSD0", -12.7), ("DO_IO1", "QSD1", 12.7),
-                          ("WP_IO2", "QSD2", 12.7), ("HOLD_IO3", "QSD3", 12.7)):
-        _label_out(sch, flash, F[name], net, dx=dx)
-    _label_out(sch, flash, F["VCC"], "VMCU", dy=-10.16)
-    _drop_out(sch, flash, str(F["GND"]), "MDGND", dx=-7.62, dy=7.62)
-    cap = _c(sch, "C834", 150 * G, y + 20 * G, angle=VERT)
-    cx, cy = cap.pin("1")
-    sch.wire((cx, cy - 6.35), (cx, cy))
-    sch.label("VMCU", cx, cy - 6.35)
-    _drop(sch, cap, "2", "MDGND", dy=5.08)
-
-    # -- USB ---------------------------------------------------------------
-    for ref, left, right, dy in (("R820", "UDM", "UDMJ", 0),
-                                 ("R821", "UDP", "UDPJ", 12)):
-        res = _r(sch, ref, 200 * G, y - 80 * G + dy * G, angle=HORIZ)
-        for pin, net, side in (("1", left, -6.35), ("2", right, 6.35)):
-            px, py = res.pin(pin)
-            sch.wire((px, py), (px + side, py))
-            sch.label(net, px + side, py)
-    usb = sch.place(circuit.USB_CONN_REF, "Connector:USB_B_Micro",
-                    circuit.USB_CONN, 250 * G, y - 90 * G,
-                    footprint=circuit.PARTS[circuit.USB_CONN_REF].footprint)
-    for pin, net, dx, dy in ((1, "VBUS", 12.7, 0), (2, "UDMJ", 12.7, 0),
-                             (3, "UDPJ", 12.7, 0)):
-        _label_out(sch, usb, pin, net, dx=dx, dy=dy)
-    # Ground and shield are one net and two pins on opposite sides of the
-    # symbol, so each leaves along its own axis before it drops.
-    _drop_out(sch, usb, "5", "MDGND", dx=7.62, dy=10.16)
-    _drop_out(sch, usb, "SH", "MDGND", dx=-7.62, dy=10.16)
-    for ref, top, bottom in (("R822", "VBUS", "VBUSD"),):
-        res = _r(sch, ref, 300 * G, y - 95 * G, angle=VERT)
-        px, py = res.pin("1")
-        sch.wire((px, py - 6.35), (px, py))
-        sch.label(top, px, py - 6.35)
-        px, py = res.pin("2")
-        sch.wire((px, py), (px, py + 6.35))
-        sch.label(bottom, px, py + 6.35)
-    res = _r(sch, "R823", 320 * G, y - 95 * G, angle=VERT)
-    px, py = res.pin("1")
-    sch.wire((px, py - 6.35), (px, py))
-    sch.label("VBUSD", px, py - 6.35)
-    _drop(sch, res, "2", "MDGND", dy=5.08)
+    # -- the ORing diode ----------------------------------------------------
+    diode = sch.place("D806", "Device:D_Schottky", circuit.CLAMP_DIODE,
+                      200 * G, y - 60 * G,
+                      footprint=circuit.PARTS["D806"].footprint, angle=HORIZ)
+    for pin, net in ((str(circuit.DIODE_PINS["A"]), "VMOD"),
+                     (str(circuit.DIODE_PINS["K"]), "VSYS")):
+        px, py = diode.pin(pin)
+        side = -6.35 if px < 200 * G else 6.35
+        sch.wire((px, py), (px + side, py))
+        sch.label(net, px + side, py)
 
     # -- DIN MIDI ----------------------------------------------------------
     O = circuit.MIDI_OPTO_PINS
@@ -1404,7 +1324,7 @@ def controller_block(sch, y):
     # -- the connectors ----------------------------------------------------
     for ref_name, x, ypos in (("J15", 250 * G, 110), ("J16", 300 * G, 110),
                               ("J17", 250 * G, 150), ("J18", 300 * G, 150),
-                              ("J19", 200 * G, 110), ("J20", 200 * G, 150)):
+                              ("J19", 200 * G, 110)):
         part = circuit.PARTS[ref_name]
         pins = _conn_nets(ref_name)
         lib = ("Connector_Generic:Conn_01x02" if len(pins) == 2
@@ -1418,19 +1338,11 @@ def controller_block(sch, y):
                 _gnd(sch, px + 7.62, py, net)
             else:
                 sch.label(net, px + 7.62, py)
-    # The BOOTSEL series resistor, between QSPI_SS and J19.
-    res = _r(sch, "R826", 150 * G, y + 110 * G, angle=HORIZ)
-    for pin, net, side in (("1", "QSCS", -6.35), ("2", "BOOT", 6.35)):
-        px, py = res.pin(pin)
-        sch.wire((px, py), (px + side, py))
-        sch.label(net, px + side, py)
-    res = _r(sch, "R825", 150 * G, y + 130 * G, angle=HORIZ)
-    for pin, net, side in (("1", "VMCU", -6.35), ("2", "RUN", 6.35)):
-        px, py = res.pin(pin)
-        sch.wire((px, py), (px + side, py))
-        sch.label(net, px + side, py)
+    # ~~R825, R826, J20.~~ The RUN pull-up is on the die, BOOTSEL is a button
+    # on the module, and the debug pads are on its underside -- see the reset
+    # comment in design.controller().
 
-    # -- the 3.3 V switcher ------------------------------------------------
+    # -- the 5 V switcher --------------------------------------------------
     Q = circuit.MCU_DCDC_PINS
     reg = sch.place(circuit.MCU_DCDC_REF, "cv:TPS560430XF", circuit.MCU_DCDC,
                     620 * G, y - 30 * G,
@@ -1445,12 +1357,12 @@ def controller_block(sch, y):
     ind = sch.place("L802", "Device:L", circuit.MCU_DCDC_L,
                     700 * G, y - 30 * G,
                     footprint=circuit.PARTS["L802"].footprint, angle=HORIZ)
-    for pin, net, side in (("1", "MSW", -6.35), ("2", "VMCU", 6.35)):
+    for pin, net, side in (("1", "MSW", -6.35), ("2", "VMOD", 6.35)):
         px, py = ind.pin(pin)
         sch.wire((px, py), (px + side, py))
         sch.label(net, px + side, py)
     for ref, net, x in (("C840", "VA_RAW", 600), ("C841", "VA_RAW", 624),
-                        ("C843", "VMCU", 700)):
+                        ("C843", "VMOD", 700)):
         cap = _c(sch, ref, x * G, y - 5 * G, angle=VERT)
         cx, cy = cap.pin("1")
         sch.wire((cx, cy - 6.35), (cx, cy))
@@ -1461,7 +1373,7 @@ def controller_block(sch, y):
         px, py = cap.pin(pin)
         sch.wire((px, py), (px + side, py))
         sch.label(net, px + side, py)
-    for ref, top, bottom, x in (("R850", "VMCU", "MFB", 620),):
+    for ref, top, bottom, x in (("R850", "VMOD", "MFB", 620),):
         res = _r(sch, ref, x * G, y + 20 * G, angle=VERT)
         px, py = res.pin("1")
         sch.wire((px, py - 6.35), (px, py))
@@ -1475,13 +1387,16 @@ def controller_block(sch, y):
     sch.label("MFB", px, py - 6.35)
     _drop(sch, res, "2", "MDGND", dy=5.08)
 
-    sch.text("The controller. Two 3.3 V rails on this sheet and they are not "
-             "one net: V3V3 is the ADC's, linear from V5, and VMCU is this "
-             "block's, switched from VA_RAW at 1.1 MHz -- see design.RAILS. "
-             "U22's input is ahead of R804 so that its ripple meets the same "
-             "pole the converter's own does. MINA/MINK/MINJ are on the far "
-             "side of U21 and belong to whatever is sending: CA-033 forbids a "
-             "DC path from them to this board's ground.",
+    sch.text("The controller. Three 3.3 V and 5 V nets on this sheet and no "
+             "two of them are one: V3V3 is the ADC's, linear from V5; VMOD is "
+             "U22's switched 5 V, carrying the module and the relay coils; "
+             "VMCU is the module's own 3.3 V, made on it by an RT6150 out of "
+             "VSYS and brought back out on pin 36. V5 is what is left of the "
+             "linear rail -- the reference and the ADC's LDO. U22's input is "
+             "ahead of R804 so that its ripple meets the same pole the "
+             "converter's own does. MINA/MINK/MINJ are on the far side of U21 "
+             "and belong to whatever is sending: CA-033 forbids a DC path "
+             "from them to this board's ground.",
              150 * G, y - 110 * G, size=2.0)
 
 def _between(point, a, b):

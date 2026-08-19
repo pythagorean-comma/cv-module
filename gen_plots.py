@@ -47,6 +47,7 @@ import subprocess
 import sys
 
 import design
+import verify
 from toolchain import kicad
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -83,6 +84,24 @@ def orderable():
         reasons.append(
             f"{len(design.DEFERRED)} blocks are not drawn at all "
             f"({', '.join(sorted(design.DEFERRED))}): see design.DEFERRED")
+    # **The third reason, and it is new because the router is gone.** Both
+    # lists above are empty and have been since the controller landed, so the
+    # design stopped gating a fabrication package a pass ago -- and it is the
+    # *board* that gates it now. gen_pcb.py places and pours and lays no
+    # signal copper, so what is on disk is a board with 485 connections
+    # unmade, and verify.UNROUTED_ITEMS is the number a person routing it by
+    # hand brings down.
+    #
+    # Read off verify.py rather than restated, for this function's own reason:
+    # what changes the answer should be the work, not somebody remembering to
+    # delete a paragraph. And note which direction it reads -- the declaration
+    # rather than the board, because a board that has *not* been re-verified
+    # is exactly the state this is trying not to ship from.
+    if verify.UNROUTED_ITEMS:
+        reasons.append(
+            f"the board has {verify.UNROUTED_ITEMS} unrouted connections. See "
+            f"verify.UNROUTED_ITEMS, and gen_pcb.py's own docstring for why "
+            f"the copper is not generated")
     return reasons
 
 
@@ -229,6 +248,30 @@ def check_plots(sheet=SHEET, board=BOARD, docs=DOCS):
     board into a temporary directory and compares bytes. It was validated the way
     test_verify.py validates its own cases -- by running it against 789c4ba,
     where it fails on cv-module-layout.pdf and passes on the other two.
+
+    ------------------------------------------------------------------------
+    **And then gen_pcb.py stopped generating the board, which changes what
+    both halves of this are worth without changing a line of either.**
+
+    **PDF_EPOCH is worth more.** Its argument was that a tracked binary
+    rewritten by every build has a history that says nothing -- and the board
+    itself was exactly that: 102,909 lines of a 6.5 MB file rewritten on every
+    run, because KiCad mints fresh UUIDs. The board is not regenerated any
+    more. It changes when a person moves copper, so a diff on it is a real
+    signal for the first time, and the plots follow it for the same reason.
+    The deterministic-UUID pass that was going to fix the board is no longer
+    needed for that: nothing writes the board but a human and KiCad.
+
+    **This check is worth more and is still not a stage, and the reason moved
+    one step.** It used to be excluded because on a *generated* board "the
+    board has legitimately changed" is what every build does, so running this
+    before gen_plots.py would fail routinely and be switched off. On a
+    hand-routed board that is even more true rather than less: the board
+    changes every time somebody lays a track, and the plots are stale between
+    then and the next `gen_plots.py`. What is new is that the plots are now
+    the *only* generated artefact downstream of the board, so this check is
+    the only thing that can say the two agree. Its place is unchanged --
+    before a commit -- and its importance is not.
     """
     import tempfile
     problems = []

@@ -819,11 +819,11 @@ def check_fail_safe(nets, values):
 
     for index in range(1, design.BYPASS_RELAYS + 1):
         ref, diode = design.BYPASS_RELAY_REFS[index - 1], f"D{80 + index}3"
-        for pin, net in ((design.RELAY_PINS["COIL+"], "V5"),
+        for pin, net in ((design.RELAY_PINS["COIL+"], "VMOD"),
                          (design.RELAY_PINS["COIL-"], "FSD")):
             if (ref, str(pin)) not in nets.get(net, ()):
                 problems.append(f"{ref}.{pin} is not on {net}")
-        for role, net in (("A", "FSD"), ("K", "V5")):
+        for role, net in (("A", "FSD"), ("K", "VMOD")):
             if (diode, str(design.DIODE_PINS[role])) not in nets.get(net, ()):
                 problems.append(
                     f"{diode}'s {'anode' if role == 'A' else 'cathode'} is not "
@@ -981,7 +981,42 @@ def check_fail_safe(nets, values):
 # class being decided -- V5, the 5 V rail, which the coarse class could not close
 # once route.py stopped placing vias it had no rule for. The table above is why
 # the class moved; rules.COPPER_OZ carries the decision.
-UNROUTED_ITEMS = 0
+# ======================================================================
+# **And then the router was deleted, so this number means something else.**
+#
+# Everything above is the record of a generated board and it is kept whole,
+# because it is where six real findings came from and because the arithmetic
+# in it is still true. What is no longer true is its subject. gen_pcb.py places
+# and pours and lays no signal copper; the board is hand-routed in KiCad, and
+# out/cv-module.kicad_pcb in this repository is whatever state that routing has
+# reached.
+#
+# **So the declaration below is a progress marker, and the check around it is
+# a ratchet.** It comes down as copper is laid and it may not go up without the
+# reason being written here, which is exactly the rule this number has always
+# run on, applied to a person instead of to a router:
+#
+#     **down as copper is laid, up only with the nets named.**
+#
+# **2, and the board it counts is the routed one, before the sync.** The board
+# on disk is the committed 55,854-segment board from bfa4483 -- the RP2040's,
+# fully routed -- and 2 is what DRC reports against its own embedded netlist.
+# It is *not* a claim that this design is two connections from finished:
+# check_board_is_the_design() is the instrument that says so, and it fails,
+# naming D806 as missing and 26 RP2040-periphery parts as present.
+#
+# **The number will go up when the sync is run and that is the reason being
+# named in advance**, so that it is not read as a regression: KiCad's Update
+# PCB from Schematic will bring the controller zone's 27 nets and about 94
+# connections onto the board as unrouted. 263 of the 288 shared parts are at
+# identical coordinates, so the copper over the six channels, the CV rows, the
+# envelope rows, the ADC and the fail-safe is still exactly where it belongs.
+#
+# **Zero is still the gate on fabrication**, and it is now the only thing
+# standing between this repository and a gerber set: design.DEFERRED and
+# design.UNSPECIFIED are both empty, every part has a footprint, and
+# gen_plots.orderable() reads both. What it does not read is this.
+UNROUTED_ITEMS = 2
 
 
 def read_drc(board, destination):
@@ -1096,7 +1131,18 @@ def check_rules(project, board):
     check that would pass while meaning nothing.
     """
     problems = []
-    rules.check_fab_class()
+    # **Reported, not raised.** rules.check_fab_class() raises, because every
+    # other caller is about to write copper and should stop. A check in this
+    # file returns a list, and one that throws takes the whole run with it --
+    # which is what it did the moment rules.FABRICATOR became PCBWay and the
+    # fitted 0.09/0.09 stopped being manufacturable: verify.py and
+    # test_verify.py both died on an AssertionError instead of reporting a
+    # finding, so 84 planted faults went unproven because of one true fact.
+    try:
+        rules.check_fab_class()
+    except AssertionError as error:
+        problems.append(f"{error} -- docs/fabrication-class.md is the "
+                        f"decision this reopens")
 
     document = json.loads(project.read_text())
     declared = gen_project.design_rules()
@@ -1313,8 +1359,15 @@ def run_erc(schematic, destination):
 # Zero errors and zero warnings is a stronger claim than the six-warning version
 # and a more fragile one. The next deferred block to land will probably reopen
 # this table; what matters when it does is that the count goes back in with it.
+# **Empty, and it stayed empty through the module.** The one thing that tried
+# to get in here was MCU_Module:RaspberryPi_Pico typing its GND and AGND pins
+# as `power_out`, which put two power outputs on MDGND against the converter's
+# Com. That is a symbol modelling a module as a source of ground where this
+# board uses it as a load, so it is corrected in design.patch_symbol() rather
+# than declared here -- and the distinction is worth keeping: this dict is for
+# residue a build is expected to carry, not for a fault with a tidy
+# explanation.
 ERC_ALLOWED = {}
-
 
 
 def check_erc(violations):
@@ -1642,6 +1695,62 @@ def _board_copper(board):
     return items
 
 
+def check_board_is_the_design(board):
+    """The saved board holds exactly the parts design.py declares.
+
+    **This is the instrument the hand-laid workflow needs and did not have,
+    and the gap it fills was created by this pass.** Until gen_pcb.py stopped
+    generating copper, the board could not drift from design.py: it was
+    rewritten from it on every build, so "does the board match" was not a
+    question anybody could ask wrongly. Now the board is a hand-edited file
+    that survives across netlist changes, and the only thing that moves a
+    netlist change onto it is a person remembering to run KiCad's **Update PCB
+    from Schematic**.
+
+    **What made it worth writing is that nothing else here would notice.**
+    check_geometry() compares design.py to KiCad's export *from the
+    schematic*, and the schematic is generated -- so a board that is three
+    netlist revisions old passes it, every constraint check, and ERC. DRC runs
+    on the board and reports against the board's own embedded netlist, which
+    is the stale one, so it agrees with itself. Every green tick in this file
+    would be green and the board would be for a different circuit.
+
+    That is this repository's named failure mode arriving through a door the
+    pass opened: a check believed to cover more than it does. The three that
+    read the board -- this, check_isolation_gap() and
+    check_ground_split_on_the_board() -- are now the only things standing
+    between a stale board and a fabrication package.
+
+    Refs only. Positions are deliberately not compared: placement.py is
+    advisory once a person is laying the board out, and a check that fires
+    every time somebody nudges a part is a check that gets switched off.
+    """
+    problems = []
+    tree = sexp.parse(board.read_text())
+    on_board = set()
+    for footprint in sexp.find_all(tree, "footprint"):
+        for prop in sexp.find_all(footprint, "property"):
+            if prop[1] == "Reference":
+                on_board.add(str(prop[2]))
+    declared = set(design.PARTS)
+    missing = sorted(declared - on_board)
+    extra = sorted(on_board - declared)
+    if missing:
+        problems.append(
+            f"{len(missing)} parts are in design.py and not on the board "
+            f"({', '.join(missing[:12])}"
+            f"{', ...' if len(missing) > 12 else ''}) -- run KiCad's Update "
+            f"PCB from Schematic against out/cv-module.kicad_sch")
+    if extra:
+        problems.append(
+            f"{len(extra)} parts are on the board and not in design.py "
+            f"({', '.join(extra[:12])}{', ...' if len(extra) > 12 else ''}) "
+            f"-- the same sync, and note it will leave their copper behind: "
+            f"a track whose part has gone keeps its net and stops being "
+            f"anybody's subject")
+    return problems
+
+
 def check_isolation_gap(board):
     """The primary's quadrant of the board holds nothing but the primary.
 
@@ -1738,124 +1847,112 @@ def check_controller(nets, values):
                 f"the assignment is checkable because Table 2 is transcribed; "
                 f"the wire is checkable because this is KiCad's netlist")
 
-    expected = {}
-    for pin in design.CONTROLLER_IOVDD_PINS:
-        expected[str(pin)] = "VMCU"
-    for pin in design.CONTROLLER_DVDD_PINS:
-        expected[str(pin)] = "VCORE"
-    P = design.CONTROLLER_PINS
-    expected[str(P["VREG_VIN"])] = "VMCU"
-    expected[str(P["VREG_VOUT"])] = "VCORE"
-    expected[str(P["USB_VDD"])] = "VMCU"
-    expected[str(P["ADC_AVDD"])] = "VMCU"
-    expected[str(P["TESTEN"])] = "MDGND"
-    expected[str(P["GND"])] = "MDGND"
+    # **The supplies, and the module made this list shorter and sharper.**
+    # The QFN's version of this asked about eleven pins on the single-3.3 V
+    # scheme of RP2040 section 2.9.7.1 -- six IOVDD, two DVDD, VREG_VIN,
+    # VREG_VOUT, USB_VDD, ADC_AVDD -- and every one of those is now behind
+    # castellations, decided by somebody else's layout and unreachable from
+    # this netlist. What is left is three pins and their *directions*, which
+    # is the claim that matters:
+    #
+    #   * **VSYS is an input and it is on VMOD**, this board's switched 5 V,
+    #     through D806. On VMCU it would be the module's own output feeding
+    #     its own input, and design.pico_backdrive() is where the arrangement
+    #     that looks like that is refused;
+    #   * **3V3 is an output and it is on VMCU**, which is where every 3.3 V
+    #     part on this board hangs;
+    #   * **AGND is on MDGND**, which the Pico datasheet allows in one
+    #     sentence and only for an application that does not need the ADC to
+    #     be quiet -- see design.controller().
+    P = design.CONTROLLER_MODULE_PINS
+    expected = {str(P["VSYS"]): "VSYS", str(P["3V3"]): "VMCU",
+                str(P["AGND"]): "MDGND"}
+    for pin in design.CONTROLLER_MODULE_GND_PINS:
+        expected[str(pin)] = "MDGND"
     for pin, net in sorted(expected.items(), key=lambda kv: int(kv[0])):
         if found.get(pin) != net:
             problems.append(
                 f"{ref}.{pin} is on {found.get(pin)!r} and should be {net!r} "
-                f"-- RP2040 section 2.9, the single 3.3 V supply scheme")
+                f"-- Pico datasheet section 2.1, and see design.controller()")
 
-    supply_pins = (len(design.CONTROLLER_IOVDD_PINS)
-                   + len(design.CONTROLLER_DVDD_PINS) + 4)
-    capacitors = {part for net in ("VMCU", "VCORE")
-                  for part, _ in nets.get(net, ())
-                  if part.startswith("C") and 820 <= int(part[1:]) <= 831}
-    if len(capacitors) != supply_pins:
+    # **The three pins this board deliberately does not drive have to stay
+    # undriven**, which is the other half of the same claim and is not covered
+    # by check_open_pins(): that one asks whether a flag exists, and this asks
+    # whether a *wire* has appeared. 3V3_EN is the one that matters -- driven
+    # low it disables the module's converter into a rail this board is not
+    # making, and driven high it fights a 100 kOhm pull-up for no reason.
+    for name in ("3V3_EN", "VBUS", "ADC_VREF"):
+        pin = str(P[name])
+        if found.get(pin) is not None:
+            problems.append(
+                f"{ref}.{pin} ({name}) has acquired {found[pin]!r} -- it is in "
+                f"design.NO_CONNECT with a reason, and for 3V3_EN the reason "
+                f"is that pulling it low turns the module's own 3.3 V off")
+
+    # **A count that used to be twelve capacitors and is now zero.** The
+    # module carries its own decoupling -- Pico datasheet section 1, "power
+    # supplies and decoupling" -- so a capacitor at U19 would be a second
+    # opinion about somebody else's layout, sitting 2.54 mm further from the
+    # die than theirs. The assertion is that there is *none*, because "we
+    # added one for luck" is exactly how a board acquires a part nobody can
+    # argue for.
+    strays = sorted({part for net in ("VMCU", "VSYS")
+                     for part, _ in nets.get(net, ())
+                     if part.startswith("C") and 820 <= int(part[1:]) <= 834})
+    if strays:
         problems.append(
-            f"{len(capacitors)} decoupling capacitors for {supply_pins} "
-            f"supply pins on {ref} ({sorted(capacitors)}) -- section 2.9 asks "
-            f"for one at each, and the reference design's own exception is "
-            f"argued from a two-layer board")
+            f"{strays} decouple the module's own supply pins -- the module "
+            f"carries that decoupling and these would be a second opinion "
+            f"about a layout this repo did not do")
     return problems
 
 
 def check_controller_periphery(nets, values):
-    """The flash, the crystal and USB are wired the way their own documents
-    say.
+    """The module's own supply path: the ORing diode and where VSYS comes from.
 
-    Three blocks, each with one thing in it that is a *value* rather than a
-    choice, and each of those is what is checked:
+    ~~The flash, the crystal and USB are wired the way their own documents
+    say.~~ **All three are inside the module and this check has a different
+    subject.** What it used to hold was the QSPI bus going straight across,
+    the crystal's drive resistor being in series with XOUT rather than across
+    it, and both USB lines carrying their 27 ohm. Every one of those was a
+    claim about copper between the RP2040 and a part the Pico already has --
+    laid out once by Raspberry Pi and reproduced identically forty million
+    times, which is a stronger guarantee than a check here could make.
 
-      * **the QSPI bus is straight across.** Six nets, six pins each end, and
-        no third part on any of them. A pull-up on QSPI_SS would be the
-        reference design's R2 -- which that document marks DNF for this exact
-        flash -- and anything else is a stub on the fastest bus on the board;
-      * **the crystal's drive resistor is in series with XOUT and its two load
-        capacitors are equal.** design.crystal_load() computes the load from
-        the pair being equal, so unequal ones make its answer wrong rather
-        than making the board wrong, which is the failure that survives
-        longest. The 1 kohm is minimal design 2.3's own value at IOVDD = 3.3 V;
-      * **both USB lines have a 27 ohm series resistor**, which Table 620
-        states as a requirement rather than a suggestion -- "27 ohm series
-        resistor required for USB operation".
+    What replaces it is the one piece of that path this board still owns, and
+    it is the piece with a hazard in it:
+
+      * **VSYS comes from VMOD through D806 and through nothing else.** The
+        diode is not there for its drop -- see design.controller() -- it is
+        there so that a USB cable plugged into an *unpowered* board cannot
+        reach VA_RAW. Without it the path is VBUS, the module's own D1, VSYS,
+        U22's output, L802, U22's SW pin, and the high-side body diode into
+        VIN: a USB host on this board's twelve-volt rail. That is four parts
+        deep and every one of them is doing what it is supposed to;
+      * **the diode points the right way**, which is the fault DIODE_PINS
+        records twice at D801 and C808 and which no other instrument here can
+        see. Backwards, it is a short from VSYS to VMOD in the direction that
+        matters and the board works until a cable is plugged in;
+      * **nothing else is on VSYS.** A decoupling capacitor there would be the
+        module's job, and anything else is a load on the wrong side of the
+        diode.
     """
     problems = []
-    P = design.CONTROLLER_PINS
-    F = design.FLASH_PINS
-    mcu, flash = design.CONTROLLER_REF, design.FLASH_REF
-    for net, mcu_pin, flash_pin in (("QSD0", "QSPI_SD0", "DI_IO0"),
-                                    ("QSD1", "QSPI_SD1", "DO_IO1"),
-                                    ("QSD2", "QSPI_SD2", "WP_IO2"),
-                                    ("QSD3", "QSPI_SD3", "HOLD_IO3"),
-                                    ("QSCK", "QSPI_SCLK", "CLK"),
-                                    ("QSCS", "QSPI_SS", "CS")):
-        carried = {(part, pin) for part, pin in nets.get(net, ())}
-        want = {(mcu, str(P[mcu_pin])), (flash, str(F[flash_pin]))}
-        # QSPI_SS also reaches the boot header through R826, which is the one
-        # declared exception and is minimal design 2.2's own 1 kohm.
-        if net == "QSCS":
-            want.add(("R826", "1"))
-        if carried != want:
-            problems.append(
-                f"{net} carries {sorted(carried)}, expected {sorted(want)} -- "
-                f"the QSPI bus goes straight across and nothing else hangs "
-                f"on it")
-
-    crystal = design.CRYSTAL_REF
-    xin = {part for part, _ in nets.get("XIN", ())}
-    if xin != {mcu, crystal, "C832"}:
+    mcu = design.CONTROLLER_REF
+    P = design.CONTROLLER_MODULE_PINS
+    want = {(mcu, str(P["VSYS"])), ("D806", str(design.DIODE_PINS["K"]))}
+    carried = set(nets.get("VSYS", ()))
+    if carried != want:
         problems.append(
-            f"XIN carries {sorted(xin)}, expected {sorted({mcu, crystal, 'C832'})}")
-    xout = {part for part, _ in nets.get("XOUT", ())}
-    if xout != {mcu, "R824"}:
+            f"VSYS carries {sorted(carried)}, expected {sorted(want)} -- the "
+            f"module's input and the cathode of D806, and nothing else")
+    anode = {part for part, pin in nets.get("VMOD", ())
+             if (part, pin) == ("D806", str(design.DIODE_PINS["A"]))}
+    if not anode:
         problems.append(
-            f"XOUT carries {sorted(xout)}, expected {mcu} and R824 -- the "
-            f"drive resistor is in series with the *amplifier's* output, and "
-            f"a crystal wired directly to XOUT is the over-drive minimal "
-            f"design 2.3 warns about")
-    xtal = {part for part, _ in nets.get("XTAL", ())}
-    if xtal != {crystal, "R824", "C833"}:
-        problems.append(
-            f"XTAL carries {sorted(xtal)}, expected the crystal, R824 and "
-            f"C833")
-    try:
-        if kisim.magnitude(values["C832"]) != kisim.magnitude(values["C833"]):
-            problems.append(
-                f"the crystal's load capacitors are {values['C832']} and "
-                f"{values['C833']} -- crystal_load() computes C/2 from them "
-                f"being equal, so unequal ones make the *calculation* wrong "
-                f"and leave the board looking right")
-    except Exception as error:
-        problems.append(f"the crystal's load capacitors do not parse: {error!r}")
-
-    for net, pin, resistor in (("UDM", "USB_DM", "R820"),
-                               ("UDP", "USB_DP", "R821")):
-        carried = {(part, pin_number) for part, pin_number in nets.get(net, ())}
-        want = {(mcu, str(P[pin])), (resistor, "1")}
-        if carried != want:
-            problems.append(
-                f"{net} carries {sorted(carried)}, expected {sorted(want)} -- "
-                f"Table 620 makes the 27 ohm series resistor a requirement")
-        try:
-            ohms = kisim.magnitude(values[resistor])
-        except Exception as error:
-            problems.append(f"{resistor} does not parse: {error!r}")
-            continue
-        if abs(ohms - design.USB_SERIES_R_OHMS) > 0.5:
-            problems.append(
-                f"{resistor} is {values[resistor]} and USB asks for "
-                f"{design.USB_SERIES_R_OHMS:.0f} ohm")
+            "D806's anode is not on VMOD -- reversed, the diode stops being "
+            "an ORing diode and becomes a path from a USB host to VA_RAW "
+            "through U22's high-side body diode")
     return problems
 
 
@@ -1895,12 +1992,12 @@ def check_mcu_supply(nets, values):
                 f"between the rail filter standing between this switcher and "
                 f"the audio rail and it standing behind it")
 
-    top = {part for part, _ in nets.get("VMCU", ()) if part == "R850"}
+    top = {part for part, _ in nets.get("VMOD", ()) if part == "R850"}
     bottom = {part for part, _ in nets.get("MFB", ())}
     if not top or bottom != {ref, "R850", "R851"}:
         problems.append(
-            f"the feedback divider is R850 on VMCU and MFB and R851 on MFB "
-            f"and MDGND; MFB carries {sorted(bottom)} and VMCU "
+            f"the feedback divider is R850 on VMOD and MFB and R851 on MFB "
+            f"and MDGND; MFB carries {sorted(bottom)} and VMOD "
             f"{'has' if top else 'does not have'} R850")
     else:
         try:
@@ -1911,14 +2008,20 @@ def check_mcu_supply(nets, values):
             rfbt = rfbb = None
         if rfbt and rfbb:
             volts = design.mcu_dcdc_output(rfbt, rfbb)
-            if abs(volts["volts"] - design.RAILS["VMCU"]) > 0.1:
+            if abs(volts["volts"] - design.RAILS["VMOD"]) > 0.1:
                 problems.append(
-                    f"R850/R851 = {values['R850']}/{values['R851']} sets VMCU "
+                    f"R850/R851 = {values['R850']}/{values['R851']} sets VMOD "
                     f"to {volts['volts']:.2f} V, not "
-                    f"{design.RAILS['VMCU']:.1f} -- equation 7, and the "
-                    f"absolute maximum on IOVDD is "
-                    f"{design.CONTROLLER_IOVDD_ABS_MAX:.2f}")
+                    f"{design.RAILS['VMOD']:.1f} -- equation 7, and the "
+                    f"module's own ceiling on VSYS is "
+                    f"{design.CONTROLLER_VSYS_RANGE[1]:.1f} V")
 
+    # **The net this counts is VMCU and the budget it protects is now two
+    # conversions away**, which is worth a sentence rather than a rename: the
+    # parts on VMCU are what the module has to deliver, mcu_chain() turns that
+    # into what U22 has to deliver, and supply_fit() turns *that* into the
+    # converter's +Vout. A part added to VMCU silently is still a part the
+    # 250 mA does not know about; it now costs about 1.4 times as much.
     counted = {part for part, _ in nets.get("VMCU", ())}
     declared = set(design.mcu_rail_load()["parts"])
     if counted != declared:
@@ -2073,6 +2176,8 @@ CHECKS = (
     ("   VREF load inside the MAX6126's range", check_reference_load,
      ("nets", "values")),
     ("   DRC clean, unrouted count declared", check_board, ("drc",)),
+    ("   the board holds the design's parts", check_board_is_the_design,
+     ("board",)),
     ("   the two pours do not overlap", check_ground_split_on_the_board,
      ("board",)),
     ("   DRC's rules are rules.py's rules", check_rules, ("project", "board")),
@@ -2082,9 +2187,9 @@ CHECKS = (
      ("board",)),
     ("   the controller's pins are the map's", check_controller,
      ("nets", "values")),
-    ("   flash, crystal and USB as specified", check_controller_periphery,
+    ("   the module is fed on VSYS, through D806", check_controller_periphery,
      ("nets", "values")),
-    ("   the 3.3 V switcher is fed from VA_RAW", check_mcu_supply,
+    ("   the 5 V switcher is fed from VA_RAW", check_mcu_supply,
      ("nets", "values")),
     ("   MIDI in is isolated, and by one part", check_midi,
      ("nets", "values")),

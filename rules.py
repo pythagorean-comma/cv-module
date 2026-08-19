@@ -86,20 +86,52 @@ import math
 # that does the cooling -- see track_current() for why that is the wrong
 # instrument.
 #
-# **And it makes the RP2040 routable**, which is what asked the question:
-# fan_out_class() puts a 0.40 mm QFN-56 off the bottom of its ladder at
-# 0.25/0.20 and clears it here, with no escape needed at all. See
-# design.controller_package() and docs/fabrication-class.md.
+# **1 oz, and the reason is that nothing on this board has ever wanted 2.**
+# The weight was carried as a free option for five passes -- this file's own
+# words were *"the rules below are chosen to be legal at either weight ...
+# keeping the option costs nothing"* -- and it was never bought against a
+# requirement. It was then spent by the RP2040's QFN, which is gone.
+#
+# **The only number this repo has for it says 1 oz by a factor of nothing that
+# matters.** track_current() puts the largest current on the board -- 92.7 mA
+# of relay coil -- at **0.088 degC of rise** on 0.20 mm of 1 oz copper, against
+# 0.028 degC at 2 oz. Both are noise. There is no thermal case, no current
+# case, and no mechanical case anybody here has written down.
+#
+# **And 2 oz would now cost something real.** PCBWay's 2 oz floor is
+# 0.178/0.203 mm, so a track through the 0.67 mm corridor between two SOIC
+# pins needs 0.584 mm of it and leaves **0.086 mm of total slack** to spend on
+# margin. At 2 oz you choose between holding margin over the process and being
+# able to route between two pins of a SOIC. At 1 oz you get both. See
+# TRACK_MM.
 COPPER_OZ = 1
 
-# 0.09 mm, which is JLCPCB's published minimum at 1 oz and the whole reason the
-# copper weight moved -- see COPPER_OZ. It was 0.25 mm, with a comment arguing
-# that "a track three thou wider than it needs to be is free everywhere except
-# between two pins of a SOIC". That was right about the SOIC and wrong about
-# what the width is for: the track sets route_pitch(), the pitch sets which pin
-# pitches the router can reach at all, and 0.25 mm put a 0.40 mm QFN-56 out of
-# reach entirely.
-TRACK_MM = 0.09
+# **0.20 mm, and the constraint that picked it is the SOIC corridor rather
+# than the fabricator's floor.** Two SOIC pins leave 0.67 mm of bare laminate
+# between them -- escape_corridor() -- and a track through it needs
+# `track + 2 x clearance`. That is the number that separates the candidates,
+# and it separates them the opposite way round from the margin figures:
+#
+#     class        w + 2c   through a SOIC?   over PCBWay's 1 oz floor
+#     0.20/0.20    0.600    yes, 0.07 spare   track +57 %, space +32 %
+#     0.25/0.25    0.750    **no**            track +97 %, space +64 %
+#
+# So the coarser class has more margin over the process and cannot pass
+# between two pins of a SOIC, on a board with a SOIC-20W, two SOIC-16, several
+# SOIC-14 and a SOIC-8 on it. 0.20/0.20 holds a third to a half of margin
+# everywhere *and* keeps the corridor, which is why it wins.
+#
+# **It is a 1 oz class and only a 1 oz class.** At 2 oz PCBWay's spacing floor
+# is 0.203 mm, so 0.20 is 1.5 % under it -- close enough to read as fine and
+# it is not. Said here because "0.20/0.20 on 1 oz or 2 oz" was written down
+# once in this project and was wrong.
+#
+# The three values this has been are each right about the board they were on:
+# 0.25/0.20 while every package was a SOIC and the fabricator was assumed to
+# be JLCPCB, 0.09/0.09 while a 0.40 mm QFN-56 had to be reachable by a maze
+# router, and 0.20/0.20 now that the controller is a 2.54 mm module, the board
+# is hand-laid, and the fabricator has been asked.
+TRACK_MM = 0.20
 
 # The rails and both grounds, per the Power net class. Not used by the router,
 # which draws every signal at TRACK_MM; this is what a rail is widened to when
@@ -107,13 +139,12 @@ TRACK_MM = 0.09
 # cannot disagree about it.
 POWER_TRACK_MM = 0.5
 
-# 0.09 mm, with the track, for the same reason. **The margin that used to be
-# here is gone and that is the honest cost of the decision**: 0.2 against a
-# 0.15 mm floor was 33 % of margin held for nothing, and 0.09 is the floor
-# itself. What protects the board now is that PITCH_MARGIN_MM is still carried
-# on top of the pitch, and that DRC runs against these numbers on every build --
-# verify.check_rules() is what holds all three files to them.
-CLEARANCE_MM = 0.09
+# 0.20 mm, with the track, and the pair is chosen together -- see TRACK_MM,
+# where the corridor arithmetic is `track + 2 x clearance` and so cannot be
+# decided one value at a time. 32 % over PCBWay's 1 oz spacing floor and 122 %
+# over JLCPCB's, and DRC runs against it on every build with
+# verify.check_rules() holding all three files to it.
+CLEARANCE_MM = 0.20
 
 # 0.6 mm diameter on a 0.3 mm hole. **Chosen to sit outside every surcharge the
 # capabilities page names**, which is the one place that page gives a price:
@@ -121,7 +152,18 @@ CLEARANCE_MM = 0.09
 # the 0.45 mm diameter below which the small holes cost more. The published
 # minimum is 0.25 mm on a 0.15 mm hole and this design has no reason to go
 # near it.
-VIA_DIAMETER_MM = 0.6
+# **0.7 mm and not 0.6, and the 0.1 mm buys margin on the one via number that
+# is a function of two others.** 0.6/0.3 is a 0.150 mm annular ring against
+# PCBWay's published 0.150 mm minimum -- exactly at it, on 767 vias, and
+# passing every check this file had because none of them computed the ring.
+# 0.7/0.3 is 0.200 mm, a third over.
+#
+# What it costs is a 0.05 mm larger radius of keepout around each via, on a
+# board that is 3.8x the area of the one it plugs into and is about to be
+# re-placed anyway. If area ever becomes the binding constraint this is a
+# cheap 0.1 mm to give back, and it should be given back deliberately rather
+# than by drifting.
+VIA_DIAMETER_MM = 0.7
 VIA_DRILL_MM = 0.3
 
 # Copper to board edge.
@@ -321,7 +363,8 @@ def pad_reach(pin_pitch=TSSOP_PIN_PITCH_MM, pad_width=TSSOP_PAD_WIDTH_MM,
     land outside. design.ENV_ADC_CHANNEL spends that on the ADC's two grounded
     channels. **That is no longer load-bearing and the note is kept for the
     arithmetic**: the fan-out closes the pads that lose, so which two rows they
-    are is free again. See track_offset_limit() and route.Grid.escape().
+    are is free again. See track_offset_limit(), and route.Grid.escape() in
+    the history -- route.py is deleted and this arithmetic outlived it.
     """
     grid = route_pitch() if grid is None else grid
     widest = pin_pitch - clearance
@@ -440,7 +483,7 @@ def track_offset_limit(edge_mm, track=TRACK_MM, clearance=CLEARANCE_MM):
     be made wider.
 
     **The number this replaces was 0.075 mm and it was a true statement about
-    a different question.** route.Grid.block_pad_copper() insets a pad by half
+    a different question.** The deleted route.Grid.block_pad_copper() inset a pad by half
     a track before claiming its cells, so that a track drawn on one of them
     stays *inside the pad's own copper* -- 0.075 mm here. That is the right
     rule for the exemption it guards (a segment inside the pad cannot be too
@@ -757,19 +800,80 @@ def class_table():
     return rows
 
 
-def check_fab_class():
+# ---------------------------------------------------------------------------
+# Whose limits, and it was the wrong fabricator's for the whole life of the file
+# ---------------------------------------------------------------------------
+#
+# **This file read JLCPCB's page first-hand and never asked whether JLCPCB is
+# where the board goes. It is not; the sibling projects go to PCBWay.** That
+# is a source read carefully and applied to the wrong thing, which is a
+# different fault from the one STYLE.md rule 10 is about and is just as
+# expensive: every number below was checked, quoted and enforced, and the
+# comparison it was enforcing was against a process nobody is buying.
+#
+# PCBWay's own capabilities page, https://www.pcbway.com/capabilities.html,
+# read 2026-08-19. Its outer-layer table is by copper *thickness*, and the
+# rows that bear on this board, converted from mil at 0.0254:
+#
+#     35 um = 1 oz   normal >= 5/6 mil   = 0.127 / 0.152 mm
+#                    medium >= 5/5 mil   = 0.127 / 0.127 mm
+#     70 um = 2 oz   normal >= 7/8 mil   = 0.178 / 0.203 mm
+#                    medium >= 6/7 mil   = 0.152 / 0.178 mm
+#
+# with a headline "Standard PCB" row giving *"Min Trace"* and *"Min Spacing"*
+# as *"0.1mm/4mil"* with no copper weight attached. **Those two disagree and
+# the disagreement is not resolved here**: 0.1 mm is finer than the 1 oz row
+# allows, so one of them is a marketing summary and the other is process
+# engineering, and which is which is not something this page says. The
+# by-weight table is the one enforced, because it is the one that distinguishes
+# the thing this board's decision turns on.
+#
+# **What follows is that the fitted 0.09/0.09 is not manufacturable at PCBWay
+# at any copper weight.** It is 29 % under the 1 oz track minimum and 41 %
+# under the spacing. The only 3.5 mil entry on the page is at 18 um -- half an
+# ounce -- and is qualified *"or parts 3.5/3.5mil"*. So check_fab_class()
+# raises, and it is right to: the 55,854 segments on this board are at a class
+# the target fabricator does not offer.
+FABRICATOR = "PCBWay"
+# name -> {oz: (min track mm, min clearance mm)}, from the pages above.
+FAB_LIMITS = {
+    "JLCPCB": {1: (0.09, 0.09), 2: (0.15, 0.15)},
+    "PCBWay": {1: (0.127, 0.152), 2: (0.178, 0.203)},
+}
+# PCBWay: *"Min Width of Annular Ring: 0.15mm(6mil)"*. JLCPCB's page gives the
+# via as a diameter/hole pair rather than a ring, and 0.25/0.15 is a 0.05 mm
+# ring, so its published floor is the looser of the two and PCBWay binds again.
+ANNULAR_RING_MM = {"JLCPCB": 0.05, "PCBWay": 0.15}
+
+
+def check_fab_class(fabricator=None):
     """Every fitted rule is inside the fabricator's published minimum. Raises."""
-    limits = {"2 oz outer": 0.15, "1 oz outer only": 0.09}
-    floor = limits["2 oz outer"] if COPPER_OZ == 2 else limits["1 oz outer only"]
-    if TRACK_MM < floor:
+    fabricator = fabricator or FABRICATOR
+    limits = FAB_LIMITS[fabricator]
+    track_floor, space_floor = limits.get(COPPER_OZ, limits[1])
+    if TRACK_MM < track_floor:
         raise AssertionError(
-            f"TRACK_MM is {TRACK_MM} mm and JLCPCB's published minimum at "
-            f"{COPPER_OZ} oz is {floor} mm -- see the reading at the top of "
-            f"this file, and note that reaching 0.09 mm means 1 oz")
-    if CLEARANCE_MM < floor:
+            f"TRACK_MM is {TRACK_MM} mm and {fabricator}'s published minimum "
+            f"at {COPPER_OZ} oz is {track_floor} mm -- see the reading at the "
+            f"top of this file. The fitted class was chosen against JLCPCB's "
+            f"table and the target is {fabricator}")
+    if CLEARANCE_MM < space_floor:
         raise AssertionError(
             f"CLEARANCE_MM is {CLEARANCE_MM} mm against a published "
-            f"{floor} mm at {COPPER_OZ} oz")
+            f"{space_floor} mm at {COPPER_OZ} oz ({fabricator})")
+    # **The annular ring, which nothing checked and which was sitting exactly
+    # on PCBWay's floor.** Their page gives *"Min Width of Annular Ring:
+    # 0.15mm(6mil)"*, and a 0.6 mm via on a 0.3 mm drill is (0.6 - 0.3) / 2 =
+    # 0.150 mm -- the floor, to three decimal places, on 767 vias. That is the
+    # kind of number that is invisible precisely because it passes: the old
+    # check asked whether the diameter and the drill each cleared their own
+    # minimum and never asked about the quantity that is a function of both.
+    ring = (VIA_DIAMETER_MM - VIA_DRILL_MM) / 2
+    if ring < ANNULAR_RING_MM[fabricator]:
+        raise AssertionError(
+            f"the via's annular ring is {ring:.3f} mm "
+            f"(({VIA_DIAMETER_MM} - {VIA_DRILL_MM}) / 2) against "
+            f"{fabricator}'s published {ANNULAR_RING_MM[fabricator]} mm")
     if VIA_DIAMETER_MM < 0.25 or VIA_DRILL_MM < 0.15:
         raise AssertionError(
             f"via {VIA_DIAMETER_MM}/{VIA_DRILL_MM} mm is below the published "
@@ -828,18 +932,37 @@ def write():
         "**So the corridor opens only at JLCPCB's finest multilayer class, "
         "which is available at 1 oz outer copper and not at 2 oz.** That is "
         "not a routing decision, it is a decision to give up 2 oz as an "
-        "option. `route.route_all()` finishes the board without it, by ripping "
+        "option -- and both are history: route.py is deleted and the board is "
+        "hand-laid. `route_all()` finished it without a finer grid, by ripping "
         "up and re-routing the nets that are in the way, so this board is "
         "ordered at the fitted class.\n")
     return path
 
 
 def main():
-    check_fab_class()
+    # **The class check is reported rather than raised through, and only
+    # here.** check_fab_class() still raises for every caller that is about to
+    # write copper -- gen_pcb.py calls it before it places anything. This file
+    # writes the *document* that explains the fitted class, and dying before
+    # the explanation is written is the one place the raise makes the problem
+    # harder to read rather than easier. It still exits non-zero.
+    failure = None
+    try:
+        check_fab_class()
+    except AssertionError as error:
+        failure = error
     _report()
+    if failure:
+        print()
+        print(f"  ** the fitted class is not manufacturable at "
+              f"{FABRICATOR} **")
+        print(f"     {failure}")
+        print(f"     docs/fabrication-class.md has the decision this reopens")
     path = write()
     print()
     print(f"wrote {path.relative_to(path.parent.parent)}")
+    if failure:
+        raise SystemExit(1)
 
 
 def _report():
@@ -868,7 +991,7 @@ def _report():
     print(f"  and no cell inside one either: a pad holds a cell at every "
           f"phase only above {reach['needed_pitch_mm']:.2f} mm of pitch, and "
           f"a TSSOP is {reach['short_by_mm'] * 1e3:.0f} um under it -- "
-          f"see rules.pad_reach(), and route.Grid.escape() for what is done "
+          f"see rules.pad_reach(); route.Grid.escape() was what did something "
           f"about it")
     print(f"  what closes it is the fan-out, and it is a ladder with three "
           f"rungs rather than a threshold:")

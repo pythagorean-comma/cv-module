@@ -18,25 +18,44 @@ and never writes to it — see [`contract/PINNED.md`](contract/PINNED.md).
 
 **A spike, and an honest one.** Every number carries its arithmetic, every check
 can be shown to fail, and everything guessed is in
-[`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md). **The board is finished copper** — 0 DRC
-violations and 0 unconnected items — and the one block still not drawn is not
-drawn for two reasons that are now arithmetic rather than scope.
+[`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md).
+
+**The programmatic approach has passed its useful limit at the geometry, and
+this pass acts on that.** Code keeps the logic — the netlist, the algebraic
+values, the pin configuration, the constraints, the checks — and the board is
+handed to KiCad. `route.py` is deleted; `gen_pcb.py` places, pours and stitches
+and lays no signal copper. The rule that follows is the one to read before
+anything else here:
+
+> **The netlist is generated and authoritative. The board is hand-laid and
+> verified.**
+
+Running `gen_pcb.py` over a hand-routed board destroys the routing, with no undo
+and no warning. The sync path for a netlist change is KiCad's own **Update PCB
+from Schematic**, against the generated sheet. `verify.py` is unchanged in what
+it asks, because every one of its questions was always asked *of* the board by
+reading it back.
+
+**And the controller is a Raspberry Pi Pico.** 0.40 mm of pin pitch became
+2.54, which is what made the router's whole subject go away — and it took the
+supply with it, because a Pico makes its own 3.3 V with a converter this design
+does not choose. See [`controller.md`](docs/controller.md).
 
 | | |
 |---|---|
 | one channel derived | ✅ every value, arithmetic inline |
 | the coarse pad | ✅ **struck** — 0.000 dB of system noise for 36 parts |
-| netlist | ✅ 314 parts, 201 nets, all pins resolved |
+| netlist | ✅ **289 parts, 184 nets, 823 pin connections** — 25 parts and 17 nets went inside the module |
 | schematic | ✅ **0 merges, 0 breaks, 0 stranded pins** |
 | the verification loop | ✅ `verify.py` reads **KiCad's** netlist, compared by name |
 | ERC | ✅ **0 errors and 0 warnings** — `ERC_ALLOWED` is empty |
 | the envelope rectifier | ✅ derived, drawn and checked — τ from the transient, not from a target |
 | the fail-safe | ✅ drawn: de-energised **is** bypass, and the pump's own rise time is the power-up interlock |
-| section 5 constraints | ✅ checked mechanically, **71** planted faults caught — and the faults themselves are checked too |
+| section 5 constraints | ✅ checked mechanically, **81** planted faults caught — and the faults themselves are checked too. Five faults went dead when their targets left the board, and the guard named all five before a case ran |
 | deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
-| board | ✅ placed, poured, routed and **finished** — **0 DRC violations and 0 unconnected items**. The 0.65 mm pin pitch is closed by a fan-out pass: `route.Grid.escape()` |
-| the fan-out | ✅ **four escapes at U17, laid as fixed copper on each pad's own centre line before the router runs.** Which pads need one is `route.access()`'s own answer; the arithmetic is `rules.track_offset_limit()`, and it is general — no SOIC pad on this board can ever need one and `Q801` still does not |
+| board | ⚠️ **the routed board from `bfa4483`, awaiting a sync.** 55,854 segments and 767 vias, and **263 of the 288 shared parts are at identical coordinates** — the audio channels, CV rows, envelope rows, ADC and fail-safe keep their copper. What needs re-routing is the controller zone: 27 nets, ~94 connections of 639. `check_board_is_the_design()` is the new instrument and it fails until KiCad's Update PCB from Schematic is run |
+| ~~the fan-out~~ | **deleted with `route.py`.** Four escapes at U17 closed the board it was written for and nothing on this board exercises it: the finest pitch left is a TSSOP's 0.65 mm. This repo's rule about a declaration nothing is obliged to use, applied to code |
 | the design rules | ✅ one copy in `rules.py`, and DRC is finally enforcing them |
 | the two `UNSPECIFIED` parts | ✅ **chosen** — Omron G6S-2 DC5 and Diodes DMG1012T. `UNSPECIFIED` is empty and no courtyard is reserved |
 | the Schottky clamp | ✅ **read, and it had failed** — the BAT54 missed by 5.5 dB. PMEG2010AEH fits with 1.5 dB |
@@ -48,7 +67,9 @@ drawn for two reasons that are now arithmetic rather than scope.
 | the 3.3 V rail | ✅ **real now, and it had been declared for four passes with no net** — `RAILS` said `V3V3` and `supply-decision.md` said there is no such rail. `check_rails_are_drawn()` is the instrument |
 | the inlet fuse | ❌ **derived and not fitted.** The converter's datasheet asks for 1.6 A slow blow and the assessment says yes — the inlet is shared with a fabricated board that has none. No part number was verified this session, and a plausible order code is worse than an absent part |
 
-| the controller | ✅ **drawn, and `DEFERRED` is empty.** The RP2040 with its QSPI flash, a 12 MHz crystal, USB, DIN MIDI in and out through an opto, the tap and expression jacks, twelve decoupling capacitors and a **TPS560430XF** switcher for its 3.3 V rail. Gate 1 closed by moving the fabrication class; gate 2 by a part whose F suffix is load-bearing — see [`controller.md`](docs/controller.md) |
+| the controller | ✅ **a Raspberry Pi Pico, and `DEFERRED` is empty.** SC0915, castellated, 2.54 mm. It deleted about 25 parts — the flash, the crystal, USB with its terminations and VBUS divider, twelve capacitors, the BOOT and SWD headers — and one whole class of problem. `pico_backdrive()` refuses the cheap supply topology on documentation rather than on arithmetic; `mcu_supply()` is what the documented one then cost — see [`controller.md`](docs/controller.md) |
+| the fabrication class | ✅ **re-opened, re-decided, and put back — 0.09/0.09 on 1 oz, unchanged.** The QFN that forced it has gone and the arithmetic says 0.15/0.15 on 2 oz is now enough. It omits the 55,854 segments already laid on a 0.23 mm grid, which are legal at 0.09 mm wide and illegal at 0.15. **The class is a free choice only for a board routed from nothing** — see [`fabrication-class.md`](docs/fabrication-class.md) |
+| the +Vout budget | ✅ **212.9 mA of 250, and it failed first.** Two converters in series made the 67.8 % threshold a threshold on a *product*, the pessimistic corner missed by 4.6 mA, and `verify.check_supply()` said so. Closed by the lever `MEASURED["mcu_dcdc_efficiency"].when_wrong` has named since the QFN pass: U22 makes 5 V now and carries the relay coils |
 
 **`design.DEFERRED` is empty and so is `design.UNSPECIFIED`.** There were six
 deferred blocks: the supply, the envelope ADC, the envelope rectifier, the
@@ -79,14 +100,37 @@ once for ERC; `gen_pcb.py` needs its bundled Python for `pcbnew`; and
 `gen_plots.py` plots the schematic, the layout and the render. That is the point
 rather than a dependency to regret.
 
+**Two pipelines now, and the split is the whole of the new workflow.** The
+first is safe and is what you run: it regenerates the netlist, the schematic
+and every document, and it verifies the board that is on disk without writing
+to it.
+
 ```bash
 python3 design.py && python3 gen_netlist.py && python3 gen_sch.py \
-  && python3 gen_project.py && python3 placement.py && python3 gen_pcb.py \
+  && python3 gen_project.py && python3 placement.py \
   && python3 verify.py && python3 test_verify.py \
   && python3 constraints.py && python3 delta.py && python3 floorplan.py \
   && python3 gen_bom.py && python3 gen_assumptions.py && python3 rules.py \
   && python3 gen_plots.py
 ```
+
+**`gen_pcb.py` is not in it.** It places, pours and stitches, and it lays no
+signal copper -- so running it over a hand-routed board discards the routing,
+with no undo. It is a *starting* step, run once, and after that the board is
+edited in KiCad:
+
+```bash
+python3 gen_pcb.py                 # refuses if the board carries signal copper
+python3 gen_pcb.py --discard-routing   # and this is how you mean it
+```
+
+The refusal is `gen_pcb_guard.refuse_to_discard_routing()` and it is enforced
+rather than documented, because for one pass it was documented in three files
+while this very code block still had `gen_pcb.py` in the middle of it.
+
+**To move a netlist change onto a routed board**, use KiCad's own **Tools ->
+Update PCB from Schematic** against `out/cv-module.kicad_sch`, which the first
+pipeline regenerates. That is the only sync path.
 
 `gen_pcb.py` is run with the ordinary interpreter and **re-runs itself under
 KiCad's bundled one**, because `pcbnew` is a SWIG extension that exists nowhere
@@ -154,8 +198,8 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | `gen_sch.py` / `gen_project.py` | the sheet, the project KiCad needs to read it, and **the project's own symbol and footprint libraries** — `out/cv.kicad_sym` and `out/cv.pretty`, the second holding the one land pattern KiCad does not ship |
 | `rules.py` | the fabrication rules, the routing pitch derived from them, and the fab class read first-hand |
 | `gen_plots.py` | the schematic, the layout and a render — the outputs you can look at without KiCad |
-| `placement.py` / `route.py` | the floorplan as coordinates, and a maze router with rip-up and retry. Neither imports KiCad |
-| `gen_pcb.py` | the board, through the deprecated `pcbnew` bindings |
+| `placement.py` | the floorplan as coordinates. It does not import KiCad |
+| `gen_pcb.py` | the board, through the deprecated `pcbnew` bindings — **place and pour only** |
 | `verify.py` / `test_verify.py` | the constraints against KiCad's own netlist, and proof the checks can fail |
 | [`FINDINGS.md`](docs/FINDINGS.md) | things wrong in the mixer repo — noted, never fixed |
 | [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) | everything guessed, with what it costs if wrong |
@@ -1178,6 +1222,42 @@ Three more things the pass turned up, each recorded where it happened:
   `verify.ERC_ALLOWED`.
 
 ## Open, in the order worth taking
+
+**The list below is the previous pass's and its first two items are closed.**
+What is genuinely open now, in order:
+
+1. **Sync the board and route the controller zone.** The board on disk is the
+   routed one from `bfa4483` — 55,854 segments, 767 vias — and **263 of the 288
+   shared parts are at identical coordinates**, so the audio channels, CV rows,
+   envelope rows, ADC and fail-safe keep their copper. What is needed, in
+   KiCad: extend `Edge.Cuts` and the southern MDGND zone 26 mm south to open
+   the strip the module sits in; **Tools → Update PCB from Schematic** against
+   `out/cv-module.kicad_sch`, which deletes the 26 RP2040-periphery footprints
+   and adds U19 and D806; place those two; and route **27 nets, about 94
+   connections of 639**. `check_board_is_the_design()` fails until the sync is
+   run, and `verify.UNROUTED_ITEMS` is the ratchet after it.
+2. **The inlet fuse** — 1.6 A slow blow, derived, with no verified order code
+   and no footprint. A plausible order code is a value, and §6 of the spec
+   forbids inventing one.
+3. **`MEASURED["noise_floor"]`** — a meter on the mixer's mono output. Still
+   this module's most load-bearing unknown; see item 1 of the old list below.
+4. **`MEASURED["mcu_dcdc_efficiency"]` and `MEASURED["pico_smps_efficiency"]`**
+   — **two ammeters now, and they multiply.** One in series with U22's VIN and
+   one in series with the Pico's VSYS pin with GPIO23 high. The budget closes
+   at 212.9 mA of 250 and it failed at 254.6 before U22 took the relay coils,
+   so this is the pair that decides whether that headroom is real.
+5. **`MEASURED["env_opamp_iq"]`**, settled by fitting a TL07xH grade;
+   **`MEASURED["vca_rin"]`**; and **`["dcdc_node_v"]` and `["inlet_loop_uh"]`**,
+   both 40 dB from mattering — retire them or measure them.
+6. **Whether to design to the fabricator's published 0.20 mm hole clearance**
+   rather than KiCad's 0.25 mm default. Unchanged, and see
+   `fabrication-class.md`'s last section for why it is deliberately separate.
+7. **Gerbers**, which `gen_plots.orderable()` now gates on the routing rather
+   than on nothing.
+
+---
+
+### The previous pass's list, kept
 
 ~~**The fan-out.**~~ **Closed.** `UNROUTED_ITEMS` is 0 and DRC is 0. See the
 fine-pitch section above.

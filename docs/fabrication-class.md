@@ -1,10 +1,212 @@
-# The fabrication class — decision
+# The fabrication class — decided against PCBWay, at 0.20 / 0.20 on 1 oz
 
-Resolves the last free choice in `rules.py`, and it stopped being free when the
-controller was derived.
+**Fitted: 0.20 / 0.20 mm track and clearance, 1 oz outer copper, 0.7 / 0.3 mm
+vias.** `rules.FABRICATOR = "PCBWay"`, and it clears **both** fabricators:
 
-**Decided: 0.09 / 0.09 mm track and clearance, on 1 oz outer copper.**
+| | track | space | annular ring |
+|---|---|---|---|
+| PCBWay, 1 oz | 0.127 → **+57 %** | 0.152 → **+32 %** | 0.15 → **+33 %** |
+| JLCPCB, 1 oz | 0.09 → +122 % | 0.09 → +122 % | 0.05 → +300 % |
+
+PCBWay is the binding floor in every row and at every copper weight, so
+designing to it leaves JLCPCB open as a second source for nothing.
+
+## What actually picked it, and it is not the margin column
+
+Two SOIC pins leave **0.67 mm** of bare laminate between them
+(`escape_corridor()`), and a track through that gap needs `track + 2 ×
+clearance`:
+
+| class | w + 2c | through a SOIC? | PCBWay 1 oz margin |
+|---|---|---|---|
+| **0.20 / 0.20** | 0.600 | **yes**, 0.07 mm spare | +57 % / +32 % |
+| 0.25 / 0.25 | 0.750 | **no** | +97 % / +64 % |
+
+The coarser class has *more* margin over the process and **cannot pass between
+two pins of a SOIC** — on a board carrying a SOIC-20W, two SOIC-16, several
+SOIC-14 and a SOIC-8. So the two figures point opposite ways and the corridor
+is the one that decides, because margin over a published minimum is
+insurance and the corridor is a routing capability you either have or do not.
+
+**It is a 1 oz class and only a 1 oz class.** At 2 oz PCBWay's spacing floor is
+0.203 mm, so 0.20 is 1.5 % *under* it — near enough to read as fine, and not.
+This project wrote down "0.20/0.20 on 1 oz or 2 oz" once and it was wrong.
+
+## Why not 2 oz
+
+**Nothing on this board has ever wanted it.** `rules.track_current()` puts the
+largest current here — 92.7 mA of relay coil — at **0.088 °C of rise** on
+0.20 mm of 1 oz, against 0.028 °C at 2 oz. Both are noise. The weight was
+carried for five passes as a free option, in this file's own words *"chosen to
+be legal at either weight ... keeping the option costs nothing"*, and was never
+bought against a requirement; it was then spent by the QFN, which has gone.
+
+**And at 2 oz it would now cost something real.** The floor is 0.178 / 0.203,
+so a track through the SOIC corridor needs 0.584 mm of the 0.67 available and
+leaves **0.086 mm of total slack** to spend on margin. At 2 oz you choose
+between holding margin over the process and routing between two pins of a
+SOIC. At 1 oz you get both.
+
+## The annular ring, which nothing was checking
+
+A 0.6 mm via on a 0.3 mm drill is a **0.150 mm** annular ring against PCBWay's
+published *"Min Width of Annular Ring: 0.15mm(6mil)"* — exactly on the floor,
+on 767 vias, and passing every check in `rules.py` because each of them asked
+about the diameter or the drill and none computed the quantity that is a
+function of both. **0.7 / 0.3 mm**, a 0.200 mm ring, a third over.
+`check_fab_class()` computes it now.
+
+---
+
+> ## The reading that got this wrong, kept
+>
+> ### ⚠ Everything below this line was decided against JLCPCB
+>
+> **Every number on this page was read from JLCPCB's capabilities page, and
+> the board goes to PCBWay.** The reading was careful, first-hand and quoted;
+> what was never asked is whether it was the right page. That is a different
+> failure from citing a source without reading it — the repo's own STYLE.md
+> rule 10 — and it costs the same, because a check that enforces the right
+> number against the wrong process passes for the whole life of the mistake.
+> `rules.FABRICATOR` and `rules.FAB_LIMITS` carry both tables now and
+> `check_fab_class()` fails.
+>
+> **PCBWay's published outer-layer minimums**, capabilities page read
+> 2026-08-19, converted from mil:
+>
+> | copper | normal | medium |
+> |---|---|---|
+> | 35 µm = 1 oz | **0.127 / 0.152 mm** | 0.127 / 0.127 mm |
+> | 70 µm = 2 oz | **0.178 / 0.203 mm** | 0.152 / 0.178 mm |
+>
+> with a headline "Standard PCB" row giving *"0.1mm/4mil"* for both, and no
+> copper weight attached to it. **Those two disagree and this page does not
+> resolve it** — 0.1 mm is finer than the 1 oz row allows, so one is a
+> marketing summary and the other is process engineering, and the document
+> does not say which. The by-weight table is what `rules.py` enforces, because
+> it is the one that distinguishes what the decision turns on.
+>
+> **Three things follow, and the first is the expensive one:**
+>
+> 1. **The fitted 0.09 / 0.09 is not manufacturable at PCBWay at any copper
+>    weight** — 29 % under the 1 oz track minimum and 41 % under the spacing.
+>    The only 3.5 mil entry on the page is at 18 µm, half an ounce, and is
+>    qualified *"or parts 3.5/3.5mil"*. So the 55,854 segments on the board
+>    are at a class the target fabricator does not offer, and **the routing has
+>    to be redone whatever else is decided.**
+> 2. **That removes the argument that put 0.09 / 0.09 back.** The reversal
+>    below was justified entirely by preserving the existing copper. The
+>    copper cannot be preserved, so the class is a free choice again and the
+>    derivation in *The reversal* — 0.205 mm or finer for the finest pitch on
+>    the board — is the live one. Against PCBWay's table that is met
+>    comfortably by 1 oz normal and by 2 oz normal.
+> 3. **It also reopens the controller.** The RP2040's QFN-56 was ruled out
+>    because `route.py` could not reach 0.40 mm; `route.py` is deleted, and a
+>    person can hand-route it. Against PCBWay's own numbers, a track leaving a
+>    QFN pad on its own centre line has 0.211 mm of room against the 0.203 mm
+>    that 2 oz normal requires — **4 % of margin** — and 0.237 mm against the
+>    0.152 mm that 1 oz normal requires, which is comfortable. So the QFN is
+>    buildable at 1 oz and is at the edge of the process at 2 oz, where the
+>    Pico's 2.54 mm is not near any edge at either. **That is a decision about
+>    how much process margin to hold, and it is not one this file can take.**
+>
+> Everything below is kept because the arithmetic in it is still correct and
+> because it is the record of two mistakes worth not repeating.
+
+---
+
+# The fabrication class — decision, a reversal, and the reversal reversed
+
+**Fitted: 0.09 / 0.09 mm track and clearance, on 1 oz outer copper — unchanged.**
 `rules.COPPER_OZ`, `rules.TRACK_MM`, `rules.CLEARANCE_MM`.
+
+> **This section was written as a decision to move to 0.15 / 0.15 on 2 oz, and
+> that was wrong.** The derivation below it is correct and it is a fact about
+> the *parts*: with the QFN gone, the finest pitch left needs 0.205 mm or
+> finer and the 2 oz minimum class clears it. **What it omits is the copper.**
+> This board carries 55,854 track segments laid at 0.09 / 0.09 on a 0.23 mm
+> routing grid, and they are the starting point for the hand routing rather
+> than something to throw away. Two adjacent tracks on that grid are 0.23 mm
+> apart: 0.09 mm wide leaves a 0.14 mm gap against a 0.09 mm clearance and is
+> legal; 0.15 mm wide leaves 0.08 mm against 0.15 and is not. So the coarser
+> class does not merely fail to help — **it condemns every one of those
+> segments, and widening them is not available either.**
+>
+> The shape of the mistake is this repo's oldest, arriving somewhere new: **a
+> derivation that asks what the parts need and never asks what the board
+> already has.** It is the same omission as `RAIL_FILTER_ESR` and as the
+> A/mm² reading below — not a wrong number, a number computed without the term
+> that dominates.
+>
+> **The arithmetic is kept because it is not wasted.** It is the answer for a
+> board routed from nothing, so if the existing routing is ever ripped up,
+> 0.15 / 0.15 on 2 oz is ready to use. The class is a free choice only when
+> there is no copper; while there is, it is a property of the copper.
+
+**This page is kept whole and it is read from the bottom.** Everything between
+here and *The reversal* is the argument for 0.09 / 0.09 on 1 oz, which was
+fitted, built and DRC-clean, and which was correct for the board it was decided
+on. What changed is not a number in it: the RP2040's 0.40 mm QFN-56 became a
+2.54 mm Raspberry Pi Pico, and the QFN was the whole of why the class was fine.
+Rewriting the argument in place would have destroyed the only record of what a
+0.40 mm pitch costs — which is the thing worth knowing if a part like it is ever
+wanted again.
+
+---
+
+## The reversal, and it is not simply "put it back"
+
+**Nothing on this board has an opinion about pin pitch any more, so this went
+back to being a free choice — and a free choice still has to be taken by
+arithmetic.** `rules.coarsest_class_for()` answers it against the *finest pitch
+left on the board*, which is the MCP3564's TSSOP-20 at 0.65 mm:
+
+| | needs | |
+|---|---|---|
+| RP2040 QFN-56, 0.40 mm | **0.12 / 0.12 mm or finer** | below the 2 oz floor, so 1 oz was the price |
+| MCP3564 TSSOP-20, 0.65 mm | **0.205 / 0.205 mm or finer** | above the 2 oz floor of 0.15, so either weight works |
+
+So the 2 oz minimum class clears the board by 27 % and the class that was
+fitted *before* the QFN — 0.25 / 0.20 — does not. **The reversal is not to the
+old value.** That is worth stating plainly, because "put it back" is what
+everybody would have written down.
+
+**Between 0.09 and 0.15 the arithmetic is silent and three other things are
+not:**
+
+* **it is not bought for current.** `rules.track_current()` puts the largest
+  current on this board — 92.7 mA of relay coil — at 0.33 °C of rise on 0.09 mm
+  of 1 oz and 0.045 °C on 0.15 mm of 2 oz. Both are nothing. Current capacity
+  was never the reason and this section says so rather than letting 2 oz look
+  like a current decision;
+* **0.09 / 0.09 is the published floor with no margin at all**, which its own
+  decision above records as the honest cost. 0.15 / 0.15 is the floor for 2 oz
+  and 67 % above the finest class available, so process variation has somewhere
+  to go;
+* **the board is hand-routed now**, and that is this session's argument rather
+  than a rediscovered one. A person laying 0.09 mm track on 0.09 mm clearance is
+  working at the fabricator's limit with no room for a judgement call, and
+  judgement is the whole of what `gen_pcb.py` giving up the router buys.
+
+## What is no longer measurable, and it is the row this decision used to rest on
+
+The four-row table below is `gen_pcb.py` end to end, and **two of its four
+columns have stopped existing.** There is no router, so there is no "time" and
+no "unrouted"; what is left is DRC, and DRC on a board with no signal copper on
+it is a weak instrument.
+
+That matters most for the third row — 0.25 / 0.20 with corrected via rules, 454
+seconds, **10 unrouted (V5)**. It is the row that says a coarse class costs
+connections, and it was a measurement of *this router* at a uniform 0.5 mm grid.
+A person routing by hand is not on a grid and is not bound by it. So the row is
+kept as history and **it is not evidence about the class fitted now**, in either
+direction: it does not condemn 0.15 / 0.15, which was never measured, and it
+does not excuse it.
+
+**What replaces the measurement is that the fabricator's own floor is a
+published number and `rules.check_fab_class()` runs against it on every build.**
+That is a weaker guarantee than a routed board and it is the one that is
+available, and saying which is which is the point of this section.
 
 ---
 

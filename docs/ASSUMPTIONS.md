@@ -100,6 +100,16 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **When wrong:** Near the predicted figure means the source model in source.py is right and the summer is already 29 dB below the thing feeding it. Much lower means the assumed coil resistance and rbb' are pessimistic. Much higher means something is wrong that this model does not describe.
 
+### `pico_smps_efficiency` = 0.91 fractional, RT6150 at 4.7 V in, 3.3 V out, PWM
+
+**Range:** 0.86 .. 0.93
+
+**Question:** What does the Pico draw from VSYS at this board's load? DS6150A/B-05 gives efficiency only as plotted curves -- the 'Buck-Boost 3.3V Efficiency, PS/SYNC = H' figure, which is the forced-PWM one this design runs in -- and at 100 mA the VIN = 3.3 V trace sits near 95 % with the 2.4 V trace about three points under it. A number read off a plotted curve is not a reading, and this one is read at a different inductor from the module's. The measurement is one ammeter in series with the Pico's VSYS pin, with GPIO23 high.
+
+**Sets:** together with mcu_dcdc_efficiency, whether the +Vout budget closes at all -- see mcu_supply()
+
+**When wrong:** **Both directions matter now, which is new.** The range's floor is chosen so that the product with the other assumption's floor is 0.660, and 0.678 is where the budget stops closing -- so the pessimistic corner already fails by 1.8 points and mcu_supply() says so rather than rounding it away. Two levers, in order of cost: the relay coils named above, and moving the module's own load off the RT6150 by back-driving its 3V3 pin, which pico_backdrive() prices and refuses on documentation grounds rather than on arithmetic.
+
 ### `servo_vos` = 0.0005 V, servo amplifier input offset
 
 **Range:** 5e-05 .. 0.003
@@ -380,7 +390,7 @@ None. All 48 were the twelve pad relays' coils, and they went with the pad — s
 
 ## Prices
 
-Of 69 BOM lines, **5 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 62 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
+Of 63 BOM lines, **5 carries a price read from a page fetched in this session**. 2 come from search results quoting a distributor without the page being opened, and 56 are typical bands for the class — estimates, labelled as such in the `basis` column of `out/cv-module-bom.csv`.
 
 The totals in `docs/SHOPPING.md` are therefore a range, and the range is honest rather than decorative. They are also a floor: none of the deferred blocks is costed.
 

@@ -42,6 +42,92 @@ import floorplan
 # 3.81 an 0805 needs with clearance -- and it is the pitch at which a SOIC-14
 # body (8.7 mm long, 3.9 wide) fits between two rows without its courtyard
 # reaching either.
+# ---------------------------------------------------------------------------
+# How close two parts may be, and it is a judgement rather than a standard
+# ---------------------------------------------------------------------------
+#
+# **Declared, not derived, and saying which is the point.** This repository has
+# no first-hand source for hand-assembly spacing and is not going to pretend
+# otherwise: KiCad's courtyards are IPC-7351 *nominal*, which already embeds an
+# assembly clearance, so courtyard-to-courtyard zero is that standard's own
+# minimum -- for a machine. How much more a person with tweezers and an iron
+# wants is not in any document this project has read. What follows is a
+# judgement, taken deliberately, against stated operating assumptions:
+#
+#     average dexterity, good tools, and a digital magnification screen.
+#
+# **The magnification is the assumption that does the least work and it is
+# worth saying so.** A microscope buys *seeing*, not *reaching*. It makes a
+# 0.65 mm pin row placeable and inspectable, and it does nothing whatever
+# about whether an iron tip fits between two parts. So none of the numbers
+# below are relaxed by having one; they are set by what has to physically get
+# in, and the screen is why the finest package on the board is a job rather
+# than a problem.
+#
+# **What has to get in, per class, which is why one number would be wrong:**
+#
+#   * two passives side by side are placed with tweezers and soldered at their
+#     *outer* ends, so the gap between them is a placement clearance and not an
+#     iron clearance. It is the smallest figure here;
+#   * an IC's pin row is drag-soldered along its length, and wants flux, braid
+#     and a tip travelling beside it. Much more room, and it is the number that
+#     most often gets forgotten because the *pads* look reachable;
+#   * a tall part blocks a neighbour's approach *angle* rather than its
+#     footprint -- you bring tweezers down at forty-odd degrees, not straight
+#     down -- and hot-air rework on one reaches several millimetres of its
+#     neighbours. Relays, the converter brick, the choke, the DPAK;
+#   * the module is soldered at its castellations, with the iron coming in
+#     **horizontally** along its edge. That is the largest clearance on the
+#     board and the only one that is about a tool's whole shaft rather than
+#     its tip;
+#   * a through-hole part is soldered from the far side, so its top-side
+#     neighbours barely matter.
+#
+# **Err generous, because of what being wrong costs.** Too loose is a board a
+# few millimetres bigger. Too tight is discovered with a part in the tweezers
+# and a fabricated board on the bench, and the fix is a re-place and a re-route
+# -- so the asymmetry is total and these are rounded up rather than down.
+GAP_MM = {
+    "passive": 0.6,        # 0805, SOD-123, SOT-23, SOT-523
+    "ic": 1.5,             # SOIC, TSSOP, SO-6L -- a drag-solder lane
+    "tall": 2.0,           # relays, the TMR brick, the choke, the DPAK
+    "module": 3.0,         # the Pico's castellated edges, iron in sideways
+    "through_hole": 1.0,   # soldered from the other side
+}
+# Which class a footprint is in, longest token first for the reason
+# placement.SIZE matches that way -- a substring table whose order is
+# load-bearing is a table that will be wrong.
+GAP_CLASS = (
+    ("RaspberryPi_Pico", "module"),
+    ("PinHeader", "through_hole"),
+    ("TRACO", "tall"), ("Relay_", "tall"), ("L_CommonMode", "tall"),
+    ("TO-252", "tall"), ("L_Bourns", "tall"), ("Fuse_", "tall"),
+    ("TSSOP", "ic"), ("SOIC", "ic"), ("SO-6L", "ic"), ("SOP-16", "ic"),
+    ("TestPoint", "passive"),
+)
+
+
+def gap_class(ref):
+    """Which assembly class a part is in. Defaults to passive."""
+    footprint = design.PARTS[ref].footprint or ""
+    for token, name in GAP_CLASS:
+        if token in footprint:
+            return name
+    return "passive"
+
+
+def required_gap(a, b):
+    """The larger of the two parts' own requirements.
+
+    **The larger and not the smaller, and not an average.** The gap exists so
+    that a tool can reach one of the two; if either of them needs a
+    drag-solder lane then the space between them is that lane, whatever the
+    other one is. An 0805 pushed up against a TSSOP does not make the TSSOP
+    easier to solder.
+    """
+    return max(GAP_MM[gap_class(a)], GAP_MM[gap_class(b)])
+
+
 ROW_PITCH = 7.62
 AUDIO_ROW_0 = 12.0
 CV_ROW_0 = AUDIO_ROW_0 + design.CHANNELS * ROW_PITCH + 14.0
@@ -120,10 +206,14 @@ SIZE = {
     # above makes and the reason the SO-6L is 11.3 mm wide against a 10 mm
     # body: it is a creepage package and the courtyard is where the creepage
     # lives.
-    "QFN-56-1EP_7x7mm": (8.26, 8.26), "SOIC-8_5.3x5.3mm": (9.30, 5.80),
     "SOT-23-6": (4.10, 3.40), "SO-6L": (11.30, 4.34),
-    "Crystal_SMD_3225": (4.20, 3.50), "L_Bourns_SRN6045TA": (7.00, 6.50),
-    "USB_Micro-B": (8.80, 6.10),
+    "L_Bourns_SRN6045TA": (7.00, 6.50),
+    # **The module, and it is the largest courtyard on the board by four
+    # times.** 23.08 x 53.85 mm, read off Module:RaspberryPi_Pico_SMD_
+    # HandSolder's own F.CrtYd -- against a 21 x 51 mm board, so a millimetre
+    # of it either side is the hand-solder pad extension and the USB
+    # overhang. That is 1243 mm2, where the QFN it replaces was 68.
+    "RaspberryPi_Pico": (23.08, 53.85),
 }
 
 # Where a footprint's anchor sits inside its own courtyard, in the footprint's
@@ -142,7 +232,11 @@ ANCHOR = {"PinHeader_1x02": (0.0, 1.275), "PinHeader_1x03": (0.0, 2.54),
           # The DPAK's tab is pad 2 and the anchor is not the body's middle.
           "TO-252-2": (-0.84, 0.0),
           # The G6S-2F's courtyard is not quite centred on its anchor.
-          "Relay_DPDT_Omron_G6S-2F": (0.0, -0.05)}
+          "Relay_DPDT_Omron_G6S-2F": (0.0, -0.05),
+          # The Pico's courtyard is 0.375 mm north of its anchor, because the
+          # micro-USB overhangs the north edge and the hand-solder pads do
+          # not extend past the south one.
+          "RaspberryPi_Pico": (0.0, -0.375)}
 
 # How far a box above may sit inside the bounding box KiCad computes for the
 # same footprint. Not a fudge factor: it is the courtyard line, measured at
@@ -236,6 +330,19 @@ GROUND_GAP = 2.0
 # far corner is the south, and the band costs the board 18 mm of length it has
 # plenty of. The switching part of this module is now as far from the front
 # ends as the outline allows.
+# **It moved 26 mm south for one pass and came straight back, and the round
+# trip is worth the six lines.** The module needed 23.08 mm of a band that had
+# 22.7 mm free, so the supply row was moved to make it -- which is the right
+# instinct on a board that is generated and the wrong one on a board that is
+# routed. Those fifteen parts carry the inlet, the isolation barrier and both
+# rails, and moving them costs **11 nets and 114 connections** of re-routing,
+# more than the entire controller zone it was making room for. It also moved
+# ISOLATION_Y with it, so verify.check_isolation_gap() reported 656 pieces of
+# primary copper outside a region that had walked away from them.
+#
+# The module goes in new board area instead -- see CONTROLLER below. Growing
+# the outline is free here in a way that shuffling is not, which is a property
+# of a hand-laid board and not of this one in particular.
 SUPPLY_Y = SPLIT_Y + 39.56             # 197.0, the band's own row
 SUPPLY_U15_X = 35.0                    # pad 1, and the pins run east from it
 # Between pin 3 and pin 5, which are 5.08 mm apart because pin 4 does not
@@ -389,7 +496,7 @@ SHARED = {
     # worth the two lines.** The window was the phase at which the two pin
     # rows that hold no grid cell landed on AGND/DGND and CH4/CH7 rather than
     # on a routed net, and anything added north of this package moved it. The
-    # fan-out removes the constraint entirely -- route.Grid.escape() lays a
+    # fan-out removed the constraint entirely -- route.Grid.escape() laid a
     # pad's escape on its own centre line, so a pin row with no cell in it is
     # reached anyway -- so no phase is special any more. The offset stays
     # because moving it would re-route the board for no reason, not because
@@ -455,66 +562,39 @@ CONTROLLER_Y = SPLIT_Y + 20.6           # 178.0, the package's own row
 CONTROLLER_X = 82.0
 
 CONTROLLER = {
-    # -- the package and its twelve capacitors ----------------------------
-    "U19": (CONTROLLER_X, CONTROLLER_Y, 0),
-    # IOVDD pins 1 and 10 are on the west row, 33 and 42 on the east, 22 on
-    # the south and 49 on the north; DVDD is 23 south and 50 north. Each
-    # capacitor is on the side its pin is on, which is as close as a 0805 gets
-    # to "at the pin" on a 0.4 mm pitch package.
-    "C820": (76.0, 176.0, 90),
-    "C821": (76.0, 180.0, 90),
-    "C822": (83.0, 184.5, 90),
-    "C823": (88.0, 176.0, 90),
-    "C824": (88.0, 180.0, 90),
-    "C825": (81.0, 171.0, 90),
-    "C826": (87.0, 184.5, 90),
-    "C827": (84.0, 171.0, 90),
-    # The regulator's two and the two dedicated supplies, all north.
-    "C828": (90.0, 171.0, 90),
-    "C829": (87.0, 171.0, 90),
-    "C830": (93.0, 171.0, 90),
-    "C831": (78.0, 171.0, 90),
-
-    # -- the flash, west, facing the QSPI row -----------------------------
-    "U20": (71.0, 178.0, 90),
-    "C834": (66.5, 172.0, 90),
-    "R826": (66.5, 176.0, 90),
-    "R825": (66.5, 180.0, 90),
-
-    # -- the crystal, south, at XIN/XOUT ----------------------------------
-    # **The row is 4.5 mm apart and it was 2.5.** stitch_grounds() puts a via
-    # beyond a pad along the pad's own long axis, and a rotated 0805's long
-    # axis is *across* the row -- so at 2.5 mm centres C832's stitch landed
-    # inside Y801's pad clearance and the build stopped. The spacing is what
-    # the stitch needs, not what the parts need.
-    "Y801": (78.5, 184.5, 0),
-    "C832": (73.0, 184.5, 90),
-    "C833": (68.5, 184.5, 90),
-    "R824": (64.0, 184.5, 90),
-
-    # -- USB, at the east edge --------------------------------------------
+    # -- the module, in a strip of new board south of the supply row --------
     #
-    # The one panel part on the board rather than on a header, and the edge is
-    # what it is for. Its two series resistors are between it and the package,
-    # which is minimal design 2.4.1's "placed close to the chip" read as an
-    # ordering rather than a distance: what matters is that the untermined
-    # length is the short one.
-    # **97.53 is solved rather than chosen and the solving is the point.** A
-    # connector that mates with something outside the board has to be *at* the
-    # edge: a micro-B plug is 6.8 mm wide and a receptacle 5 mm inside the
-    # outline cannot be reached at all. Every other part on this board is
-    # placed with MARGIN of clear board around it, and outline() adds that
-    # margin to whatever is outermost -- so a connector placed by eye is
-    # always 5 mm too far in, and nothing in this repo would have said so.
-    # This x puts its courtyard's east edge exactly on the outline the rest of
-    # the board implies, and check_edge_parts() is what holds it there.
-    "J14": (97.53, 178.0, 90),
-    "R820": (91.5, 176.0, 90),
-    "R821": (91.5, 180.0, 90),
-    "R822": (93.0, 186.0, 90),
-    "R823": (90.0, 186.0, 90),
+    # **1243 mm2 of courtyard, and where it goes was decided by what it would
+    # have had to displace.** At 90 or 270 degrees it is 53.85 x 23.08 mm; the
+    # digital half of the existing outline is 50.5 mm tall, so there is no
+    # vertical placement that fits east of anything. Putting it in the
+    # controller band meant moving the supply row, which costs more re-routing
+    # than the module's own zone -- see SUPPLY_Y. So the board grows south by
+    # 26 mm and the module goes in the strip, entirely inside the digital
+    # domain and clear of every piece of copper already laid.
+    #
+    # **270 and not 90**: at 90 the module's north edge -- the one its USB
+    # overhangs -- faces west, so what ends up flush with the board's east
+    # edge is the other end, three underside debug pads. DRC found that as
+    # three 0.29 mm edge-clearance violations against a 0.30 mm rule, and
+    # check_edge_parts() could not have, because it asks whether the courtyard
+    # reaches the outline and both rotations do.
+    "U19": (75.0, 220.0, 270),
+    # The ORing diode, on the module's own side of the run from U22.
+    "D806": (44.0, 220.0, 90),
 
-    # -- the 3.3 V switcher, south-east, next to the band it feeds from ---
+    # -- the reset link ----------------------------------------------------
+    "J19": (38.0, 176.0, 0),
+
+    # -- the 5 V switcher, exactly where it already is ---------------------
+    #
+    # **Not moved, and that is the point.** These eight parts are on the
+    # committed board at these coordinates with their copper around them; the
+    # block's nets -- MSW, MCB, MFB -- are unchanged by the module, and what
+    # did change is a rail's name and a new run from VMOD to the three relay
+    # coils. Re-siting the switcher to sit beside the module would have been
+    # tidier on the sheet and would have cost eight parts' worth of routing
+    # for nothing.
     "U22": (58.0, 190.5, 0),
     "L802": (66.0, 190.5, 0),
     "C840": (52.0, 190.5, 90),
@@ -529,12 +609,16 @@ CONTROLLER = {
     "J16": (20.0, 176.0, 0),
     "J17": (26.0, 176.0, 0),
     "J18": (32.0, 176.0, 0),
-    "J19": (38.0, 176.0, 0),
-    "J20": (44.0, 176.0, 0),
 
     # -- the MIDI receiver, west, on somebody else's ground ---------------
     "U21": (14.0, 187.0, 0),
-    "C835": (10.0, 182.5, 90),
+    # 4.5 mm south of U21 rather than 4.5 north: DRC's silkscreen check found
+    # the reference field of U21 clipped by this pad's solder mask, which is a
+    # legibility fault rather than an electrical one and is still a fault --
+    # a designator that cannot be read is a part somebody fits by counting.
+    # Its own datasheet distance is what constrains it: "within 1 cm of each
+    # pin", and check_midi_bypass() holds that.
+    "C835": (10.0, 191.5, 90),
     "R827": (22.0, 186.0, 90),
     "D805": (25.0, 186.0, 90),
     "C836": (28.0, 186.0, 90),
@@ -565,7 +649,11 @@ ADC_ROW_0 = SHARED_Y
 # thing in this block -- six tracks from a 18 mm column into 3.25 mm of pin
 # row -- and every millimetre of spread removed is one it does not have to
 # turn through.
-ADC_ROW_PITCH = 3.6
+# **4.0 and it was 3.6, which put an 0805's courtyards 0.20 mm apart.** A
+# rotated 0805 is 3.4 mm of courtyard, so this pitch *is* the gap plus the
+# part; at 3.6 the gap was 0.20 mm and GAP_MM["passive"] asks for 0.6. The
+# constant that looked like a routing choice was an assembly one.
+ADC_ROW_PITCH = 4.0
 
 # The pull-downs sit at the controller connector, which is where their whole
 # argument is: a hi-Z MCU has to read as a defined low at the pin it left.
@@ -803,7 +891,40 @@ def courtyard(ref):
 # Parts that must sit on the board's edge rather than inside it, with the
 # side each faces. A part in here is one whose whole purpose is to be reached
 # from outside the enclosure.
-EDGE_PARTS = {"J14": "east"}
+EDGE_PARTS = {"U19": "east"}
+
+
+def check_courtyard_gap():
+    """No two parts are closer than their assembly class allows.
+
+    **The companion to check_overlaps(), and the distinction is the whole
+    reason both exist.** That one asks whether two courtyards intersect, which
+    is a question about whether the board is *manufacturable*; this asks
+    whether there is room for a tool between them, which is a question about
+    whether it is *assemblable*. A board can pass the first and be miserable to
+    build, and this repo had 33 parts under 0.5 mm and no instrument that
+    mentioned it.
+
+    GAP_MM is where the numbers are and it says plainly that they are a
+    judgement rather than a reading.
+    """
+    problems = []
+    boxes = {ref: courtyard(ref) for ref in design.PARTS}
+    refs = sorted(r for r in boxes if boxes[r])
+    for index, ref in enumerate(refs):
+        for other in refs[index + 1:]:
+            ax0, ay0, ax1, ay1 = boxes[ref]
+            bx0, by0, bx1, by1 = boxes[other]
+            dx = max(bx0 - ax1, ax0 - bx1, 0.0)
+            dy = max(by0 - ay1, ay0 - by1, 0.0)
+            gap = (dx * dx + dy * dy) ** 0.5
+            need = required_gap(ref, other)
+            if gap < need - 1e-9:
+                problems.append(
+                    f"{ref} ({gap_class(ref)}) and {other} "
+                    f"({gap_class(other)}) are {gap:.2f} mm apart and the "
+                    f"larger class wants {need:.1f} -- see GAP_MM")
+    return problems
 
 
 def check_edge_parts():
@@ -968,7 +1089,8 @@ def check_zones():
 def main():
     print("placement")
     problems = (check_placed() + check_zones() + check_overlaps()
-                + check_edge_parts() + check_zone_occupancy())
+                + check_edge_parts() + check_zone_occupancy()
+              + check_courtyard_gap())
     print(f"  every part has a position              "
           f"{'ok' if not check_placed() else 'FAIL'}")
     print(f"  columns agree with floorplan zones     "
@@ -978,6 +1100,13 @@ def main():
           f"{'ok' if not overlaps else str(len(overlaps)) + ' FAIL'}")
     print(f"  edge connectors reach the outline      "
           f"{'ok' if not check_edge_parts() else 'FAIL'}")
+    tight = check_courtyard_gap()
+    print(f"  room for an iron between parts         "
+          f"{'ok' if not tight else str(len(tight)) + ' FAIL'}")
+    for line in tight[:8]:
+        print(f"      {line}")
+    if len(tight) > 8:
+        print(f"      ... and {len(tight) - 8} more")
     print(f"  every zone holds parts, every part a zone "
           f"{'ok' if not check_zone_occupancy() else 'FAIL'}")
     for problem in problems[:12]:

@@ -289,21 +289,18 @@ PRICES = {
     # STYLE.md rule 10's point is that a citation is a thing somebody followed,
     # and `band` is this file's word for "not this session".
     design.CONTROLLER: band(
-        0.80, 1.80, "GBP", 10,
-        "RP2040, 7x7 QFN-56. Raspberry Pi sell it directly and it is the "
-        "cheapest active on this board by an order of magnitude against the "
-        "converter -- which is worth seeing, because the controller is the "
-        "block that took the longest to close and it is not the expensive "
-        "one. What it *did* cost is the fabrication class: 0.40 mm pitch is "
-        "why the board is 0.09/0.09 on 1 oz. See docs/fabrication-class.md."),
-
-    design.FLASH: band(
-        1.00, 2.50, "GBP", 10,
-        "W25Q128JVSIQ, 8-pin SOIC 208-mil, 128 Mbit. The reference design's "
-        "own part. **The size is not derived** -- nothing in this project "
-        "sizes the firmware -- so the smaller siblings are the obvious saving "
-        "and they are pin-compatible: W25Q16JV is a quarter of this and "
-        "changes no value on the board. See design.FLASH."),
+        3.60, 5.00, "GBP", 1,
+        "Raspberry Pi Pico, SC0915. **The one line on this BOM whose price is "
+        "published rather than banded**: the Pico datasheet's own Table 6 "
+        "says US$4.00 at 1+, which is the only figure in this file that came "
+        "from a vendor's ordering table instead of from a class. It is now "
+        "the most expensive active on the board after the converter, and it "
+        "replaced four lines that came to about GBP 3 between them -- the "
+        "RP2040, the flash, the crystal and the USB receptacle -- plus twelve "
+        "capacitors, four resistors and two headers. So the parts cost is "
+        "roughly a wash and what it bought is elsewhere: 0.40 mm of pin pitch "
+        "became 2.54, which re-opened docs/fabrication-class.md, and about 25 "
+        "lines of assembly became one."),
 
     design.MIDI_OPTO: band(
         1.00, 2.20, "GBP", 10,
@@ -316,35 +313,25 @@ PRICES = {
         0.70, 1.60, "GBP", 10,
         "TPS560430XFDBVR, SOT-23-6. **The F suffix is the price of this "
         "line**: the PFM version is the same die and a few pence cheaper, and "
-        "design.mcu_dcdc_light_load() shows its switching frequency would "
-        "fall to 246 kHz at this board's idle load -- under the >= 300 kHz "
-        "rule spec section 1.1 sets, on a rail the audio domain shares."),
-
-    design.CRYSTAL: band(
-        0.40, 1.20, "GBP", 10,
-        "Abracon ABM8-272-T3, 3.2 x 2.5 mm. Named twice by the vendor's own "
-        "hardware-design document -- 'For original designs using RP2040 we "
-        "recommend using the Abracon ABM8-272-T3' -- and its Table 1 is where "
-        "CL, ESR and the drive level in design.CRYSTAL come from."),
+        "design.mcu_dcdc_light_load() shows the PFM sibling would fall to "
+        "194 kHz in bypass at idle -- under the >= 300 kHz rule spec section "
+        "1.1 sets, on a rail the audio domain shares. The state matters: in "
+        "circuit the relay coils hold this rail continuous, and bypass is "
+        "where they let go."),
 
     design.MCU_DCDC_L: band(
         0.30, 0.90, "GBP", 25,
-        "Bourns SRN6045TA-120M, 12 uH, 6.0 x 6.0 mm shielded. Table 1 of the "
-        "switcher's datasheet gives the inductance; what the part is chosen "
-        "against is its own datasheet's Isat of 4.0 A against a 1.4 A peak "
-        "current limit, which is section 9.2.2.4's rule and 2.9x of it."),
-
-    design.USB_CONN: band(
-        0.40, 1.20, "GBP", 10,
-        "Molex 105017-0001, micro-B receptacle. **The one panel part on the "
-        "board rather than on a header**, and placement.EDGE_PARTS is what "
-        "keeps it at the edge where a plug can reach it."),
+        "Bourns SRN6045TA-150M, 15 uH, 6.0 x 6.0 mm shielded. Table 1 of the "
+        "switcher's datasheet asks for 18 uH at 5 V and this series does not "
+        "make one; 15 is inside the +/-20 % the table's own column heading "
+        "gives and 22 is 0.4 uH outside it. What the part is chosen against "
+        "is its Isat of 3.8 A against a 1.4 A peak current limit, which is "
+        "section 9.2.2.4's rule and 2.7x of it."),
 
     # The passives the block adds. Same classes as everything above them.
-    "51k 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
+    "88k7 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
     "22k1 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
     "1k 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
-    "27R 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
     "390R 1%": band(0.01, 0.05, "GBP", 100, "0805 1%"),
     # CA-033's own tolerances, and the wattage is the reason the 33 ohm is
     # called out: "RA 33 ohm 5% 0.5W". An 0805 is 0.125 W and the loop puts
@@ -352,7 +339,6 @@ PRICES = {
     # about a *shorted* output rather than about this current.
     "33R 5%": band(0.01, 0.05, "GBP", 100, "0805 5%"),
     "10R 5%": band(0.01, 0.05, "GBP", 100, "0805 5%"),
-    "15p/50V C0G": band(0.02, 0.08, "GBP", 100, "0805 C0G"),
     "2u2/50V X7R": band(0.05, 0.20, "GBP", 25, "1210 X7R at 50 V"),
     "22u/16V X5R": band(0.08, 0.30, "GBP", 25, "1210 X5R"),
 

@@ -187,14 +187,20 @@ DOMAINS = (
     # resistor and it returns to the sending device's ground, not to MDGND.
     # Written as two ranges rather than one because a domain table whose
     # patterns are tidier than the board is a domain table that will be wrong.
-    (r"^R82[0-6]$|^R82[89]$", DIGITAL, "USB termination, the VBUS divider, "
-                                       "the crystal drive resistor, RUN, "
-                                       "BOOTSEL and the MIDI OUT pair"),
+    (r"^R82[89]$", DIGITAL, "the MIDI OUT pair. R820 to R826 were the USB "
+                             "terminations, the VBUS divider, the RUN "
+                             "pull-up and the BOOTSEL resistor, and every one "
+                             "of them went with the module"),
     (r"^R83[0-3]$", DIGITAL, "the tap and expression networks"),
     (r"^R85[01]$", DIGITAL, "the switcher's feedback divider"),
-    (r"^J14$", DIGITAL, "USB, board-mounted -- see design.USB_CONN_REF"),
-    (r"^J16$|^J17$|^J18$|^J19$|^J20$", DIGITAL, "MIDI out, the panel jacks, "
-                                                "the boot header and SWD"),
+    # ~~J14, the USB receptacle.~~ On the module now, which is also where
+    # the USB *ground* is: design.usb_ground_loop() is unchanged and so is the
+    # hazard, because a cable still ties this box's ground to a computer's.
+    # What changed is that the path runs through U19's own castellations
+    # rather than through a connector this board places.
+    (r"^D806$", DIGITAL, "the ORing diode into the module's VSYS pin"),
+    (r"^J16$|^J17$|^J18$|^J19$", DIGITAL, "MIDI out, the panel jacks and the "
+                                          "reset link"),
     # -- and the second barrier -------------------------------------------
     (r"^U21$", BARRIER, "the MIDI opto: pins 1 and 3 belong to the sending "
                         "device, 4 to 6 to this board. 5000 Vrms and 0.4 pF "
@@ -716,9 +722,14 @@ COURTYARD = {
     "TSSOP-20": 55.0,
     # The controller block. The QFN's number is its 7 x 7 body plus a
     # courtyard; the rest are their own bodies.
-    "QFN-56-1EP_7x7mm": 64.0, "SO-6L": 44.0, "SOIC-8_5.3x5.3mm": 34.0,
-    "SOT-23-6": 13.0, "Crystal_SMD_3225": 10.0, "L_Bourns_SRN6045TA": 42.0,
-    "USB_Micro-B": 60.0,
+    "SO-6L": 44.0, "SOT-23-6": 13.0, "L_Bourns_SRN6045TA": 42.0,
+    # **The module, and it is 1071 mm2 against the QFN-56's 64.** That ratio
+    # is the honest headline of the swap: 17 times the board area for the
+    # controller, against about 25 parts and the fabrication class it no
+    # longer forces. The estimate is the module's own 21 x 51 mm rather than
+    # its courtyard, because this table is bodies and placement.SIZE is
+    # courtyards -- see the comment at the head of it.
+    "RaspberryPi_Pico": 1071.0,
 }
 
 # **What the pad was, kept as arithmetic because the saving is the result.** A

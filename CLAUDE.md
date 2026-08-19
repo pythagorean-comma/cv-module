@@ -336,7 +336,57 @@ of them disagreed. That list is at the head of the ADC section in `design.py`.
 
 ---
 
-## The router reaches a pad only if a track can *legally* land inside it
+## The board is hand-laid now, and that is the rule to read first
+
+**`gen_pcb.py` places and pours. It does not route.** `route.py` is deleted --
+a maze router with rip-up and retry, a fan-out escape and a three-way
+via-exclusion model, which closed this board at 0 unrouted and 0 DRC. The
+problem it existed for went with the RP2040's QFN-56; what it cost is the thing
+to carry, and it was never the copper. It was that the **board had to be a
+function of `design.py`**, so no question about geometry could be asked of a
+layout until it had been answered in Python first.
+
+**The workflow consequence, and nobody may be allowed to discover it by
+accident:**
+
+> **The netlist is generated and authoritative. The board is hand-laid and
+> verified.**
+
+* running `gen_pcb.py` writes a fresh board with the footprints placed, the
+  planes poured, the ground pads stitched and **no signal copper at all** -- so
+  running it over a hand-routed board destroys the routing, with no undo and no
+  warning, because `pcbnew` has no notion of "the parts moved, keep the tracks";
+* the way to move a netlist change onto a routed board is KiCad's own **Update
+  PCB from Schematic**, against the generated `out/cv-module.kicad_sch`;
+* `verify.py` is unchanged in what it asks -- DRC, the netlist against KiCad's
+  own export, the ground split, the isolation region, both barriers -- because
+  every one of those questions is asked *of the board*, by reading it back.
+  None of them ever needed the board to have been written by us;
+* **`verify.UNROUTED_ITEMS` is a progress marker and the check around it is a
+  ratchet.** 485 is a freshly generated board: every connection unmade. It
+  comes down as copper is laid and may go up only with the reason written
+  there -- the same rule it always ran on, applied to a person instead of to a
+  router. Zero is the gate on gerbers, and `gen_plots.orderable()` reads it;
+* **the stitching is not routing and stays.** A plane connection is a hole to
+  the copper already underneath, and it is the one piece of geometry a person
+  would otherwise reproduce 151 times by hand.
+
+**And two invariants moved in worth without moving in content.** `PDF_EPOCH`
+exists so a tracked plot is a function of the board -- and the board itself
+used to be the churning artefact, 102,909 lines rewritten on every run because
+KiCad mints fresh UUIDs. It is not regenerated any more, so a diff on it is a
+real signal for the first time, and the deterministic-UUID pass is no longer
+needed for that. `gen_plots.check_plots()` is worth *more* for the same reason
+-- the plots are now the only generated artefact downstream of the board, so it
+is the only thing that can say the two agree -- and it is still not a stage in
+the run order, because on a hand-routed board "the board has legitimately
+changed" is what every hour of work does.
+
+**What is kept from the router pass is everything below**, and it is kept
+because the arithmetic in it is still true and because six findings came out of
+it. None of it describes what the build does today.
+
+## The router reached a pad only if a track could *legally* land inside it
 
 **Three boxes, three answers, and the check that existed to predict this
 measured the wrong one.** A pad has a bounding box; `route.block_pad_copper()`
@@ -486,7 +536,86 @@ fires on one is 1.6 mm of pointless copper on every SOT-23.
 
 ---
 
-## The controller: drawn, and `DEFERRED` is empty
+## The controller is a Raspberry Pi Pico, and it took the supply with it
+
+**`design.CONTROLLER` is a module now** -- SC0915, castellated, on
+`Module:RaspberryPi_Pico_SMD_HandSolder`. `docs/controller.md` is the record;
+what has to survive compaction is this.
+
+**It deletes about 25 parts and one whole class of problem.** U20, Y801 with
+R824/C832/C833, J14 with R820-R823, twelve supply capacitors and the BOOT and
+SWD headers. 314 parts became 289 and 201 nets became 184. 0.40 mm of pin pitch
+became 2.54, which is why `route.py` is gone.
+
+**`docs/fabrication-class.md` was re-opened, re-decided at 0.15/0.15 on 2 oz,
+and put back to 0.09/0.09 on 1 oz -- and the round trip is the finding.** The
+derivation is right about the parts: `coarsest_class_for()` against the finest
+pitch left, the MCP3564's TSSOP at 0.65 mm, needs 0.205 or finer, which the
+2 oz minimum clears and the old 0.25/0.20 misses. **It omits the copper.**
+55,854 segments are already laid at 0.09/0.09 on a 0.23 mm grid, and two
+adjacent tracks there are 0.23 mm apart -- legal at 0.09 mm wide, illegal at
+0.15, and not widenable. **The class is a free choice only for a board routed
+from nothing; while there is copper on it, the class is a property of the
+copper.** Same omission as `RAIL_FILTER_ESR`: not a wrong number, a number
+computed without the term that dominates.
+
+**Back-driving the module's 3V3 pin is refused and it is not refused on
+arithmetic.** `pico_backdrive()` is the record. The cheap topology -- U22
+unchanged, straight to pin 36, `3V3_EN` held low -- costs 32.1 mA of +Vout
+where the drawn one costs 90, so the numbers argue for it. The RT6150's
+datasheet states the disconnect (*"the load is disconnected from the input"*),
+states its direction (*"the output voltage can **drop below** the input voltage
+during shutdown"*) and bounds the leakage at 10 uA -- and **every one of those
+is stated with the input present**, while this topology needs the input absent
+and the output held above it. The Pico datasheet's own §4.5 lists three ways to
+power the module and pin 36 is in none of them. Same reading rule that refused
+the TPS560430X3F's inferred FB connection, on the pin that *is* the rail.
+
+**So the module is fed on VSYS, and that put two converters in series.** The
+threshold did not move -- `mcu_supply()` still says 67.8 % -- but it became a
+threshold on a **product** of two efficiencies, whose pessimistic ends multiply
+to 0.660. **The corner failed by 4.6 mA and `verify.check_supply()` said so**:
+254.6 mA asked of a 250 mA output.
+
+**What closed it is the lever the repo had already named.**
+`MEASURED["mcu_dcdc_efficiency"].when_wrong` has said since the QFN pass that
+the thing to change is the 92.7 mA of relay coil V5 makes *linearly* from
+twelve volts. U22 moved from 3.3 V to 5 V -- Table 1's own 1.1 MHz/5 V row, and
+§9.2's worked example is that exact operating point -- and carries the coils as
+well as the module. +Vout is **212.9 mA of 250**. What is left on the linear V5
+is the MAX6126 and the ADC's LDO: 2.2 mA of load behind 10 mA of quiescent
+current, kept deliberately, because the reference the whole CV chain is
+measured against does not go behind a 1.1 MHz switcher to save 4 % of +Vout.
+
+**Three things about the block that must survive compaction:**
+
+* **`D806` is not there for its drop.** With no ORing diode and a USB cable in
+  an *unpowered* board, VBUS reaches VSYS through the module's own D1 and from
+  there it is on U22's output, where the buck's high-side body diode carries it
+  to VA_RAW -- a USB host on this board's twelve-volt rail, four parts deep,
+  every one of them doing what it is supposed to;
+* **GPIO23 high is a firmware constant with a hardware reason.** It is the
+  RT6150's power-save pin and the module's default is PFM, whose rate falls
+  with load. No suffix to buy this time. `pico_smps_beat()`: 800-1200 kHz
+  forced, which overlaps U22's own 935-1265 MHz band so those two beat through
+  zero -- and `supply_beat()` has already shown that is not a thing to design a
+  margin into;
+* **the F suffix is still load-bearing and the argument changed underneath it.**
+  At 5 V into 15 uH the boundary is 88 mA and the rail carries 160, so "a PFM
+  part would be discontinuous *always*" has gone. What replaces it is
+  **bypass**: the coils are 93 mA of that 160 and they drop out exactly when
+  the fail-safe takes the module out of circuit, which is the state the box
+  powers up in. With the processor idle too the rail is 16 mA, where a PFM part
+  would run at **194 kHz, under the rule**.
+
+**And one row of `controller_fit()` is exactly 1.00x.** MCLK needs a
+`CLOCK GPOUT` pin; four exist on the chip and **three are internal to the
+module**, so GPIO21 is the only pin on this board that can carry it. Met, by a
+pin the datasheet names, and what it costs is the option. `exactly_met` is
+returned beside `tightest` because the "tightest" figure skips rows where
+`has == needs` -- fair while USB was the only such row, and not now.
+
+## The controller: drawn as a bare RP2040, and `DEFERRED` is empty
 
 **Both gates closed and the block is on the board.** The package gate closed by
 moving the fabrication class — `docs/fabrication-class.md`, and the RP2040 is
@@ -803,12 +932,14 @@ cv-module/
   floorplan.py           zones, ground domains, boundary crossings
   rules.py               the fabrication rules, and the arithmetic behind them
   placement.py           the floorplan as coordinates. No KiCad import
-  route.py               a maze router with rip-up and retry. No KiCad
   verify.py              the constraints, checked against KiCad's own netlist
   test_verify.py         plants faults to prove verify.py's checks can fail
 
   gen_pcb.py             -> out/cv-module.kicad_pcb, through pcbnew. Relaunches
-                         itself under KiCad's Python, then re-runs gen_project
+                         itself under KiCad's Python, then re-runs gen_project.
+                         PLACE AND POUR ONLY: re-running it discards hand-routed
+                         copper. Sync a netlist change with KiCad's own Update
+                         PCB from Schematic instead
   gen_netlist.py         -> out/cv-module.net
   gen_sch.py             -> out/cv-module.kicad_sch
   gen_project.py         -> out/cv-module.kicad_pro, the lib tables,
@@ -839,25 +970,47 @@ from a filename.
 
 Run order, and each step reads the one before:
 
+**Two pipelines now, and the split is the whole of the new workflow.** The
+first is safe and is what you run: it regenerates the netlist, the schematic
+and every document, and it verifies the board that is on disk without writing
+to it.
+
 ```bash
 python3 design.py && python3 gen_netlist.py && python3 gen_sch.py \
-  && python3 gen_project.py && python3 placement.py && python3 gen_pcb.py \
+  && python3 gen_project.py && python3 placement.py \
   && python3 verify.py && python3 test_verify.py \
   && python3 constraints.py && python3 delta.py && python3 floorplan.py \
   && python3 gen_bom.py && python3 gen_assumptions.py && python3 rules.py \
   && python3 gen_plots.py
 ```
 
-**And the run takes about half an hour now, nearly all of it `gen_pcb.py`.**
-It was 89 s at this fabrication class with 164 nets; the controller brings the
-board to 201 nets and 314 parts, and the router's cost is contention rather than
-cell count -- `rules.grid_cost()` records that measurement and the wrong
-prediction it replaced. The number to watch is not the total but its shape: a
-denser board on the same grid is where a maze router with rip-up and retry gets
-expensive, and `route.RETRY_PASSES` is 4, so it is bounded rather than open.
-Nothing here is waiting on it; it is written down because a build that used to
-be a coffee is now a walk, and somebody should know that before they assume a
-hang.
+**`gen_pcb.py` is not in it.** It places, pours and stitches, and it lays no
+signal copper -- so running it over a hand-routed board discards the routing,
+with no undo. It is a *starting* step, run once, and after that the board is
+edited in KiCad:
+
+```bash
+python3 gen_pcb.py                 # refuses if the board carries signal copper
+python3 gen_pcb.py --discard-routing   # and this is how you mean it
+```
+
+The refusal is `gen_pcb_guard.refuse_to_discard_routing()` and it is enforced
+rather than documented, because for one pass it was documented in three files
+while this very code block still had `gen_pcb.py` in the middle of it.
+
+**To move a netlist change onto a routed board**, use KiCad's own **Tools ->
+Update PCB from Schematic** against `out/cv-module.kicad_sch`, which the first
+pipeline regenerates. That is the only sync path.
+
+**And the run takes about a minute now, of which `gen_pcb.py` is eleven
+seconds.** It was half an hour: 89 s at 164 nets, and the controller took it to
+201 nets and 314 parts on a router whose cost is contention rather than cell
+count. Deleting the router deleted the whole of that. The measurement is kept
+in `rules.grid_cost()` because it is the record of a wrong prediction --
+"4.7x the cells will be slower" was 22 % faster -- and because nothing else in
+this repo has measured a superlinear cost curve. What is *not* worth keeping is
+the advice that followed it: there is no longer a build long enough to be
+mistaken for a hang.
 
 **`rules.py` is last in that list and first in the dependency order**, which is
 worth not being confused by: `gen_pcb.py` and `gen_project.py` both import it,
