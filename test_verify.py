@@ -1079,7 +1079,31 @@ def main():
         finally:
             socket._git = original
 
+    # **The two retirements, and the second provocation is the real mechanism
+    # rather than a poke at the threshold.** design.SETTLED says two
+    # assumptions are not worth a bench because no value in their range
+    # changes anything -- a claim about the design, not about the numbers, so
+    # it expires when the design moves. inlet_loop_uh's own note names exactly
+    # how: it was load-bearing until L801 was fitted. Taking the choke back
+    # off is that sentence run backwards, and check_settled() has to object.
+    def _settled_names_nothing():
+        design.SETTLED["not_an_assumption"] = "a retirement of nothing"
+        try:
+            design.check_settled()
+        finally:
+            del design.SETTLED["not_an_assumption"]
+
+    def _choke_comes_off():
+        original = design.INLET_CHOKE_UH
+        design.INLET_CHOKE_UH = 0.0
+        try:
+            design.check_settled()
+        finally:
+            design.INLET_CHOKE_UH = original
+
     for label, provoke in (
+            ("a retired assumption names nothing", _settled_names_nothing),
+            ("the choke comes off and a retirement expires", _choke_comes_off),
             ("contract: the mixer's root is on sys.path", _sys_path_polluted),
             ("contract: a module was loaded from the mixer repo",
              _module_from_the_mixer),
@@ -1089,7 +1113,7 @@ def main():
         try:
             provoke()
             found = []
-        except SystemExit:
+        except (SystemExit, AssertionError):
             found = ["raised"]
         report(label, found)
 

@@ -174,3 +174,8 @@ out/from-kicad-drc.json
 # KiCad writes this beside the project when kicad-cli touches it: local UI state,
 # not design intent. gen_project.py does not produce it and nothing reads it.
 out/cv-module.kicad_prl
+
+# KiCad writes a lock file beside anything it has open. Never committed:
+# it names a host and a process, and a stale one makes KiCad refuse a file
+# that nothing is holding.
+out/~*.lck

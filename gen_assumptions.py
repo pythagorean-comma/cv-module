@@ -476,9 +476,29 @@ def _report():
     out("From `design.MEASURED`, which is the mixer's `Assumption` class "
         "reused rather than reimplemented.")
     out()
+    sweep = design.barrier_sweep()
+    out(f"**{len(design.MEASURED) - len(design.SETTLED)} of these are worth a "
+        f"bench and {len(design.SETTLED)} are not**, and the difference is "
+        f"computed rather than felt. `design.SETTLED` names the ones whose "
+        f"*whole declared range* gives the same answer, and "
+        f"`design.check_settled()` recomputes that on every build — so a "
+        f"retirement expires the day the design makes one load-bearing again. "
+        f"Both of the retired ones are barrier residuals: at their joint worst "
+        f"corner, against the **optimistic** end of `noise_floor`'s own range, "
+        f"they put {sweep['corner_v'] * 1e6:.2f} µV at the audio bond, which "
+        f"is {sweep['corner_db']:+.1f} dB — "
+        f"{abs(sweep['corner_db']) - design.SETTLED_MARGIN_DB:.1f} dB inside "
+        f"the {design.SETTLED_MARGIN_DB:.0f} dB the check holds, with three "
+        f"worst cases stacked.")
+    out()
     for name, value, rng, question, sets, when_wrong in _from_measured():
-        out(f"### `{name}` = {value}")
+        settled = design.SETTLED.get(name)
+        mark = " — **retired**" if settled else ""
+        out(f"### `{name}` = {value}{mark}")
         out()
+        if settled:
+            out(f"**Retired, and still a guess:** {settled}")
+            out()
         out(f"**Range:** {rng}")
         out()
         out(f"**Question:** {question}")

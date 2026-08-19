@@ -54,7 +54,7 @@ does not choose. See [`controller.md`](docs/controller.md).
 | ERC | ✅ **0 errors and 0 warnings** — `ERC_ALLOWED` is empty |
 | the envelope rectifier | ✅ derived, drawn and checked — τ from the transient, not from a target |
 | the fail-safe | ✅ drawn: de-energised **is** bypass, and the pump's own rise time is the power-up interlock |
-| section 5 constraints | ✅ checked mechanically, **87** planted faults caught — and the faults themselves are checked too. Five faults went dead when their targets left the board, and the guard named all five before a case ran |
+| section 5 constraints | ✅ checked mechanically, **89** planted faults caught — and the faults themselves are checked too. Five faults went dead when their targets left the board, and the guard named all five before a case ran |
 | deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
 | board | ✅ **placed, poured, stitched and seeded — 0 unconnected items and 0 DRC violations, and `check_board_is_the_design()` passes for the first time.** 290 footprints on 106.9 × 233.6 mm, 151 ground stitches, **1652 track runs and 595 vias** laid by one run of `route.py` as a *seed*. It is a starting point somebody adjusts in KiCad, not an output the build reproduces: `gen_pcb_guard.refuse_to_discard_routing()` refuses the next run whether the copper came from the router or from a person |
@@ -200,7 +200,8 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | [`CLAUDE.md`](CLAUDE.md) | the rules, including which "load-bearing constraints" actually are |
 | [`STYLE.md`](docs/STYLE.md) | the mixer's conventions, read off its source and followed |
 | [`ssi2164-control-port.md`](docs/ssi2164-control-port.md) | the datasheet read first-hand. **Six spec corrections** |
-| [`fabrication-class.md`](docs/fabrication-class.md) | 0.09/0.09 on 1 oz — the decision, and the four-row table that took it |
+| [`fabrication-class.md`](docs/fabrication-class.md) | 0.20/0.20 on 1 oz against PCBWay — the decision, and the corridor that took it |
+| [`bench.md`](docs/bench.md) | what is left to measure, in order, and what each reading decides |
 | [`contract/socket.py`](contract/socket.py) | the only place upstream constants are adapted |
 | [`toolchain/`](toolchain/PROVENANCE.md) | KiCad plumbing, copied from the mixer. Ours to modify |
 | `design.py` | values, derivations, the netlist, and the borrowed-symbol patch |
@@ -1305,9 +1306,14 @@ Three more things the pass turned up, each recorded where it happened:
 ## Open, in the order worth taking
 
 **Everything a check can decide is decided.** `verify.py` passes end to end,
-`test_verify.py` catches all 87 planted faults, `placement.check_courtyard_gap()`
+`test_verify.py` catches all 89 planted faults, `placement.check_courtyard_gap()`
 is at zero, DRC is at zero and so is the unrouted count. What is open is work
 on a bench and one decision about copper that is a person's to take.
+
+**Ten assumptions were open and eight are**, which is the other thing this
+pass moved: one closed by reading a page, two retired against their own whole
+declared range, and one decided with a trigger attached.
+[`bench.md`](docs/bench.md) is the list and the order.
 
 1. **Route the board by hand — Tim's step, and it is the longest one in the
    project.** What opens in KiCad is 290 footprints, the outline, two inner
@@ -1319,18 +1325,20 @@ on a bench and one decision about copper that is a person's to take.
    ground split, the isolation region and both barriers — and
    `verify.UNROUTED_ITEMS` is the ratchet: **down as copper is laid, up only
    with the nets named there.**
-2. **`MEASURED["noise_floor"]`** — a meter on the mixer's mono output. Still
-   this module's most load-bearing unknown; see item 1 of the old list below.
+2. **`MEASURED["noise_floor"]`** — a meter on the mixer's mono output, and
+   the only one of the three that can be taken before this board exists. It is
+   still this module's most load-bearing unknown: across its declared range
+   the module costs **0.01 dB or 0.79 dB quiescent, and 0.08 dB or 3.13 dB
+   while the lead feature runs**. It also gates a component value —
+   **below 81 µV, `R_IN` should move from 12k1 to 7.5 kΩ**. See
+   [`bench.md`](docs/bench.md).
 3. **`MEASURED["mcu_dcdc_efficiency"]` and `MEASURED["pico_smps_efficiency"]`**
-   — **two ammeters, and they multiply.** One in series with U22's VIN and one
-   in series with the Pico's VSYS pin with GPIO23 high. The budget closes at
-   212.9 mA of 250 and it failed at 254.6 before U22 took the relay coils, so
-   this is the pair that decides whether that headroom is real.
-4. **`MEASURED["env_opamp_iq"]`**, settled by fitting a TL07xH grade;
-   **`MEASURED["vca_rin"]`**, a resistor value with 2.1 dB in it; and
-   **`["dcdc_node_v"]` and `["inlet_loop_uh"]`**, both 40 dB from mattering —
-   retire them or measure them.
-5. **Gerbers.** `gen_plots.orderable()` returns nothing now: `DEFERRED` and
+   — two ammeters, after fabrication, and **they are confirmations rather than
+   a gate**. One in series with U22's VIN and one in series with the Pico's
+   VSYS pin with GPIO23 high. Floors of **53 %** and **45 %**, each with the
+   other stage at its own pessimistic end, against declared ranges starting at
+   75 and 86.
+4. **Gerbers.** `gen_plots.orderable()` returns nothing now: `DEFERRED` and
    `UNSPECIFIED` are empty, every part has a footprint, and the unrouted count
    is zero. **Nothing in the repository gates a fabrication package any more**,
    which makes writing one a decision somebody takes rather than a step that
@@ -1345,6 +1353,9 @@ on a bench and one decision about copper that is a person's to take.
 | ~~**The inlet fuse**~~ | Fitted. SCHURTER UMT 250, 1.6 A time-lag, 3403.0168.11 — the blocker was a catalogue, not the requirement |
 | ~~**The hole clearance**~~ | Owned, at `rules.hole_rules()`. The question had JLCPCB's number in it and PCBWay's answer points the other way |
 | ~~**The placement gaps**~~ | 23 → 0, by `pack_east()` and `clear_south()` rather than by nudging |
+| ~~**`MEASURED["env_opamp_iq"]`**~~ | Closed by reading one more page. Section 5.8 of SLOS080W continues across a page break and the row is there: 1.4 mA typ, 2.5 max — both figures the repo already carried, one unsourced and one called an envelope |
+| ~~**`["dcdc_node_v"]` and `["inlet_loop_uh"]`**~~ | Retired into `design.SETTLED`, and `check_settled()` recomputes the claim on every build. Still guesses; no value in either range changes anything |
+| ~~**`MEASURED["vca_rin"]`**~~ | Decided: stays at 12k1, revisit at a measured 81 µV. The 2.1 dB is at the *cell* — at the system output it is 0.04 dB |
 
 ---
 

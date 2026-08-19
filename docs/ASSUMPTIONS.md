@@ -20,6 +20,8 @@ The discipline is the mixer's. Its `Assumption` class says it plainly: **the ran
 
 From `design.MEASURED`, which is the mixer's `Assumption` class reused rather than reimplemented.
 
+**8 of these are worth a bench and 2 are not**, and the difference is computed rather than felt. `design.SETTLED` names the ones whose *whole declared range* gives the same answer, and `design.check_settled()` recomputes that on every build — so a retirement expires the day the design makes one load-bearing again. Both of the retired ones are barrier residuals: at their joint worst corner, against the **optimistic** end of `noise_floor`'s own range, they put 4.09 µV at the audio bond, which is -21.8 dB — 1.8 dB inside the 20 dB the check holds, with three worst cases stacked.
+
 ### `cv_corner` = 254.7 Hz, 2-pole
 
 **Range:** 200.0 .. 400.0
@@ -30,7 +32,9 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **When wrong:** Two capacitors per channel. The corner scales as 1/C with the resistors fixed at the <=22k the noise budget wants, so 400 Hz is C1 = 36n / C2 = 15n and nothing else moves. Note the direction of the trade: faster is a worse anti-AM filter and a sharper click, and 00-current-state puts this block at 15-20 dB of the whole noise argument.
 
-### `dcdc_node_v` = 40.0 V pk-pk, flyback primary switching node
+### `dcdc_node_v` = 40.0 V pk-pk, flyback primary switching node — **retired**
+
+**Retired, and still a guess:** barrier_return() scales linearly with it, so the whole 24-72 V range moves the residual at the audio bond from 0.69 to 2.06 uV -- 46.4 dB to 36.9 dB *under* the mixer's own noise floor. There is no value in the range at which another part is worth fitting, which is the only decision it feeds.
 
 **Range:** 24.0 .. 72.0
 
@@ -40,17 +44,9 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **When wrong:** Linearly. barrier_return() scales with it, so the top of the range is 5 dB worse than the value and the bottom is 4 dB better -- and the *fraction* returned locally does not move at all, because it is set by two impedances. What would change is whether the residual at the bond is worth another part, and at every point in this range it is not.
 
-### `env_opamp_iq` = 2.5 mA/amplifier, TL074 quiescent, maximum
+### `inlet_loop_uh` = 0.75 uH, the loop the shared inlet closes — **retired**
 
-**Range:** 1.125 .. 2.8
-
-**Question:** What is the plain TL074's maximum quiescent current per amplifier? SLOS080W is a combined TL071/72/74 document and the pages walked in this session carry the TL07x*H* grade (937.5 uA typ, 1125 uA max); the plain grade's own row was not located. The 1.4 mA typical this repo carries is unsourced.
-
-**Sets:** 8 amplifiers of the 40 on VA+/VA-, so about 8 mA on a rail supply_load() puts at 110 mA maximum
-
-**When wrong:** The bipolar rails move by at most 11 mA either way, which is inside any sensible margin on a DC-DC that has not been chosen. It is declared rather than resolved because a supply sized on an invented maximum is exactly what section 6 forbids, and because fitting the H grade -- which is read -- would settle it by choosing a part.
-
-### `inlet_loop_uh` = 0.75 uH, the loop the shared inlet closes
+**Retired, and still a guess:** It used to be the denominator of a split and is a straight scale now: L801 puts 3.6 kohm in that denominator, so 0.3 and 1.5 uH return the same 99.984 % locally to five figures and differ only in the residual, 0.47 to 2.27 uV. **The choke is what retired it** -- before it was fitted the range mattered and the assumption's own when_wrong named a choke as the fix.
 
 **Range:** 0.3 .. 1.5
 
@@ -58,7 +54,7 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **Sets:** the impedance of the bond the barrier's residual current is developed across
 
-**When wrong:** **Re-read after L801 was fitted, and it is a different assumption now.** It used to be the *denominator of a split* -- barrier_return() divided the barrier current between C810 and this loop, so a smaller loop was a worse result and the whole declared range mattered. The choke puts 3.6 kohm in that denominator, so the split is set by the part and not by the box: 0.3 and 1.5 uH give the same 99.98 % local return to four figures. What is left is a straight scale on the residual, because the bond voltage is this impedance times a current that no longer depends on it -- a factor of 5 across the range, on 1.1 uV that is 42 dB under the mixer's own noise floor. Every point in the range is inaudible and so is every point outside it. The old clause named a choke as the answer if the number went the wrong way; the choke is fitted, so the question this assumption asks has stopped being load-bearing and is kept because it is still unmeasured.
+**When wrong:** **Re-read after L801 was fitted, and it is a different assumption now.** It used to be the *denominator of a split* -- barrier_return() divided the barrier current between C810 and this loop, so a smaller loop was a worse result and the whole declared range mattered. The choke puts 3.6 kohm in that denominator, so the split is set by the part and not by the box: 0.3 and 1.5 uH give the same 99.98 % local return to four figures. What is left is a straight scale on the residual, because the bond voltage is this impedance times a current that no longer depends on it -- a factor of 5 across the range, on 1.1 uV that is 42 dB under the mixer's own noise floor. Every point in the range is inaudible and so is every point outside it. The old clause named a choke as the answer if the number went the wrong way; the choke is fitted, so the question this assumption asks has stopped being load-bearing. **Retired: it is in SETTLED**, and it is the worked example of why that table needs check_settled() beside it -- this was load-bearing until one part went on, and would be again the day it came off.
 
 ### `logic_law_error` = 0.0023 fractional, '541 output-impedance asymmetry
 
@@ -76,9 +72,9 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **Question:** What does U22 draw from VA_RAW at this board's real 3.3 V load? SLVSE22B gives efficiency as figures rather than as a table -- section 7.8's curves at 8, 12, 24 and 36 V in -- and a number read off a plotted curve is not a reading. The measurement is one ammeter in series with the switcher's VIN pin.
 
-**Sets:** how much of the converter's remaining 35.4 mA of +Vout the controller costs, and that is the tightest budget on the board
+**Sets:** how much of the converter's remaining 128.2 mA of +Vout the controller costs -- it was the tightest budget on the board and it is not any more, which is what the note below is about
 
-**When wrong:** **Only in one direction, and the threshold is computed rather than assumed.** mcu_supply() states the efficiency at which the +Vout budget stops closing -- about 67 % -- and the range's floor is above it deliberately: a synchronous buck at a quarter of its rated current does not do worse than three quarters, and the FPWM version's own penalty at light load is inside that. If the measurement came back under 67 % the fix is not this part: it is the 92.7 mA of relay coil that V5 makes linearly from twelve volts, which is 37 % of +Vout and the only load on this board large enough to matter.
+**When wrong:** **Only in one direction, and the threshold moved a long way when the fix it named was taken.** This read 'about 67 %', and the sentence after it named the lever: the 92.7 mA of relay coil V5 made linearly from twelve volts. That lever was pulled -- U22 makes 5 V now and carries the coils -- and it moved two things at once. The headroom before this block went from 35.4 mA to 128.2, because excluding the controller now excludes the coils too; and the coils stopped passing through the module's own converter, so there is no longer one number covering both stages. mcu_supply()'s u22_floor solves it: **53 % with the module at its own pessimistic end**, against a declared range starting at 75. The pessimistic corner fits with 37 mA of +Vout to spare, so what is left here is a confirmation and not a gate.
 
 ### `mcu_rail_ma` = 52.1 mA on 3.3 V, RP2040 alone, maximum average
 
@@ -106,9 +102,9 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **Question:** What does the Pico draw from VSYS at this board's load? DS6150A/B-05 gives efficiency only as plotted curves -- the 'Buck-Boost 3.3V Efficiency, PS/SYNC = H' figure, which is the forced-PWM one this design runs in -- and at 100 mA the VIN = 3.3 V trace sits near 95 % with the 2.4 V trace about three points under it. A number read off a plotted curve is not a reading, and this one is read at a different inductor from the module's. The measurement is one ammeter in series with the Pico's VSYS pin, with GPIO23 high.
 
-**Sets:** together with mcu_dcdc_efficiency, whether the +Vout budget closes at all -- see mcu_supply()
+**Sets:** what the module's own 3.3 V load costs +Vout, which is 43 % of what U22 delivers -- see mcu_supply()
 
-**When wrong:** **Both directions matter now, which is new.** The range's floor is chosen so that the product with the other assumption's floor is 0.660, and 0.678 is where the budget stops closing -- so the pessimistic corner already fails by 1.8 points and mcu_supply() says so rather than rounding it away. Two levers, in order of cost: the relay coils named above, and moving the module's own load off the RT6150 by back-driving its 3V3 pin, which pico_backdrive() prices and refuses on documentation grounds rather than on arithmetic.
+**When wrong:** **It is not a threshold on a product and it never was.** This read 'the product with the other assumption's floor is 0.660, and 0.678 is where the budget stops closing'. 0.678 was mcu_supply()'s single-stage conservation floor carrying a second name -- the same expression, called a product -- so the framing was wrong before the number was. The topology then made it wrong twice: **57 % of VMOD's power is relay coil**, which passes through U22 and never through this converter, so the two stages are not in series for most of the load and no product describes them. mcu_supply()'s module_floor is the honest figure -- **45 % with U22 at its own pessimistic end**, against a declared range starting at 86. Nothing here gates the design; the measurement is worth taking because a curve read off a figure is not a reading.
 
 ### `servo_vos` = 0.0005 V, servo amplifier input offset
 
@@ -128,7 +124,7 @@ From `design.MEASURED`, which is the mixer's `Assumption` class reused rather th
 
 **Sets:** the VCA's output noise, and with it whether this module is audible against the six Nu capsules at all
 
-**When wrong:** Nothing structural: two resistors per channel, and the coarse pad's deletion means the top of the range is no longer bounded by anything but the part. How much it matters is decided entirely by the mixer's own noise_floor assumption -- at the predicted 144 uV the whole choice is worth 0.3 dB, and at the optimistic end of its declared range it is worth 0.8 dB. Measure that first; this is downstream of it.
+**When wrong:** Nothing structural: two resistors per channel, same footprint, and the coarse pad's deletion means the top of the range is no longer bounded by anything but the part. **Decided rather than left open, and the trigger is a number.** The old text here said the choice was 'worth 0.3 dB at the predicted 144 uV and 0.8 dB at the optimistic end' -- delta.rin_sensitivity() computes **0.04 dB quiescent and 0.20 dB while gating** at 144 uV, and 0.26 / 0.92 dB at 50, so the old pair was the gating figures rounded and read as though they were the quiescent ones. So R_IN stays at 12k1, against a distortion cost page 4 gives a direction for and no number -- and **revisit at 81 uV**, which is the measured floor at which 7.5k first reaches half a decibel in the lead feature. Downstream of one meter reading and of nothing else.
 
 ## Inherited from the mixer
 

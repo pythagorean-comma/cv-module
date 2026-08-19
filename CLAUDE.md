@@ -1008,6 +1008,9 @@ cv-module/
                          decided it rather than an argument
     controller.md        the last deferred block: the two gates, the part that
                          closed the second, and the five things drawing it found
+    bench.md             what is left to measure, in order, and what each
+                         reading decides. Three, and only noise_floor can be
+                         taken before the board is fabricated
     FINDINGS.md          anything wrong in the mixer repo — noted, never fixed
     ASSUMPTIONS.md       everything guessed                      [generated]
     constraints.md       does each constraint have a mechanism?  [generated]

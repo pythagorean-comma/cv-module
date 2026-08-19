@@ -98,14 +98,22 @@ MEASURED = {
                  "0.05 % at 0.775 V rms and 0.025 % 17 dB below that.",
         sets="the VCA's output noise, and with it whether this module is "
              "audible against the six Nu capsules at all",
-        when_wrong="Nothing structural: two resistors per channel, and the "
-                   "coarse pad's deletion means the top of the range is no "
-                   "longer bounded by anything but the part. "
-                   "How much it matters is decided entirely by the mixer's "
-                   "own noise_floor assumption -- at the predicted 144 uV the "
-                   "whole choice is worth 0.3 dB, and at the optimistic end "
-                   "of its declared range it is worth 0.8 dB. Measure that "
-                   "first; this is downstream of it."),
+        when_wrong="Nothing structural: two resistors per channel, same "
+                   "footprint, and the coarse pad's deletion means the top of "
+                   "the range is no longer bounded by anything but the part. "
+                   "**Decided rather than left open, and the trigger is a "
+                   "number.** The old text here said the choice was 'worth "
+                   "0.3 dB at the predicted 144 uV and 0.8 dB at the "
+                   "optimistic end' -- delta.rin_sensitivity() computes "
+                   "**0.04 dB quiescent and 0.20 dB while gating** at 144 uV, "
+                   "and 0.26 / 0.92 dB at 50, so the old pair was the gating "
+                   "figures rounded and read as though they were the "
+                   "quiescent ones. So R_IN stays at 12k1, against a "
+                   "distortion cost page 4 gives a direction for and no "
+                   "number -- and **revisit at 81 uV**, which is the measured "
+                   "floor at which 7.5k first reaches half a decibel in the "
+                   "lead feature. Downstream of one meter reading and of "
+                   "nothing else."),
 
     "cv_corner": Assumption(
         value=254.7, units=" Hz, 2-pole", low=200.0, high=400.0,
@@ -120,23 +128,23 @@ MEASURED = {
                    "anti-AM filter and a sharper click, and 00-current-state "
                    "puts this block at 15-20 dB of the whole noise argument."),
 
-    "env_opamp_iq": Assumption(
-        value=2.5, units=" mA/amplifier, TL074 quiescent, maximum",
-        low=1.125, high=2.8,
-        question="What is the plain TL074's maximum quiescent current per "
-                 "amplifier? SLOS080W is a combined TL071/72/74 document and "
-                 "the pages walked in this session carry the TL07x*H* grade "
-                 "(937.5 uA typ, 1125 uA max); the plain grade's own row was "
-                 "not located. The 1.4 mA typical this repo carries is "
-                 "unsourced.",
-        sets="8 amplifiers of the 40 on VA+/VA-, so about 8 mA on a rail "
-             "supply_load() puts at 110 mA maximum",
-        when_wrong="The bipolar rails move by at most 11 mA either way, which "
-                   "is inside any sensible margin on a DC-DC that has not been "
-                   "chosen. It is declared rather than resolved because a "
-                   "supply sized on an invented maximum is exactly what "
-                   "section 6 forbids, and because fitting the H grade -- "
-                   "which is read -- would settle it by choosing a part."),
+    # **`env_opamp_iq` was here and it is closed by reading one more page.**
+    # It asked "what is the plain TL074's maximum quiescent current per
+    # amplifier?" and said the plain grade's row "was not located" -- the
+    # walk had found section 5.7, the TL07x**H** table, and stopped. Section
+    # 5.8 is the plain grade's and **it continues onto the next page**, where
+    # the row is: *"I_Q, quiescent current per amplifier, V_O = 0 V, no load:
+    # 1.4 typ, 2.5 max, mA"*, at +/-15 V and 25 degC. That is
+    # ENV_OPAMP_IQ_MA exactly, both numbers, which the repo had been carrying
+    # unsourced and calling an envelope.
+    #
+    # **The failure is one rung in from "a source cited and never read", and
+    # it is worth the distinction.** The document was fetched, opened and
+    # quoted; what was not read was the *continuation* of the table that was
+    # being read, across a page break, three pages further into the same
+    # section. Nothing in STYLE.md rule 10 covers that, and nothing could:
+    # from inside, a table that ends at a page boundary and a table that ends
+    # look identical.
 
     "mcu_rail_ma": Assumption(
         value=52.1, units=" mA on 3.3 V, RP2040 alone, maximum average",
@@ -180,19 +188,24 @@ MEASURED = {
                  "and a number read off a plotted curve is not a reading. The "
                  "measurement is one ammeter in series with the switcher's "
                  "VIN pin.",
-        sets="how much of the converter's remaining 35.4 mA of +Vout the "
-             "controller costs, and that is the tightest budget on the board",
-        when_wrong="**Only in one direction, and the threshold is computed "
-                   "rather than assumed.** mcu_supply() states the efficiency "
-                   "at which the +Vout budget stops closing -- about 67 % -- "
-                   "and the range's floor is above it deliberately: a "
-                   "synchronous buck at a quarter of its rated current does "
-                   "not do worse than three quarters, and the FPWM version's "
-                   "own penalty at light load is inside that. If the "
-                   "measurement came back under 67 % the fix is not this "
-                   "part: it is the 92.7 mA of relay coil that V5 makes "
-                   "linearly from twelve volts, which is 37 % of +Vout and "
-                   "the only load on this board large enough to matter."),
+        sets="how much of the converter's remaining 128.2 mA of +Vout the "
+             "controller costs -- it was the tightest budget on the board and "
+             "it is not any more, which is what the note below is about",
+        when_wrong="**Only in one direction, and the threshold moved a long "
+                   "way when the fix it named was taken.** This read 'about "
+                   "67 %', and the sentence after it named the lever: the "
+                   "92.7 mA of relay coil V5 made linearly from twelve volts. "
+                   "That lever was pulled -- U22 makes 5 V now and carries "
+                   "the coils -- and it moved two things at once. The "
+                   "headroom before this block went from 35.4 mA to 128.2, "
+                   "because excluding the controller now excludes the coils "
+                   "too; and the coils stopped passing through the module's "
+                   "own converter, so there is no longer one number covering "
+                   "both stages. mcu_supply()'s u22_floor solves it: **53 % "
+                   "with the module at its own pessimistic end**, against a "
+                   "declared range starting at 75. The pessimistic corner "
+                   "fits with 37 mA of +Vout to spare, so what is left here "
+                   "is a confirmation and not a gate."),
 
     # **The second efficiency, and it exists because the module carries a
     # converter this design does not choose.** It has the same shape as the
@@ -212,18 +225,23 @@ MEASURED = {
                  "not a reading, and this one is read at a different inductor "
                  "from the module's. The measurement is one ammeter in series "
                  "with the Pico's VSYS pin, with GPIO23 high.",
-        sets="together with mcu_dcdc_efficiency, whether the +Vout budget "
-             "closes at all -- see mcu_supply()",
-        when_wrong="**Both directions matter now, which is new.** The range's "
-                   "floor is chosen so that the product with the other "
-                   "assumption's floor is 0.660, and 0.678 is where the "
-                   "budget stops closing -- so the pessimistic corner already "
-                   "fails by 1.8 points and mcu_supply() says so rather than "
-                   "rounding it away. Two levers, in order of cost: the relay "
-                   "coils named above, and moving the module's own load off "
-                   "the RT6150 by back-driving its 3V3 pin, which "
-                   "pico_backdrive() prices and refuses on documentation "
-                   "grounds rather than on arithmetic."),
+        sets="what the module's own 3.3 V load costs +Vout, which is 43 % of "
+             "what U22 delivers -- see mcu_supply()",
+        when_wrong="**It is not a threshold on a product and it never was.** "
+                   "This read 'the product with the other assumption's floor "
+                   "is 0.660, and 0.678 is where the budget stops closing'. "
+                   "0.678 was mcu_supply()'s single-stage conservation floor "
+                   "carrying a second name -- the same expression, called a "
+                   "product -- so the framing was wrong before the number "
+                   "was. The topology then made it wrong twice: **57 % of "
+                   "VMOD's power is relay coil**, which passes through U22 "
+                   "and never through this converter, so the two stages are "
+                   "not in series for most of the load and no product "
+                   "describes them. mcu_supply()'s module_floor is the honest "
+                   "figure -- **45 % with U22 at its own pessimistic end**, "
+                   "against a declared range starting at 86. Nothing here "
+                   "gates the design; the measurement is worth taking because "
+                   "a curve read off a figure is not a reading."),
 
     "servo_vos": Assumption(
         value=0.5e-3, units=" V, servo amplifier input offset",
@@ -292,8 +310,11 @@ MEASURED = {
                    "every point outside it. The old clause named a choke as "
                    "the answer if the number went the wrong way; the choke is "
                    "fitted, so the question this assumption asks has stopped "
-                   "being load-bearing and is kept because it is still "
-                   "unmeasured."),
+                   "being load-bearing. **Retired: it is in SETTLED**, and it "
+                   "is the worked example of why that table needs "
+                   "check_settled() beside it -- this was load-bearing until "
+                   "one part went on, and would be again the day it came "
+                   "off."),
 
     "logic_law_error": Assumption(
         value=0.23e-2, units=" fractional, '541 output-impedance asymmetry",
@@ -308,6 +329,51 @@ MEASURED = {
                    "and 0.23 % over a 61 dB span is 0.14 dB. Calibratable in "
                    "firmware from a single measured curve if it ever matters."),
 }
+
+# ---------------------------------------------------------------------------
+# Which of these are worth a bench, and it is not all of them
+# ---------------------------------------------------------------------------
+#
+# **An assumption whose whole declared range gives the same answer is not a
+# measurement, it is a number.** MEASURED is the mixer's own class at the pin
+# and it has no field for this -- rightly: the mixer owns what an Assumption
+# *is*, and which of ours are worth taking to a bench is this repository's
+# question about its own design. So the retirement lives here, as a table
+# beside the dict rather than a field inside it.
+#
+# **Each entry is a claim that a function can fail**, which is the difference
+# between retiring an assumption and ignoring one. check_settled() below
+# recomputes the consequence at both ends of the declared range and asserts
+# the margin is still there; if a later part or a later topology makes one of
+# these load-bearing again, the check says so and the entry has to come out.
+#
+# What is *not* claimed is that the number is known. Both of these are still
+# guesses and both would still be interesting to measure. What is claimed is
+# that no value in the range -- and for these two, no value outside it either
+# -- changes anything this design does.
+SETTLED = {
+    "dcdc_node_v": (
+        "barrier_return() scales linearly with it, so the whole 24-72 V "
+        "range moves the residual at the audio bond from 0.69 to 2.06 uV -- "
+        "46.4 dB to 36.9 dB *under* the mixer's own noise floor. There is no "
+        "value in the range at which another part is worth fitting, which is "
+        "the only decision it feeds."),
+    "inlet_loop_uh": (
+        "It used to be the denominator of a split and is a straight scale "
+        "now: L801 puts 3.6 kohm in that denominator, so 0.3 and 1.5 uH "
+        "return the same 99.984 % locally to five figures and differ only in "
+        "the residual, 0.47 to 2.27 uV. **The choke is what retired it** -- "
+        "before it was fitted the range mattered and the assumption's own "
+        "when_wrong named a choke as the fix."),
+}
+
+# How far under the noise floor the worst corner of every settled assumption
+# has to stay. 20 dB, and it is a round number chosen for what it means rather
+# than derived: at a fifth of the amplitude of a noise floor that is itself an
+# assumption, a term has stopped being a term. The margin is checked at the
+# *optimistic* end of noise_floor's own range, which is the demanding one.
+SETTLED_MARGIN_DB = 20.0
+
 
 
 # ---------------------------------------------------------------------------
@@ -835,7 +901,21 @@ OPAMP_QUADS = -(-OPAMP_NEEDED // OPAMP_SECTIONS)
 # offset is -52 dB against the mixer's clipping_peak(), which is the detector's
 # floor and not the audio path's.
 ENV_OPAMP = "TL074"
-ENV_OPAMP_EN = 18e-9                  # nV/rtHz at 1 kHz, and it never reaches audio
+# **ENV_OPAMP_EN was here at 18e-9 and it was the wrong row of the right
+# table, read by nothing.** Section 5.9 gives the plain grade's input voltage
+# noise density at 1 kHz as **18 nV/rtHz for "All PS and NS packages, all
+# TL07xM devices"** and **37 nV/rtHz for "All other devices"** -- and this
+# board fits the D package, SOIC-14, which is one of the others. So the
+# constant was low by 6.3 dB, chosen by a condition (the package) that the
+# reading did not carry down.
+#
+# It is deleted rather than corrected because **nothing in this repository
+# ever read it**: the comment beside it said "it never reaches audio", which
+# is true -- the detector's output goes to the ADC through a divider and joins
+# no audio node -- and a constant with no consumer and no consequence is the
+# same declaration design.RAILS' "V3V3" was. Two failures in one line, and the
+# second is why the first survived: a number nothing computes from cannot be
+# found to be wrong.
 ENV_OPAMP_VOS = 3.0e-3                # typical; 10 mV maximum
 ENV_SECTIONS_NEEDED = CHANNELS
 ENV_QUADS = -(-ENV_SECTIONS_NEEDED // OPAMP_SECTIONS)
@@ -3531,6 +3611,107 @@ def mcu_chain(eta_module=None, eta_buck=None):
     }
 
 
+def barrier_sweep():
+    """The residual at the audio bond over each settled assumption's range.
+
+    Every row is barrier_return() run at one end of one declared range, with
+    everything else at its own value, plus the joint worst corner -- and the
+    margin is quoted against the *optimistic* end of noise_floor's own range,
+    because that is the demanding one. An assumption retired against the
+    pessimistic end of another assumption is retired against a convenience.
+    """
+    node = MEASURED["dcdc_node_v"]
+    loop = MEASURED["inlet_loop_uh"]
+    floor = MEASURED["noise_floor"].low
+    rows = {}
+    for name, keyword, values in (("dcdc_node_v", "node_vpp",
+                                   (node.low, node.value, node.high)),
+                                  ("inlet_loop_uh", "loop_uh",
+                                   (loop.low, loop.value, loop.high))):
+        rows[name] = [
+            (value, barrier_return(**{keyword: value})["bond_v"])
+            for value in values]
+    corner = barrier_return(node_vpp=node.high, loop_uh=loop.high)["bond_v"]
+    return {
+        "rows": rows,
+        "corner_v": corner,
+        "corner_db": 20 * math.log10(corner / floor),
+        "against_v": floor,
+        "worst_db": {name: max(20 * math.log10(v / floor) for _, v in row)
+                     for name, row in rows.items()},
+    }
+
+
+def check_settled():
+    """Every retired assumption is still retired. Raises.
+
+    **The half that makes SETTLED a table and not an excuse.** Retiring an
+    assumption is a claim that no value in its range changes a conclusion, and
+    a claim like that is true of a design rather than of a number -- so it
+    expires when the design moves. inlet_loop_uh is the worked example in both
+    directions: it was load-bearing until L801 was fitted, and it would become
+    load-bearing again the day the choke came off.
+
+    Checks two things, because they fail differently. That every name in
+    SETTLED is an assumption that exists -- a declaration naming nothing is a
+    check that cannot fail, which this repository has now found five times.
+    And that the worst corner of the two barrier assumptions is still
+    SETTLED_MARGIN_DB under the noise floor's own optimistic end.
+    """
+    missing = sorted(set(SETTLED) - set(MEASURED))
+    if missing:
+        raise AssertionError(
+            f"SETTLED names {missing}, which are not in MEASURED -- an "
+            f"assumption cannot be retired before it is declared, and a "
+            f"table that describes nothing cannot fail")
+    sweep = barrier_sweep()
+    for name in ("dcdc_node_v", "inlet_loop_uh"):
+        if name not in SETTLED:
+            continue
+        worst = sweep["worst_db"][name]
+        if worst > -SETTLED_MARGIN_DB:
+            raise AssertionError(
+                f"{name} is retired in SETTLED and its worst declared value "
+                f"now puts {worst:+.1f} dB at the audio bond against a "
+                f"{-SETTLED_MARGIN_DB:+.0f} dB margin -- it is load-bearing "
+                f"again and the entry has to come out. See barrier_sweep()")
+    if sweep["corner_db"] > -SETTLED_MARGIN_DB:
+        raise AssertionError(
+            f"both barrier assumptions at their joint worst put "
+            f"{sweep['corner_db']:+.1f} dB at the audio bond against a "
+            f"{-SETTLED_MARGIN_DB:+.0f} dB margin")
+
+
+def _efficiency_floor(other, u22_side, step=0.001, floor=0.42):
+    """The efficiency one converter needs, with the other at its worst.
+
+    **Two thresholds and not one, because the chain is not two stages in
+    series.** The relay coils are on VMOD, so they see U22 and nothing else;
+    only the module's own 3.3 V load passes through both. A single number
+    covering both stages would have to be a product, and a product is not a
+    quantity that describes this.
+
+    Solved by scan rather than in closed form: mcu_chain() puts the ORing
+    diode's forward drop through CLAMP_VF_TABLE, which is a datasheet table
+    with an interpolation and no extrapolation, so there is no expression to
+    invert. `floor` is where the scan starts and it is above the table's own
+    end deliberately -- below it the answer is not "worse", it is "the diode
+    is carrying more than the page describes", and this function will not
+    report a number for that.
+
+    Returns None if even `floor` fits, which is a stronger result than a
+    threshold and should read as one.
+    """
+    trial = floor
+    while trial <= 1.0:
+        module, u22 = ((other, trial) if u22_side else (trial, other))
+        if mcu_chain(module, u22)["input_ma"] <= supply_fit(
+                include_mcu=False)["positive_headroom_ma"]:
+            return None if trial <= floor else round(trial, 3)
+        trial += step
+    return 1.0
+
+
 def mcu_supply():
     """The 3.3 V load, counted off the netlist, and what it costs the converter.
 
@@ -3580,12 +3761,31 @@ def mcu_supply():
         # the property that made this bound worth stating and it survives the
         # topology changing under it.
         "floor_ma": watts / SUPPLY_VOUT * 1e3,
-        "min_efficiency": watts / SUPPLY_VOUT * 1e3 / head,
-        # ...and it is a threshold on a **product** now, which is the whole of
-        # what the module cost. 0.678 against two assumptions whose pessimistic
-        # ends multiply to 0.660: the corner fails, by 1.8 points of efficiency
-        # and 4.6 mA of +Vout, and it is said here rather than rounded.
-        "min_efficiency_product": watts / SUPPLY_VOUT * 1e3 / head,
+        # **The conservation floor, and it is about the 3.3 V load alone.**
+        # Named `mcu_only` because that is what `watts` is: the MCU rail's
+        # power over twelve volts over the headroom. It is a true bound and it
+        # is no longer the binding one, for the reason below.
+        "min_efficiency_mcu_only": watts / SUPPLY_VOUT * 1e3 / head,
+        # **`min_efficiency_product` was here and it never computed a
+        # product.** It was the same expression as the line above, under a
+        # second name -- so the "threshold on a product" this block was
+        # rewritten around was a rename, not a derivation, and the 0.678 in
+        # the comment beside it was the single-stage floor with `head` at the
+        # 35.4 mA it was before the relay coils moved.
+        #
+        # **Both halves of that claim have since expired, independently.**
+        # `head` is 128.2 mA now, because excluding the controller block also
+        # excludes the 92.7 mA of coil V5 used to make linearly and U22 makes
+        # now -- so the same figure computes 0.187. And the chain stopped
+        # being two stages in series for one load at the same moment: **57 %
+        # of VMOD's power is relay coil**, which passes through U22 and never
+        # through the module's own RT6150. A product of the two efficiencies
+        # is not a quantity this topology has.
+        #
+        # So the thresholds are two, each with the other stage at its declared
+        # worst, and they are solved rather than named.
+        "u22_floor": _efficiency_floor(module.low, u22_side=True),
+        "module_floor": _efficiency_floor(efficiency.low, u22_side=False),
         "efficiency_product": (module.low * efficiency.low,
                                module.value * efficiency.value,
                                module.high * efficiency.high),
@@ -4609,16 +4809,26 @@ def coil_budget():
 # 1.7 mA that coil_budget() carried**, which matched no row of that table.
 OPAMP_IQ_MA = (1.8, 2.3)
 
-# TL074, and **this is the one figure in the supply arithmetic that is not
-# read.** SLOS080W (July 2025) is a combined TL071/72/74 document; the pages
-# walked in this session carry the TL07x**H** grade at 937.5 uA typ and
-# 1125 uA max per amplifier, and the plain grade's own row was not located. The
-# 1.4 mA typical below is the figure the repo already carried, unsourced. The
-# maximum is declared as an envelope rather than invented precisely, and it is
-# deliberately the pessimistic end: MEASURED["env_opamp_iq"] holds the range.
+# TL074, **read now, and both numbers were already right.** SLOS080W
+# (September 1978, revised July 2025) section 5.8, "Electrical Characteristics
+# (DC) for TL07xC, TL07xAC, TL07xBC, TL07xI, TL07xM", *continued* on the
+# following page: "I_Q, quiescent current per amplifier, V_O = 0 V, no load --
+# 1.4 typ, 2.5 max, mA", at V_S = +/-15 V and T_A = 25 degC.
 #
-# It is 8 amplifiers of 40, so the whole uncertainty is 8 mA on a rail carrying
-# about 110 -- worth declaring, not worth blocking on.
+# This carried MEASURED["env_opamp_iq"] for four passes because the previous
+# walk read section 5.7 -- the TL07x**H** table, 937.5 uA typ and 1125 uA max
+# -- and concluded the plain grade's row was absent. It was three pages later
+# and over a page break. The typical it had been carrying unsourced and the
+# maximum it had "declared as an envelope rather than invented precisely" are
+# the datasheet's own two figures, to both digits.
+#
+# **Which is luck, and the note stays because of what it would have cost.**
+# Had the envelope been generous rather than exact, the supply arithmetic
+# would have been sized on a guess that agreed with nothing -- and the check
+# that would have caught it is the one that does not exist: check_assumptions()
+# enforces only that a value sits inside its own declared range.
+#
+# It is 8 amplifiers of 40, about 8 mA on a rail carrying 110.
 ENV_OPAMP_IQ_MA = (1.4, 2.5)
 
 
@@ -6882,6 +7092,7 @@ class Design:
         self.check_pin_numbers()
         self.check_orderable()
         self.check_controller_functions()
+        check_settled()
 
     def check_rails_are_drawn(self):
         """Every rail RAILS declares is a net some part is on.
@@ -8796,9 +9007,16 @@ def _report():
     print(f"  headroom              {mcu['headroom_before_ma']:>7.2f} mA "
           f"before, {mcu['headroom_after_ma']:.2f} after -- the tightest "
           f"margin on this board")
-    print(f"  fits at any efficiency over "
-          f"{mcu['min_efficiency'] * 100:.0f} %, and the assumed range starts "
-          f"at {MEASURED['mcu_dcdc_efficiency'].low * 100:.0f} %")
+    floor_u22, floor_mod = mcu['u22_floor'], mcu['module_floor']
+    print(f"  fits with U22 over "
+          f"{'anything measurable' if floor_u22 is None else f'{floor_u22 * 100:.0f} %'}"
+          f" at the module's worst {MEASURED['pico_smps_efficiency'].low:.2f}, "
+          f"and the module over "
+          f"{'anything measurable' if floor_mod is None else f'{floor_mod * 100:.0f} %'}"
+          f" at U22's worst {MEASURED['mcu_dcdc_efficiency'].low:.2f}")
+    print(f"    two thresholds and not one: {mcu['chain']['worst']['coil_ma'] * 5.0 / 1e3 / mcu['chain']['worst']['vmod_watts'] * 100:.0f} % of VMOD is "
+          f"relay coil, which passes through U22 and never through the "
+          f"module's own converter, so there is no product to threshold")
     light = mcu_dcdc_light_load()
     print(f"  the F suffix           boundary {light['boundary_ma']:.0f} mA: "
           f"continuous in circuit at {light['load_ma']:.0f} mA "
@@ -9081,7 +9299,21 @@ def _report():
 
     print("assumptions still open here")
     for name, assumption in sorted(MEASURED.items()):
-        print(f"  {name:<16} {assumption!r}")
+        if name not in SETTLED:
+            print(f"  {name:<16} {assumption!r}")
+    sweep = barrier_sweep()
+    print(f"\nsettled: still guesses, and no value in range changes anything")
+    for name in sorted(SETTLED):
+        print(f"  {name:<16} {MEASURED[name]!r}")
+        row = sweep["rows"].get(name)
+        if row:
+            span = ", ".join(f"{v:g} -> {b * 1e6:.2f} uV" for v, b in row)
+            print(f"    {span}, worst {sweep['worst_db'][name]:+.1f} dB "
+                  f"against a {MEASURED['noise_floor'].low * 1e6:.0f} uV floor")
+    print(f"  both at once           {sweep['corner_v'] * 1e6:.2f} uV, "
+          f"{sweep['corner_db']:+.1f} dB -- {abs(sweep['corner_db']) - SETTLED_MARGIN_DB:.1f} dB "
+          f"inside the {SETTLED_MARGIN_DB:.0f} dB check_settled() holds, and that "
+          f"is three worst cases stacked")
 
 
 if __name__ == "__main__":
