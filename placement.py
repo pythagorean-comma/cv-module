@@ -248,26 +248,33 @@ COURTYARD_TOLERANCE_MM = 0.06
 
 # West to east, and the order is floorplan.ZONES' own. Each entry is a column
 # of one part per channel; the comment names the zone it implements.
+# **Seven of these moved to satisfy GAP_MM, none by more than 1.1 mm, and the
+# 4 mm column pitch was never the problem.** That pitch gives an 0805 2.1 mm of
+# clearance. What it does not account for is that a quad package is 9.2 mm wide
+# and spans two rows, so a column beside one is beside something twelve times
+# its own width: R{n}02 had 0.4 mm to U1's courtyard against the 1.5 mm a
+# drag-solder lane wants. Solved against check_courtyard_gap() rather than
+# eyeballed, which is why they are odd numbers.
 COLUMNS = (
     (r"^J([1-6])$", 6.0, 0, "A0"),           # the loom, on the west edge
     (r"^R([1-6])01$", 13.0, 90, "A1"),
-    (r"^R([1-6])02$", 17.0, 90, "A1"),
-    (r"^C([1-6])01$", 30.0, 90, "A2"),       # 1210, the wide one
+    (r"^R([1-6])02$", 15.9, 90, "A1"),
+    (r"^C([1-6])01$", 30.8, 90, "A2"),       # 1210, the wide one
     (r"^R([1-6])11$", 35.0, 90, "A2"),
     (r"^R([1-6])15$", 39.0, 90, "A2"),
-    (r"^C([1-6])02$", 43.0, 90, "A2"),
+    (r"^C([1-6])02$", 42.2, 90, "A2"),
     (r"^R([1-6])21$", 58.0, 90, "A4"),
-    (r"^C([1-6])21$", 62.0, 90, "A4"),
+    (r"^C([1-6])21$", 60.8, 90, "A4"),
     (r"^R([1-6])31$", 76.0, 90, "A4"),
     (r"^C([1-6])31$", 80.0, 90, "A4"),
-    (r"^R([1-6])32$", 84.0, 90, "A4"),
+    (r"^R([1-6])32$", 83.9, 90, "A4"),
     # The CV band: filter west, envelope east.
     (r"^R([1-6])41$", 13.0, 90, "C1"),
     (r"^R([1-6])42$", 17.0, 90, "C1"),
     (r"^R([1-6])43$", 21.0, 90, "C1"),
     (r"^R([1-6])44$", 25.0, 90, "C1"),
     (r"^C([1-6])41$", 29.0, 90, "C1"),
-    (r"^C([1-6])42$", 33.0, 90, "C1"),
+    (r"^C([1-6])42$", 32.8, 90, "C1"),
     (r"^R([1-6])51$", 52.0, 90, "A5"),
     (r"^R([1-6])52$", 56.0, 90, "A5"),
     (r"^D([1-6])51$", 60.0, 90, "A5"),
@@ -275,7 +282,7 @@ COLUMNS = (
     (r"^R([1-6])53$", 70.0, 90, "A5"),
     (r"^R([1-6])54$", 74.0, 90, "A5"),
     (r"^R([1-6])55$", 78.0, 90, "A5"),
-    (r"^C([1-6])51$", 82.0, 90, "A5"),
+    (r"^C([1-6])51$", 81.8, 90, "A5"),
 )
 
 # Which rows a column's parts sit on. The audio path is on the odd row of each
