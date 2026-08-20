@@ -1045,6 +1045,134 @@ def rail_crosstalk(width_mm=None, psrr_db=OPAMP_PSRR_20K_DB,
     }
 
 
+# ---------------------------------------------------------------------------
+# The other half of channel isolation: two traces side by side
+# ---------------------------------------------------------------------------
+#
+# rail_crosstalk() above answers one of the two ways one channel reaches
+# another on this board -- a shared rail impedance. This is the other, and it
+# is the one that moved when the routing did: trace adjacency is a property of
+# the copper, so replacing route.py's seed with KiCadRoutingTools' board
+# changed it and nothing here could say by how much. Neither board had ever
+# been measured for it.
+#
+# **The trap is the impedance and this repo has already fallen into it once.**
+# constraints.pin_impedance()'s docstring records it: computing the loom node
+# as 10 kohm rather than its true tens of ohms put the shielding estimate at
+# -51 dB, failing the -54 dB requirement, where the right figure is -113 dB.
+# Sixty-two decibels, from one substitution. The same substitution is available
+# here and would be just as wrong.
+
+# **The stackup is not declared, and h is the widest term in the answer.**
+# out/cv-module.kicad_pcb carries no (stackup ...) block, so KiCad's defaults
+# apply and the dielectric height between an outer layer and the plane beneath
+# it has never been chosen. Across the plausible range for a 1.6 mm four-layer
+# board it is worth about 9 dB, which does not change the verdict -- the
+# pessimistic end is quoted everywhere -- but it is the one input to this
+# calculation that nobody has picked. Recorded here rather than assumed
+# silently.
+# Speed of light in vacuum, m/s. The second physical constant this file needs
+# that is not a component value; COPPER_RHO above is the first.
+LIGHT_M_PER_S = 299_792_458.0
+
+PCB_H_MM = (0.10, 0.20, 0.50)          # low, likely, pessimistic
+PCB_ER = 4.3                           # FR-4, the usual figure, not measured
+PCB_COPPER_MM = 0.035                  # 1 oz, rules.COPPER_OZ_UM
+
+
+def microstrip_z0(w_mm=None, h_mm=0.20, t_mm=PCB_COPPER_MM, er=PCB_ER):
+    """Characteristic impedance of a microstrip, IPC-2141 / Hammerstad.
+
+    Implemented here rather than imported: KiCadRoutingTools carries the same
+    formulas in `impedance.py`, and importing them would put a third-party
+    dependency in the one loop that has to run anywhere KiCad runs.
+
+    **The two do not agree exactly and the first draft of this docstring said
+    they agreed "to a fraction of an ohm".** They do not: at the design point
+    -- 0.20 mm track, 0.20 mm height -- this returns 65.8 ohm and the tool
+    returns 69.0, which is 4.7 %. Both are IPC-2141 with different thickness
+    corrections, and neither is the wrong answer to its own question. What it
+    costs downstream is 5 % on Cm and **0.4 dB** on the coupling figure, which
+    is checked rather than assumed because a claim about two implementations
+    agreeing is exactly the sort this repo has recorded going unread.
+    """
+    w = rules.TRACK_MM if w_mm is None else w_mm
+    # Thickness correction: a trace of finite copper behaves as a slightly
+    # wider one.
+    w_eff = w + (t_mm / math.pi) * (1 + math.log(2 * h_mm / t_mm))
+    u = w_eff / h_mm
+    er_eff = (er + 1) / 2 + (er - 1) / 2 / math.sqrt(1 + 12 / u)
+    if u <= 1.0:
+        z_air = 60 * math.log(8 / u + u / 4)
+    else:
+        z_air = 120 * math.pi / (u + 1.393 + 0.667 * math.log(u + 1.444))
+    return z_air / math.sqrt(er_eff), er_eff
+
+
+def trace_mutual_capacitance(pitch_mm, h_mm=0.20, w_mm=None):
+    """Mutual capacitance between two parallel traces, farads per millimetre.
+
+        k    = 0.48 exp(-0.96 s / h)         edge-coupled microstrip coupling
+        Cm   = Cself k / (2 (1 - k))         from the odd-mode relation
+        Cself= sqrt(er_eff) / (c0 Z0)
+
+    `k` is the industry approximation for edge-coupled microstrip -- the same
+    one KiCadRoutingTools' `differential_microstrip_z0()` uses -- with `s` the
+    edge-to-edge gap. The step to Cm is the standard odd/even mode identity:
+    the odd mode charges the mutual capacitance and the even mode does not, so
+    Z_odd/Z0 = Cself/(Cself + 2 Cm) = 1 - k.
+
+    **This is an approximation and not a field solve**, which is stated because
+    the margin below is wide enough that it does not have to be better. If it
+    were ever close, the answer would be a solver rather than a tighter
+    constant.
+    """
+    w = rules.TRACK_MM if w_mm is None else w_mm
+    s = pitch_mm - w
+    if s <= 0:
+        raise ValueError(f"pitch {pitch_mm} mm is not wider than the {w} mm track")
+    z0, er_eff = microstrip_z0(w, h_mm)
+    c_self = math.sqrt(er_eff) / (LIGHT_M_PER_S * z0)      # F/m
+    k = 0.48 * math.exp(-0.96 * s / h_mm)
+    return c_self * k / (2 * (1 - k)) * 1e-3               # F/mm
+
+
+def trace_mutual_inductance(pitch_mm, h_mm=0.20, w_mm=None):
+    """Mutual inductance between the same pair, henries per millimetre.
+
+    The other half of the mechanism, and it is computed rather than dismissed:
+    for a *low impedance* victim -- which every audio node on this board is --
+    inductive coupling is usually the term that bites, because a series voltage
+    source does not care that the node is stiff. Here it does not, and the
+    reason is the aggressor current: 123 uA into a 10k front end, not amps.
+    """
+    w = rules.TRACK_MM if w_mm is None else w_mm
+    s = pitch_mm - w
+    z0, er_eff = microstrip_z0(w, h_mm)
+    l_self = z0 * math.sqrt(er_eff) / LIGHT_M_PER_S * 1e-3  # H/mm
+    k = 0.48 * math.exp(-0.96 * s / h_mm)
+    return k * l_self
+
+
+def cv_node_impedance(hz):
+    """CVX{n}, the one per-channel node with no active pin on it, ohms.
+
+    Every other per-channel net is a driven op-amp output or a virtual earth,
+    both of which are ohms. This is the MFB filter's internal node -- R1, R2,
+    R3 and R_OFF meeting at C1 -- so it is the only candidate for the high
+    impedance that would make trace coupling load-bearing.
+
+    It is not one, and the reason is C1. The resistive part is 4.9 kohm, but
+    the coupled voltage goes as omega Z, and C1 shunts the node at exactly the
+    rate omega rises: above about 5 kHz the product is flat at 1/C1 and the
+    node behaves as 142 ohm at 20 kHz. A high-impedance node that stops being
+    one precisely where it would matter.
+    """
+    resistive = 1.0 / sum(1.0 / r for r in (CV_R1_OHMS, CV_R2_OHMS,
+                                            CV_R3_OHMS, CV_ROFF_OHMS))
+    return abs(1.0 / complex(1.0 / resistive, 2 * math.pi * hz * CV_C1_FARADS))
+
+
 def power_track_verdict():
     """Does POWER_TRACK_MM buy anything the requirement can see?
 
