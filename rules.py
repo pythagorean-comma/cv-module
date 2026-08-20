@@ -133,11 +133,27 @@ COPPER_OZ = 1
 # is hand-laid, and the fabricator has been asked.
 TRACK_MM = 0.20
 
-# The rails and both grounds, per the Power net class. Not used by the router,
-# which draws every signal at TRACK_MM; this is what a rail is widened to when
-# somebody widens one, and it is declared here so gen_project.py and the board
-# cannot disagree about it.
-POWER_TRACK_MM = 0.5
+# **POWER_TRACK_MM was here at 0.5 mm for the whole life of the board and it
+# is gone, because it was the one constant in this file with no argument
+# beside it.** What it had was a procedure -- "this is what a rail is widened
+# to when somebody widens one" -- and nobody ever did, so no copper was ever
+# 0.5 mm wide. verify.check_rules() asserts the board carries exactly one
+# track width, which means the only instrument that mentioned the constant
+# asserted its *absence*: a declaration nothing is obliged to use cannot be
+# wrong, the same way zone P and RAILS["V3V3"] could not be wrong.
+#
+# It was forced by a router that reads net classes and would have drawn it.
+# design.power_track_verdict() is the derivation that had never been done, and
+# every mechanism a wider rail could address is closed by a wide margin:
+#
+#   heating          0.58 C of rise at VA+'s 213 mA on 0.20 mm
+#   static drop      42 mV worst case, on V5, a 5 V rail
+#   crosstalk        -148.8 dB against a -54 dB requirement, and -88.8 dB
+#                    even if the amplifier had NO power-supply rejection
+#
+# Widening to 0.5 mm buys 7.96 dB on a figure with 94.8 dB of margin. The
+# Power net class survives the constant, because its other field is a colour
+# and a hand-routed board is worth having the rails red in the editor.
 
 # 0.20 mm, with the track, and the pair is chosen together -- see TRACK_MM,
 # where the corridor arithmetic is `track + 2 x clearance` and so cannot be

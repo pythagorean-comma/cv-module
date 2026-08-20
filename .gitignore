@@ -179,3 +179,18 @@ out/cv-module.kicad_prl
 # it names a host and a process, and a stale one makes KiCad refuse a file
 # that nothing is holding.
 out/~*.lck
+
+# krt.py's routing candidate and its working directory. The candidate is a
+# 3.2 MB board KiCadRoutingTools wrote and nobody has accepted yet -- the whole
+# point of it not being out/cv-module.kicad_pcb is that a run which produced a
+# worse board costs nothing. `--commit` is what promotes one, and what is
+# promoted is tracked as the board. The work directory holds the injected
+# keep-out geometry and a net-class-flattened project, neither of which is a
+# design artefact.
+out/cv-module-krt.kicad_pcb
+out/krt-work/
+# and the siblings kicad-cli leaves beside a board it refills: the DRC report
+# it is told to write, and the local UI state it writes uninvited.
+out/*.drc.json
+out/cv-module-krt.kicad_pro
+out/cv-module-krt.kicad_prl

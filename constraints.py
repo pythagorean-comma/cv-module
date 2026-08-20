@@ -62,7 +62,11 @@ AGGRESSORS = (
 # What the requirement is, and where it comes from: 00-current-state.md, "For
 # 40 dB of musical gate depth: per-channel depth >=47 dB, per-pair isolation
 # <=-54 dB. Crosstalk remains the binding constraint."
-ISOLATION_DB = -54.0
+#
+# Moved to design.py, because design.rail_crosstalk() has to compare against it
+# too and this file imports that one. Re-exported under the same name so every
+# existing reference here still reads constraints.ISOLATION_DB.
+ISOLATION_DB = design.ISOLATION_DB
 
 SIGNAL_RMS = socket.MEASURED["channel_peak"].value / math.sqrt(2)
 

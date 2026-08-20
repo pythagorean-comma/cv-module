@@ -1127,12 +1127,16 @@ def check_rules(project, board):
     so that tightening a number here cannot quietly leave the class the board
     can be ordered at.
 
-    What this deliberately does *not* check is that the Power net class's
-    0.5 mm track width appears anywhere in the copper. It does not: route.py
-    draws every net at TRACK_MM, rails included, because a 0.5 mm track needs a
-    0.7 mm grid and that grid does not route this board. POWER_TRACK_MM is what
-    a rail is widened to by hand, and saying so here is the alternative to a
-    check that would pass while meaning nothing.
+    **This paragraph used to excuse a width that no longer exists.** It read:
+    the Power class's 0.5 mm "does not appear anywhere in the copper ...
+    POWER_TRACK_MM is what a rail is widened to by hand". That was a fact about
+    *route.py* -- which could not draw 0.5 mm on its grid -- written where it
+    reads as a fact about the board, which is the shape floorplan.CROSSING_RULE
+    records one artefact along. A router that reads net classes arrived and
+    would have drawn it, and design.power_track_verdict() then priced the
+    widening at 7.96 dB against 94.8 dB of margin. The constant is gone; both
+    classes declare TRACK_MM, and the assertion below that the board carries
+    exactly one width is now a check on something rather than an excuse.
     """
     problems = []
     # **Reported, not raised.** rules.check_fab_class() raises, because every
@@ -1166,7 +1170,7 @@ def check_rules(project, board):
     classes = {row["name"]: row
                for row in document.get("net_settings", {}).get("classes", ())}
     expected = {"Default": (rules.TRACK_MM, rules.CLEARANCE_MM),
-                "Power": (rules.POWER_TRACK_MM, rules.CLEARANCE_MM)}
+                "Power": (rules.TRACK_MM, rules.CLEARANCE_MM)}
     for name, (track, clearance) in sorted(expected.items()):
         row = classes.get(name)
         if row is None:

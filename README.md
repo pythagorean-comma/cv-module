@@ -137,6 +137,21 @@ adjust rather than a ratsnest. It is a starting point and not an output --
 nothing downstream reads it, and the guard refuses the next run whether the
 copper came from the router or from a person.
 
+`krt.py` is a third way copper gets laid and it is not in either pipeline
+either: it routes a scope with KiCadRoutingTools and writes
+`out/cv-module-krt.kicad_pcb`. **Only `--commit` touches the tracked board**,
+and that is the whole of its safety -- it does not go through
+`gen_pcb_guard.refuse_to_discard_routing()` because it never writes the board
+by accident.
+
+**What it discards depends on the scope and the difference is the hazard.**
+`--nets "ENVA*"` rips and re-lays those six and leaves every other net's copper
+untouched, measured per-net. A bare `python3 krt.py` is `--nets "*"` with
+`--force-reroute`: it rips and re-lays **every net on the board**, so committing
+one over hand-routed copper destroys the hand-routing exactly as
+`gen_pcb.py --discard-routing` would. The candidate file is what stands between
+those two, not a guard. See the section above.
+
 The refusal is `gen_pcb_guard.refuse_to_discard_routing()` and it is enforced
 rather than documented, because for one pass it was documented in three files
 while this very code block still had `gen_pcb.py` in the middle of it.
@@ -204,6 +219,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | [`ssi2164-control-port.md`](docs/ssi2164-control-port.md) | the datasheet read first-hand. **Six spec corrections** |
 | [`fabrication-class.md`](docs/fabrication-class.md) | 0.20/0.20 on 1 oz against PCBWay — the decision, and the corridor that took it |
 | [`bench.md`](docs/bench.md) | what is left to measure, in order, and what each reading decides |
+| [`routing-tool.md`](docs/routing-tool.md) | KiCadRoutingTools measured against this board — and the four things it must be told before it lays copper |
 | [`contract/socket.py`](contract/socket.py) | the only place upstream constants are adapted |
 | [`toolchain/`](toolchain/PROVENANCE.md) | KiCad plumbing, copied from the mixer. Ours to modify |
 | `design.py` | values, derivations, the netlist, and the borrowed-symbol patch |
@@ -215,6 +231,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | `placement.py` | the floorplan as coordinates. It does not import KiCad |
 | `gen_pcb.py` | the board, through the deprecated `pcbnew` bindings — **place and pour**, and `--seed-routing` for one pass of the router |
 | `route.py` | the maze router. **Restored, and it runs once**, as a seed somebody then edits |
+| `krt.py` | drives KiCadRoutingTools under this repo's own constraints — layers, fab floor, keep-outs and net scope all generated. Writes a candidate; `--commit` promotes it |
 | `verify.py` / `test_verify.py` | the constraints against KiCad's own netlist, and proof the checks can fail |
 | [`FINDINGS.md`](docs/FINDINGS.md) | things wrong in the mixer repo — noted, never fixed |
 | [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) | everything guessed, with what it costs if wrong |

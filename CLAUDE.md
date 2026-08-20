@@ -431,6 +431,60 @@ accident:**
   0.2 mm of margin invented on a rule that does not exist, and the bypass
   field is packed tightly enough that inventing it costs a stitch.
 
+## There is a second router now, and its defaults would wreck this board
+
+**`krt.py` drives [KiCadRoutingTools](https://github.com/drandyhaas/KiCadRoutingTools)
+and `docs/routing-tool.md` is the record.** It does not change the rule above:
+the netlist is still generated and authoritative, the board is still verified
+by reading it back, and `krt.py` writes a *candidate* that `--commit`
+promotes. What has to survive compaction is why the adapter exists at all.
+
+**Pointed at this board with its own defaults it laid 4106 mm of signal track
+through both ground planes -- and its DRC, its connectivity check and its own
+improvement gate all reported success.** `In1.Cu` and `In2.Cu` are entirely
+MAGND and MDGND; the zone filler flows around a track with clearance, so a
+perforated reference plane is legal copper. **Every instrument agreed while
+the thing the noise argument rests on was cut to pieces**, which is this
+repo's oldest failure arriving from outside it. Nothing here would have said
+so either: `verify.py` reads widths, vias, nets and regions, and until this
+tool existed nothing could put a track on a plane layer, so nothing asked.
+`krt.check_planes_intact()` is the instrument and it is new.
+
+Four things it must be told, each measured, all four generated rather than
+typed:
+
+* **the layers** -- every poured layer excluded, derived from the board's own
+  zones, because a layer becomes a plane by being poured on;
+* **the fabrication floor** -- its default 4-layer floor is **0.0889 mm track
+  and 0.10 mm clearance**, JLCPCB's tiers out of `fab_tiers.py`, and it will
+  escalate down to them to rescue a net: `PIN6` came back as 34 segments of
+  0.0889 mm copper on an audio input. `--fab-overrides` from `rules.py` pins
+  it;
+* **the primary's region** -- a `User.2` keep-out from the same three
+  coordinates `check_isolation_gap()` measures, or it puts 24 pieces of copper
+  in there;
+* **`gen_project.py` afterwards** -- it rewrites the sibling `.kicad_pro` to
+  the floors it used, including `min_hole_clearance` to **0.20**, the exact
+  number `rules.hole_rules()` refused. `verify.py` runs DRC against that file,
+  so the tool can make this repo's verification pass by moving its goalposts.
+  Same failure as `SaveBoard()` flattening the project, same fix.
+
+**And the gate belongs to the plan, not the pass.** A whole board is three
+passes -- secondary with the keep-out, a rescue, then the primary nets -- and
+the first one must be *allowed* to defer what it could not reach, so its
+improvement gate is off and `krt.plan_gate()` refuses at the end instead.
+Two facts behind that: `--max-ripup` is **not** the lever (a run at 12 returned
+the run at the default, and the tool's own rejection message had said it
+would -- a source cited and never read, again); and **a keep-out's cost is not
+paid where it is drawn** -- blocking the supply corner broke `BUF2`, whose
+parts are **113 mm away**. That is `ENV_ADC_CHANNEL`'s finding a second time,
+so the rescue reads the failed net off the run rather than carrying a name.
+
+Measured: 185/185 nets, one track width, one via size, no plane copper, the
+primary's region clear, in **5 min 50 s** -- and 9.8 % less track than the seed
+for **33 % more vias**, which is why the recommendation is scoped re-routing
+rather than replacing the board.
+
 ## The placement is packed, not nudged, and the two functions are the rule
 
 **`placement.check_courtyard_gap()` is at zero.** It was 41 two passes ago and
@@ -1044,6 +1098,9 @@ cv-module/
                          decided it rather than an argument
     controller.md        the last deferred block: the two gates, the part that
                          closed the second, and the five things drawing it found
+    routing-tool.md      KiCadRoutingTools: what it is worth here and the
+                         four things it must be told. Its defaults route on
+                         the ground planes
     bench.md             what is left to measure, in order, and what each
                          reading decides. Three, and only noise_floor can be
                          taken before the board is fabricated
@@ -1075,6 +1132,9 @@ cv-module/
                          bands, and check_courtyard_gap() is at zero
   route.py               the maze router. RESTORED, and it runs once: it is
                          gen_pcb.py --seed-routing and nothing else calls it
+  krt.py                 drives KiCadRoutingTools from rules.py, placement.py
+                         and design.py. Generates every argument; never writes
+                         the board without --commit. docs/routing-tool.md
   verify.py              the constraints, checked against KiCad's own netlist
   test_verify.py         plants faults to prove verify.py's checks can fail
 
@@ -1146,6 +1206,21 @@ then **one** run of `route.py` so that what somebody opens is a legal route to
 adjust rather than a ratsnest. It is a starting point and not an output --
 nothing downstream reads it, and the guard refuses the next run whether the
 copper came from the router or from a person.
+
+`krt.py` is a third way copper gets laid and it is not in either pipeline
+either: it routes a scope with KiCadRoutingTools and writes
+`out/cv-module-krt.kicad_pcb`. **Only `--commit` touches the tracked board**,
+and that is the whole of its safety -- it does not go through
+`gen_pcb_guard.refuse_to_discard_routing()` because it never writes the board
+by accident.
+
+**What it discards depends on the scope and the difference is the hazard.**
+`--nets "ENVA*"` rips and re-lays those six and leaves every other net's copper
+untouched, measured per-net. A bare `python3 krt.py` is `--nets "*"` with
+`--force-reroute`: it rips and re-lays **every net on the board**, so committing
+one over hand-routed copper destroys the hand-routing exactly as
+`gen_pcb.py --discard-routing` would. The candidate file is what stands between
+those two, not a guard. See the section above.
 
 The refusal is `gen_pcb_guard.refuse_to_discard_routing()` and it is enforced
 rather than documented, because for one pass it was documented in three files

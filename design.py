@@ -927,6 +927,161 @@ ENV_PACKAGES_REFS = tuple(f"U{13 + i}" for i in range(ENV_QUADS))
 # refs are quads rather than inferring it from a prefix.
 OPAMP_PACKAGES_REFS = tuple(f"U{1 + i}" for i in range(OPAMP_QUADS))
 
+# The per-pair channel isolation the system has to meet, dB. From
+# 00-current-state.md: "For 40 dB of musical gate depth: per-channel depth
+# >=47 dB, per-pair isolation <=-54 dB. Crosstalk remains the binding
+# constraint."
+#
+# **Declared here rather than in constraints.py, which is where it lived.**
+# rail_crosstalk() below needs it and constraints.py imports this file, so the
+# dependency only runs one way; a second copy of -54 would have been the
+# magic number this repo exists to refuse. constraints.ISOLATION_DB is this
+# name now.
+ISOLATION_DB = -54.0
+
+# ---------------------------------------------------------------------------
+# What the Power net class is for, which nobody had computed
+# ---------------------------------------------------------------------------
+#
+# **rules.POWER_TRACK_MM has been declared since the first pass with no copper
+# behind it and no argument beside it.** Its comment says what it *is* -- "what
+# a rail is widened to when somebody widens one" -- which is a procedure, not a
+# reason, and it is the only constant in rules.py without one. Every other
+# number there walks the values it has been and the board each was right for.
+# That made it invisible in the way zone P and RAILS["V3V3"] were invisible: a
+# declaration nothing is obliged to use cannot be wrong, and verify.check_rules()
+# actively forbade it appearing, so the one instrument that mentions it asserts
+# it is *absent*.
+#
+# It stopped being dormant when a router that reads net classes arrived, because
+# that router draws 0.5 mm on the Power nets without being asked. So the
+# question had to be answered rather than deferred: what is the widening for?
+#
+# The only mechanism a wider rail addresses here is **shared-impedance
+# crosstalk** -- channel A's signal current flowing in a rail resistance that
+# channel B's amplifier also sits on, so that A's programme appears on B's
+# supply and, divided by the amplifier's power-supply rejection, at B's input.
+# Heating is not it: rules.track_current() puts VA+'s 213 mA on 0.20 mm at
+# 0.58 C of rise, and 7 C even if the borrowed IPC constant is three times out.
+# Static drop is not it either: the worst measured end-to-end path is V5's
+# 453 mohm, which is 42 mV on a 5 V rail.
+
+# Copper resistivity at 20 C, ohm-metres. The one physical constant this file
+# needs that is not a component value.
+COPPER_RHO = 1.724e-8
+
+# **The worst shared rail path on the board, measured rather than estimated.**
+# Dijkstra over each rail's real segment-and-via graph in out/cv-module.kicad_pcb,
+# weighting every segment by its own width: VA+ 40 mohm, VA- 364, V5 453,
+# VMOD 282. VA- is the audio rail with the longest path, and 364 mohm of 0.20 mm
+# 1 oz copper is 148 mm of track.
+#
+# Taken as *shared* in full, which is deliberately pessimistic: two channels
+# share only the part of the path between the regulator and wherever their
+# branches part, and this assumes they part at the far end.
+RAIL_SHARED_MM = 148.0
+
+# OPA1644 PSRR, SBOS484D page 7, OFFSET VOLTAGE section: "PSRR, V_OS vs power
+# supply, V_S = +/-2.25 V to +/-18 V -- 0.14 typ, 2 max, uV/V". That is a DC
+# figure and 2 uV/V is -114 dB.
+#
+# **The audio-band figure is a curve and is treated as one.** Figure 4, "CMRR
+# and PSRR vs Frequency (Referred to Input)", page 9, is the only frequency
+# data the document carries; bench.md's own rule is that a number read off a
+# plotted curve is not a reading, so what is used here is a deliberately
+# pessimistic read of it at the top of the audio band rather than the value the
+# curve appears to show. The margin below is large enough that the distinction
+# does not decide anything, and saying so is the point of writing it down.
+OPAMP_PSRR_DC_DB = 114.0               # 2 uV/V, the table's maximum
+OPAMP_PSRR_20K_DB = 60.0               # pessimistic read of Figure 4
+
+# The width that was considered and rejected. Kept so the comparison can be
+# re-run rather than re-argued -- this repo's habit of leaving the losing
+# option in the table -- and no longer in rules.py, because a constant there is
+# one the board is built to.
+POWER_TRACK_CONSIDERED_MM = 0.5
+
+
+def rail_ohms(width_mm, length_mm=RAIL_SHARED_MM, oz=None):
+    """Resistance of a rail track, from geometry and copper resistivity."""
+    oz = rules.COPPER_OZ if oz is None else oz
+    area = width_mm * 1e-3 * oz * rules.COPPER_OZ_UM * 1e-6
+    return COPPER_RHO * (length_mm * 1e-3) / area
+
+
+def rail_crosstalk(width_mm=None, psrr_db=OPAMP_PSRR_20K_DB,
+                   length_mm=RAIL_SHARED_MM):
+    """Channel-to-channel crosstalk through the shared rail, in dB.
+
+        i_sig    = clipping_peak / RIN          the loudest per-channel current
+        v_rail   = i_sig * R(width, length)     A's programme, on the rail
+        v_in     = v_rail / 10^(psrr/20)        as B's amplifier sees it
+        result   = 20 log10(v_in / clipping_peak)
+
+    The current is the peak the system can produce -- socket.clipping_peak()
+    into the mixer's own RIN -- because the loudest channel is the one that
+    modulates the rail, and comparing its rail voltage against the same peak at
+    B is the ratio spec section 5 asks about.
+
+    Pessimistic three times over, deliberately: the whole path is taken as
+    shared, the peak is used where a class-AB output stage draws a rectified
+    half of it from each rail, and the PSRR is the bottom of a curve rather
+    than the table's DC figure. The answer survives all three by a margin that
+    makes the fourth decimal place irrelevant, which is the only way a number
+    read off a plot is allowed to decide anything.
+    """
+    width_mm = rules.TRACK_MM if width_mm is None else width_mm
+    peak = socket.clipping_peak()
+    i_sig = peak / socket.RIN_OHMS
+    v_rail = i_sig * rail_ohms(width_mm, length_mm)
+    v_in = v_rail / (10 ** (psrr_db / 20.0))
+    return {
+        "width_mm": width_mm,
+        "ohms": rail_ohms(width_mm, length_mm),
+        "i_sig_ua": i_sig * 1e6,
+        "v_rail_uv": v_rail * 1e6,
+        "v_in_nv": v_in * 1e9,
+        "crosstalk_db": 20 * math.log10(v_in / peak),
+    }
+
+
+def power_track_verdict():
+    """Does POWER_TRACK_MM buy anything the requirement can see?
+
+    Spec section 5 wants per-channel-pair isolation better than ISOLATION_DB.
+    This compares the shared-rail path at TRACK_MM against the same path at
+    POWER_TRACK_CONSIDERED_MM and prices the widening against that.
+
+    **The row that settles it is `psrr_free_db`, and it is the reason a number
+    read off a plot is allowed to appear above.** Set the amplifier's
+    power-supply rejection to *zero* -- every microvolt on the rail arriving
+    undiminished at the input, which no amplifier is that bad at -- and the
+    shared rail at TRACK_MM still lands 35 dB inside the requirement. So the
+    verdict does not depend on Figure 4, on the DC table row, or on which of
+    them applies at 20 kHz. It depends only on i_sig, the measured copper, and
+    conservation of the ratio, and it would survive the datasheet being wrong.
+
+    That is the same shape as the +Vout budget's "fits at any efficiency above
+    68 %": a bound that cannot be wrong is worth more than an estimate that is
+    probably right.
+    """
+    narrow = rail_crosstalk(rules.TRACK_MM)
+    wide = rail_crosstalk(POWER_TRACK_CONSIDERED_MM)
+    return {
+        "requirement_db": ISOLATION_DB,
+        "narrow": narrow,
+        "wide": wide,
+        # Positive is pass: how far inside the requirement the narrow track is.
+        "margin_db": ISOLATION_DB - narrow["crosstalk_db"],
+        "widening_buys_db": narrow["crosstalk_db"] - wide["crosstalk_db"],
+        "psrr_free_db": rail_crosstalk(rules.TRACK_MM,
+                                       psrr_db=0.0)["crosstalk_db"],
+        "psrr_that_would_fail_db": 20 * math.log10(
+            narrow["v_rail_uv"] * 1e-6
+            / (socket.clipping_peak() * 10 ** (ISOLATION_DB / 20.0))),
+    }
+
+
 # Spec section 1.1's rule, as a number: |f_module - 45 kHz| > 20 kHz because the
 # mixer already runs a 45 kHz charge pump and a VCA is a multiplier, so two
 # supply ripples intermodulate into the audio band. That gives f > 65 kHz; the
