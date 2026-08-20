@@ -54,11 +54,13 @@ does not choose. See [`controller.md`](docs/controller.md).
 | ERC | ✅ **0 errors and 0 warnings** — `ERC_ALLOWED` is empty |
 | the envelope rectifier | ✅ derived, drawn and checked — τ from the transient, not from a target |
 | the fail-safe | ✅ drawn: de-energised **is** bypass, and the pump's own rise time is the power-up interlock |
-| section 5 constraints | ✅ checked mechanically, **89** planted faults caught — and the faults themselves are checked too. Five faults went dead when their targets left the board, and the guard named all five before a case ran |
+| section 5 constraints | ✅ checked mechanically, **92** planted faults caught — and the faults themselves are checked too. Five faults went dead when their targets left the board, and the guard named all five before a case ran |
 | deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
 | board | ✅ **placed, poured, stitched and seeded — 0 unconnected items and 0 DRC violations, and `check_board_is_the_design()` passes for the first time.** 290 footprints on 106.9 × 233.6 mm, 151 ground stitches, **1652 track runs and 595 vias** laid by one run of `route.py` as a *seed*. It is a starting point somebody adjusts in KiCad, not an output the build reproduces: `gen_pcb_guard.refuse_to_discard_routing()` refuses the next run whether the copper came from the router or from a person |
 | the fan-out | ✅ **back with `route.py`, and it laid two escapes on this board.** Was: Four escapes at U17 closed the board it was written for and nothing on this board exercises it: the finest pitch left is a TSSOP's 0.65 mm. This repo's rule about a declaration nothing is obliged to use, applied to code |
+| DC bias | ⚠️ **modelled for the first time, and one capacitor is genuinely short.** TDK's own curves, read off their characterisation pages: `C840` gives **1.65 µF at 12 V against TI's "2.2 µF or higher"** — 25 %, four times its own tolerance, and it wants a higher-CV part in the same 1210 land. `C843` and `C814` are short of nominal and inside their parts' tolerance bands, declared in `CAP_BIAS_ALLOWED` with the figures. The six VCA input blocking caps sit at **zero bias** and do not derate at all. Three Murata lines have no curve here and are reported as unchecked |
+| the BOM | ✅ **re-sourced, and the exercise found three wrong part numbers and one that had been wrong for four passes.** Six obsolete Murata lines became TDK and Yageo parts; `Design.check_order_codes()` now decodes a ceramic's part number and compares its case, dielectric, voltage and capacitance against the value string and the land. It says plainly what it cannot do: whether a code names a *real* part is a question only a distributor answers |
 | the design rules | ✅ one copy in `rules.py`, and DRC is finally enforcing them — including the two hole rules, which were the fifth and sixth "left alone deliberately" and ran at KiCad's defaults while nobody owned them |
 | the placement | ✅ **`check_courtyard_gap()` is at zero**, from 41 two passes ago and 23 at the start of this one. The supply row is packed west to east by `pack_east()` and the seven bands south of the relays are stacked by `clear_south()`, each naming the one pair that sets it. It cost 3.6 mm of board length and 1.7 mm of width |
 | the two `UNSPECIFIED` parts | ✅ **chosen** — Omron G6S-2 DC5 and Diodes DMG1012T. `UNSPECIFIED` is empty and no courtyard is reserved |
@@ -683,8 +685,7 @@ each would have been missed:
 is the one thing here that would work and be wrong: behind `R804` the switcher's
 own pulse train develops across the filter resistor and onto the rail six audio
 channels share. In front of it, the same pole attenuates it 6 dB harder than it
-does the converter's own ripple — 39 mA rms of input ripple becomes **2.4 µV on
-VA+**, 102 dB down as AM. `verify.check_mcu_supply()` holds the wire.
+does the converter's own ripple — 39 mA rms of input ripple becomes **3.86 µV on VA+**, 97 dB down as AM — it was 2.4 µV and 102 dB at the capacitors' *nominal* value, and `effective_farads()` is why it moved. `verify.check_mcu_supply()` holds the wire.
 
 **`SUPPLY_IOUT_MA` is a datasheet reading and was not touched.**
 
@@ -1306,7 +1307,7 @@ Three more things the pass turned up, each recorded where it happened:
 ## Open, in the order worth taking
 
 **Everything a check can decide is decided.** `verify.py` passes end to end,
-`test_verify.py` catches all 89 planted faults, `placement.check_courtyard_gap()`
+`test_verify.py` catches all 92 planted faults, `placement.check_courtyard_gap()`
 is at zero, DRC is at zero and so is the unrouted count. What is open is work
 on a bench and one decision about copper that is a person's to take.
 

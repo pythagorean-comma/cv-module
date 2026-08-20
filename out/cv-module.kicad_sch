@@ -43404,7 +43404,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "100n/50V C0G"
+		(property "Value" "100n/50V X7R"
 			(at 25.4 793.75 0)
 			(effects
 				(font
@@ -58120,7 +58120,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "2u2/50V X7R"
+		(property "Value" "4u7/50V X7R"
 			(at 762 1536.7 0)
 			(effects
 				(font

@@ -67,7 +67,7 @@ filter, that train's own IR drop lands on the rail the six audio channels share.
 In front of it, the pole that exists for the converter's 75 mV<sub>pp</sub>
 attenuates this one too, at twice the frequency and about 6 dB harder.
 `mcu_dcdc_injection()` prices it: 39 mA rms of input ripple over C813's 17 mΩ is
-663 µV on VA_RAW and **2.4 µV on VA+**, which is 102 dB below the signal as AM.
+841 µV on VA_RAW and **3.86 µV on VA+**, which is 97 dB below the signal as AM. *(Was 663 µV and 2.4 µV, computed at the capacitors' nominal capacitance; `design.effective_farads()` now runs the arithmetic at what they are worth at their own DC bias.)*
 `verify.check_mcu_supply()` is what holds the wire, because VIN on VA+ works,
 routes, passes DRC and hums.
 

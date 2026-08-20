@@ -737,8 +737,7 @@ difference between two suffixes is load-bearing.
 pulse train from its supply; behind the rail filter that train's own IR drop is
 on the rail six audio channels share, and in front of it the same pole that
 attenuates the converter's 75 mV<sub>pp</sub> attenuates this too, 6 dB harder
-at twice the frequency. 39 mA rms of input ripple becomes **2.4 µV on VA+**,
-102 dB down as AM. `verify.check_mcu_supply()` holds the wire, because VIN on
+at twice the frequency. 39 mA rms of input ripple becomes **3.86 µV on VA+**, 97 dB down as AM — it was 2.4 µV and 102 dB at the capacitors' *nominal* value, and `effective_farads()` is why it moved. `verify.check_mcu_supply()` holds the wire, because VIN on
 VA+ works, routes, passes DRC and hums.
 
 **The +Vout budget is the tightest number on this board and it is honest.**
@@ -870,6 +869,43 @@ because it centres the spread — 2.66–3.80 mA, 1.66× and 1.58× — rather t
 because 220 fails. `midi_loop()` is the arithmetic and `check_midi()` computes
 the current rather than comparing the value, which is what makes the check hold
 against drift in either direction.
+
+## A part number is a claim about four things, and nothing was reading it
+
+**`Design.check_order_codes()` decodes a ceramic capacitor's MPN** -- case,
+dielectric, voltage, capacitance -- and compares all four to the value string
+and to the land. It exists because a re-sourcing pass produced three wrong
+codes in one afternoon and uncovered a fourth that had stood for four passes:
+
+* `10u/16V X7R` carried an **0805** code on a **1210** land, in **X5R** against
+  a value string saying X7R. Eight parts, wrong twice over;
+* two substitutes were offered a decimal exponent out -- `562` for `563` is a
+  factor of ten, `561` is a factor of a hundred. **The third digit of an EIA
+  code is an exponent**, so a one-character slip is always an order of
+  magnitude and nothing about the number looks wrong.
+
+**Two limits are written into the check rather than left to be discovered.**
+It parses only the vendor schemes it has been taught -- Murata GRM/GCM, TDK C
+and CGA, Yageo CC -- and an unparsed code is *reported and counted*, never
+passed. And it cannot tell whether a part **exists**: the fourth wrong code
+this pass produced was invented by pattern from a real one, decodes correctly
+in every field, and TDK does not make it. That is a distributor's question and
+the check says so.
+
+**The general form, and it is the one this repo keeps arriving at from new
+directions: a fact encoded in a string that nothing reads.** `ORDER_CODES`
+had a rule about *links* -- "a URL that has been fetched and seen to resolve"
+-- and none about the part number the link points at. `check_orderable()`
+asked whether a value *has* a code and never whether the code is that part.
+
+**And its sibling is still open: a choice with no argument recorded.**
+`VREF_NR_CAP` was C0G for four passes with no reason written anywhere, which
+cost a specialty part at ten times the price of the identical X7R thirty-five
+BOM rows above it -- on the one line that then could not be sourced. The
+datasheet names no dielectric at that pin and offers 100 uF as an alternative,
+which cannot be C0G. `C_FILM_FP` is the same shape and is still bare. This
+repo has instruments for a value nothing uses and none for a value used
+everywhere with no reason beside it.
 
 ## Toolchain
 

@@ -1101,7 +1101,62 @@ def main():
         finally:
             design.INLET_CHOKE_UH = original
 
+    # **The order codes, and the three faults these plant all happened.** A
+    # capacitance a decimal exponent out, and a case code against the wrong
+    # land -- see design.Design.check_order_codes(), which also records the
+    # one it would *not* have caught.
+    def _capacitance_off_by_ten():
+        original = design.DESIGN.parts["C141"].mpn
+        design.DESIGN.parts["C141"].mpn = "GRM2195C1H562JA01D"
+        try:
+            design.DESIGN.check_order_codes()
+        finally:
+            design.DESIGN.parts["C141"].mpn = original
+
+    def _case_code_against_the_land():
+        original = design.DESIGN.parts["C101"].mpn
+        design.DESIGN.parts["C101"].mpn = "CGA4J2X7R1C106K125AE"
+        try:
+            design.DESIGN.check_order_codes()
+        finally:
+            design.DESIGN.parts["C101"].mpn = original
+
+    # **The bias check, and the first version of this fault was the mistake
+    # this file already records one case earlier.** It mutated a curve and
+    # asserted "some capacitor is now short" -- and C840 *is* short, today,
+    # for real, so the assertion held whether or not the mutation did
+    # anything. A mutation planted into a check that was already failing is a
+    # pass for the wrong reason, which is exactly what the track-width case
+    # above had to be rewritten for.
+    #
+    # So the discriminator is a **named** ref that is passing beforehand:
+    # C802 has 9.93 uF against a 0.1 uF minimum and is nowhere near the edge.
+    # Collapse its curve and C802 itself has to appear.
+    def _biased_ceramic_falls_short():
+        part = design.DESIGN.parts["C802"].mpn
+        original = design.CAP_DC_BIAS[part]
+        before = [p for p in design.check_capacitor_bias()[0]
+                  if p.startswith("C802")]
+        design.CAP_DC_BIAS[part] = tuple((v, c / 1000.0) for v, c in original)
+        try:
+            if before:
+                raise AssertionError("C802 was already short -- this fault "
+                                     "cannot discriminate")
+            after = [p for p in design.check_capacitor_bias()[0]
+                     if p.startswith("C802")]
+            if not after:
+                raise AssertionError("C802 is short and was not reported")
+            raise SystemExit("caught")
+        finally:
+            design.CAP_DC_BIAS[part] = original
+
     for label, provoke in (
+            ("a biased ceramic is short of its stated minimum",
+             _biased_ceramic_falls_short),
+            ("an order code is a decimal exponent out",
+             _capacitance_off_by_ten),
+            ("an order code's case is not its land",
+             _case_code_against_the_land),
             ("a retired assumption names nothing", _settled_names_nothing),
             ("the choke comes off and a retirement expires", _choke_comes_off),
             ("contract: the mixer's root is on sys.path", _sys_path_polluted),

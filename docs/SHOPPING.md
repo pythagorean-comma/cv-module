@@ -21,20 +21,19 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 
 | Ref | Value | MPN | Fitted | Order | Unit | Basis | Mouser UK |
 |---|---|---|---|---|---|---|---|
-| C101–C814 | 10u/16V X7R | `GRM21BR61C106KE15L` | 8 | 12 | GBP 0.08–0.25 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR61C106KE15L) |
+| C101–C814 | 10u/16V X7R | `CGA6M3X7R1C106K200AB` | 8 | 12 | GBP 0.08–0.25 | band | [search](https://www.mouser.co.uk/c/?q=CGA6M3X7R1C106K200AB) |
 | C102–C652 | 1200p/50V C0G | `GRM2165C1H122JA01D` | 12 | 16 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H122JA01D) |
 | C121–C621 | 100p/50V C0G | `GRM2165C1H101JA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H101JA01D) |
-| C131–C631 | 150n/50V X7R | `GRM216R71H154KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H154KA01D) |
-| C141–C641 | 56n/50V X7R | `GRM216R71H563KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H563KA01D) |
+| C131–C631 | 150n/50V X7R | `CGA4J2X7R1H154K125AA` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=CGA4J2X7R1H154K125AA) |
+| C141–C641 | 56n/50V X7R | `CC0805KRX7R9BB563` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=CC0805KRX7R9BB563) |
 | C142–C642 | 22n/50V X7R | `GRM216R71H223KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H223KA01D) |
 | C151–C810 | 470n/50V X7R | `GRM21BR71H474KA88L` | 7 | 11 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71H474KA88L) |
-| C701–C842 | 100n/50V X7R | `GRM216R71H104KA01D` | 35 | 39 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H104KA01D) |
-| C801 | 100n/50V C0G | `GRM2195C1H104JA01D` | 1 | 5 | GBP 0.15–0.45 | band | [search](https://www.mouser.co.uk/c/?q=GRM2195C1H104JA01D) |
+| C701–C842 | 100n/50V X7R | `CGA4J2X7R1H104K125AE` | 36 | 40 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=CGA4J2X7R1H104K125AE) |
 | C805 | 2n2/50V C0G | `GRM2165C1H222JA01D` | 1 | 5 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H222JA01D) |
 | C806–C816 | 1u/16V X7R | `GRM21BR71C105KA01L` | 3 | 7 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71C105KA01L) |
-| C807–C813 | 10u/50V X7R | `GRM32ER71H106KA12L` | 5 | 9 | GBP 0.30–0.80 | band | [search](https://www.mouser.co.uk/c/?q=GRM32ER71H106KA12L) |
-| C840 | 2u2/50V X7R | `GRM21BR71H225KA73L` | 1 | 5 | GBP 0.05–0.20 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71H225KA73L) |
-| C843 | 22u/16V X5R | `GRM21BR61C226ME44L` | 1 | 5 | GBP 0.08–0.30 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR61C226ME44L) |
+| C807–C813 | 10u/50V X7R | `CNA6P1X7R1H106K250AE` | 5 | 9 | GBP 0.30–0.80 | band | [search](https://www.mouser.co.uk/c/?q=CNA6P1X7R1H106K250AE) |
+| C840 | 4u7/50V X7R | `CGA6P3X7R1H475K250AB` | 1 | 5 | GBP 0.08–0.30 | band | [search](https://www.mouser.co.uk/c/?q=CGA6P3X7R1H475K250AB) |
+| C843 | 22u/16V X5R | `C3225X5R1C226M250AA` | 1 | 5 | GBP 0.08–0.30 | band | [search](https://www.mouser.co.uk/c/?q=C3225X5R1C226M250AA) |
 | D151–D805 | 1N4148W | `1N4148WS-7-F` | 13 | 14 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=1N4148WS-7-F) |
 | D801–D833 | BAT54 | `BAT54-7-F` | 5 | 6 | GBP 0.05–0.15 | band | [search](https://www.mouser.co.uk/c/?q=BAT54-7-F) |
 | D803, D806 | PMEG2010AEH | `PMEG2010AEH,115` | 2 | 3 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=PMEG2010AEH,115) |
@@ -88,7 +87,7 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 
 ## Totals, per currency, fitted quantities
 
-- **GBP 60.78 – 97.24**
+- **GBP 60.67 – 96.94**
 - **USD 29.76 – 51.60**
 
 Kept per currency rather than converted: two lines were priced in dollars because that is the currency the figures were found in, and folding them into a sterling total at a rate nobody looked up would turn two honest figures into one invented one.
@@ -111,15 +110,13 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **C701–C842** — 0805 X7R
 
-**C801** — 0805 C0G at 100 nF is a large part for the class and priced accordingly. It is the reference's NR capacitor, which is worth C0G.
-
 **C805** — 0805 C0G
 
 **C806–C816** — 0805 X7R
 
 **C807–C813** — 1210 X7R at 50 V, which is 4x derating on the +/-12 V rails and 2.5x on the 20 V primary. A 25 V part would be cheaper and would have lost most of its capacitance at the top of the inlet range -- the same argument the mixer makes at its own VIN_P.
 
-**C840** — 1210 X7R at 50 V
+**C840** — 1210 X7R at 50 V, 2.5 mm body. It was a 2u2 and the DC bias curve is why -- see design.MCU_DCDC_CIN
 
 **C843** — 1210 X5R
 

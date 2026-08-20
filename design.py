@@ -57,6 +57,7 @@ the commit named in contract/PINNED.md. Nothing upstream is retyped.
 """
 
 import math
+import re
 
 import contract.socket as socket
 # The fabrication rules, because whether a package can be *routed* is a design
@@ -3223,8 +3224,22 @@ MCU_DCDC_L_TABLE_HENRIES = 18e-6
 # the device pins." Both are fitted; the 2.2 uF is at 50 V because the same
 # section asks for "a voltage rating of twice the maximum input voltage" and
 # the input is twelve.
-MCU_DCDC_CIN = "2u2/50V X7R"
-MCU_DCDC_CIN_FARADS = 2.2e-6
+# **4.7 uF and not the 2.2 the datasheet asks for, because 2.2 nominal is not
+# 2.2 in circuit.** TDK's own curve for the 2.2 uF part in this land gives
+# **1.65 uF at the 12 V this node sits at** -- 25 % short of section 9.2.2.6's
+# "2.2 uF or higher", and four times the part's own tolerance, so it cannot be
+# read as a tolerance question. The 4.7 uF sibling holds **4.23 uF at 12 V**,
+# which is 1.9x the requirement.
+#
+# Same 1210 land, so this costs no copper: only the body goes from 2.0 to
+# 2.5 mm tall, which placement.SIZE does not model because a courtyard is a
+# footprint and not a height.
+#
+# **The nominal is what the BOM buys and the effective is what the converter
+# gets, and this repo had no way to say the second until now.** See
+# CAP_DC_BIAS and check_capacitor_bias().
+MCU_DCDC_CIN = "4u7/50V X7R"
+MCU_DCDC_CIN_FARADS = 4.7e-6
 MCU_DCDC_CIN_HF = "100n/50V X7R"
 # Section 9.2.2.7: "The recommended bootstrap capacitor is 0.1 uF and rated at
 # 16 V or higher ... high-quality ceramic type with X7R or X5R grade".
@@ -3488,11 +3503,18 @@ def mcu_dcdc_injection(f_khz=None):
     supply = mcu_supply()
     duty = V3V3_VOLTS / SUPPLY_VOUT
     i_rms = supply["load_ma"] * 1e-3 * math.sqrt(duty * (1 - duty))
-    z_bulk = 1.0 / (2 * math.pi * f_hz * PRIMARY_BULK_C_FARADS)
+    # **C813 by name, and at what it is worth at 12 V.** This read
+    # PRIMARY_BULK_C_FARADS, which is C807 and C808 -- the *primary* bulk, on
+    # IGND, on the far side of an isolation barrier from this node. The two
+    # happened to be the same value string, so one constant stood for two
+    # different parts on two different nets at two different biases, and the
+    # expression was right for as long as that coincidence held. That is
+    # barrier_return()'s `choke_r` again, and inlet_budget()'s after it.
+    z_bulk = 1.0 / (2 * math.pi * f_hz * effective_farads("C813"))
     on_raw = i_rms * z_bulk
     # The same pole as rail_filter(), evaluated here rather than there because
     # the frequency is this part's and not the TMR's.
-    corner = 1.0 / (2 * math.pi * RAIL_FILTER_R_OHMS * RAIL_FILTER_C_FARADS)
+    corner = 1.0 / (2 * math.pi * RAIL_FILTER_R_OHMS * effective_farads("C811"))
     attenuation = math.sqrt(1 + (f_hz / corner) ** 2)
     residual = on_raw / attenuation
     return {
@@ -4280,7 +4302,34 @@ def servo_residual():
 VREF = 2.5
 VREF_PART = "MAX6126A25"
 VREF_NOISE = 45e-9                  # V/rtHz at 1 kHz, with C_NR fitted
-VREF_NR_CAP = "100n/50V C0G"
+# **X7R, and the C0G it replaces had no argument anywhere.** The datasheet
+# was read again for this: "Noise Reduction. Connect a 0.1uF capacitor to
+# improve wideband noise", "add a 0.1uF capacitor to NR", "A noise reduction
+# capacitor of 0.1uF increases the turn-on time to 20ms" -- and for the output
+# pin, "The MAX6126 requires an output capacitor between 0.1uF and 10uF". **No
+# dielectric is named at either pin.**
+#
+# What settles it is the datasheet's own alternative: it offers **100 uF** at
+# NR, to take the 0.1-10 Hz noise from 0.9 to 0.6 uVpp. There is no 100 uF
+# C0G; at that value the part is an electrolytic or a very-high-CV X5R. A pin
+# specified to work with either of those is not sensitive to X7R's voltage
+# coefficient, and the leakage argument goes the same way, since an
+# electrolytic leaks orders of magnitude more than any ceramic.
+#
+# The two remaining objections fail on their own terms. Voltage coefficient:
+# the pin sits at a static bias, so less effective capacitance means slightly
+# less noise reduction and a slightly *faster* turn-on -- and faster is free,
+# because VREF_TURN_ON_S is a sequencing constraint the fail-safe waits out.
+# Dielectric absorption: matters for settling after a disturbance, and the
+# 20 ms turn-on below already dominates it.
+#
+# **The finding is that nothing here can catch a choice made without an
+# argument.** This repo has instruments for a value nothing uses -- V3V3,
+# ENV_OPAMP_EN -- and none for a value used everywhere with no reason
+# recorded. It cost a specialty part at ten times the price of the identical
+# X7R thirty-five rows above it in the BOM, on the one line that then could
+# not be sourced. C_FILM_FP is the same shape and is still bare.
+VREF_NR_CAP = "100n/50V X7R"
 VREF_MAX_FOR_AHC = 3.3 / 0.7
 
 # **The NR capacitor costs 20 ms of turn-on time, and that lands on the
@@ -5560,7 +5609,11 @@ def rail_filter(r_ohms=None, c_farads=None, f_khz=None):
     be 0.47 V and would step by 0.2 V every time the module went into circuit.
     """
     r_ohms = r_ohms or RAIL_FILTER_R_OHMS
-    c_farads = c_farads or RAIL_FILTER_C_FARADS
+    # **The effective capacitance and not the nominal**, which is 7.89 uF of
+    # C811's 10 at the 12 V it sits at. The declared constant stays what the
+    # BOM buys; this is what the pole is made of. Passable, so a candidate
+    # part can still be asked about.
+    c_farads = c_farads or effective_farads("C811")
     # The bottom of the stated band, because that is the least attenuated.
     f_hz = (f_khz or SUPPLY_KHZ[0]) * 1e3
     corner = 1.0 / (2 * math.pi * r_ohms * c_farads)
@@ -5913,7 +5966,11 @@ def input_filter(lead_nh=None):
     """
     lead_nh = lead_nh or MEASURED["inlet_loop_uh"].value * 1e3 / 3.0
     omega = 2 * math.pi * SUPPLY_KHZ_TYP * 1e3
-    z_local = 1.0 / (omega * 2 * PRIMARY_BULK_C_FARADS)
+    # C807 and C808 in parallel, each at the 19.65 V they actually sit at --
+    # where this used the nominal 10 uF and got 44 % more capacitance than the
+    # pair delivers.
+    z_local = 1.0 / (omega * (effective_farads("C807")
+                              + effective_farads("C808")))
     z_lead = omega * lead_nh * 1e-9
     share = z_local / (z_local + z_lead)
     return {
@@ -6643,6 +6700,30 @@ def patch_symbol(lib_id, definition):
 
 R_FP = "Resistor_SMD:R_0805_2012Metric"
 C_FP = "Capacitor_SMD:C_0805_2012Metric"
+# **The 1210 land, and it had no comment at all until the bias curves were
+# read.** The name is a fossil: there is not one film capacitor on this board
+# and there never was in the drawn design -- all fifteen parts on this land
+# are ceramic. The most likely history is that it was chosen when they were
+# meant to be film, which is physically much larger, and neither the land nor
+# the name moved when they became ceramic.
+#
+# **It is right, and now for a reason.** TDK's own characterisation says what
+# the case buys: at 12 V a 2.2 uF 50 V X7R in this land holds 1.65 uF, and at
+# 5 V a 22 uF 16 V X5R holds 20.4. An 0805 of either would be far worse --
+# volumetric efficiency is what derating is a function of, and the case is
+# the volume. See CAP_DC_BIAS and check_capacitor_bias().
+#
+# **Six of the fifteen do not need it and keep it anyway**, which is worth
+# saying rather than leaving as an inconsistency somebody re-opens. C101-C601
+# are the VCA input blocking caps and sit at **zero DC bias** -- both ends are
+# at 0 V -- so the case buys them nothing measurable. They stay 1210 because
+# the land is placed and routed around, the part is already bought for the
+# other nine, and a second capacitor land would be a second entry in
+# placement.SIZE for no electrical gain.
+#
+# That is one constant serving two arguments, stated rather than split. The
+# distinction matters if a later pass wants the board area back: **the six are
+# free to shrink and the nine are not.**
 C_FILM_FP = "Capacitor_SMD:C_1210_3225Metric"
 SOIC8_FP = "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
 SOIC14_FP = "Package_SO:SOIC-14_3.9x8.7mm_P1.27mm"
@@ -6770,11 +6851,25 @@ ORDER_CODES = {
     "100p/50V C0G":   "GRM2165C1H101JA01D",
     "1200p/50V C0G":  "GRM2165C1H122JA01D",
     "22n/50V X7R":    "GRM216R71H223KA01D",
-    "56n/50V X7R":    "GRM216R71H563KA01D",
-    "150n/50V X7R":   "GRM216R71H154KA01D",
-    "100n/50V X7R":   "GRM216R71H104KA01D",
-    "100n/50V C0G":   "GRM2195C1H104JA01D",
-    "10u/16V X7R":    "GRM21BR61C106KE15L",
+    # **Six lines were re-sourced and none of the values moved.** The Murata
+    # parts below were obsolete or unbuyable; what replaced them is a TDK CGA
+    # or C part at the same value, and one Yageo. Checked digit by digit
+    # against distributor listings by check_order_codes(), which exists
+    # because this exchange produced three wrong ones -- see its docstring.
+    "56n/50V X7R":    "CC0805KRX7R9BB563",
+    "150n/50V X7R":   "CGA4J2X7R1H154K125AA",
+    "100n/50V X7R":   "CGA4J2X7R1H104K125AE",
+    # ~~"100n/50V C0G": "GRM2195C1H104JA01D"~~ -- **gone, and the value string
+    # went with it.** C801 is the MAX6126's noise-reduction capacitor and it
+    # was specified C0G with no argument recorded anywhere; the datasheet asks
+    # for "0.1uF" and names no dielectric, at NR or at OUTF. See VREF_NR_CAP.
+    # C801 is now the same part as the other thirty-five 100 nF, which takes
+    # a BOM line out and takes the board's most expensive 100 nF with it.
+    # **1210 now, and the old part was 0805 against a 1210 land.** GRM21 is
+    # Murata's 0805 code; the land has been C_1210_3225Metric all along, and
+    # nothing compared them. The old code was also X5R while this value string
+    # says X7R, so that one line disagreed with itself twice over.
+    "10u/16V X7R":    "CGA6M3X7R1C106K200AB",
     OPAMP:            "OPA1644AIDR",
     PUMP_C:           "GRM2165C1H222JA01D",
     PUMP_HOLD_C:      "GRM21BR71C105KA01L",
@@ -6808,8 +6903,10 @@ ORDER_CODES = {
     "1k 1%":          "RC0805FR-071KL",
     "15p/50V C0G":    "GRM2165C1H150JA01D",
     "1u/16V X7R":     "GRM21BR71C105KA01L",
-    "2u2/50V X7R":    "GRM21BR71H225KA73L",
-    "22u/16V X5R":    "GRM21BR61C226ME44L",
+    # Both 1210 now, and both were 0805 codes on 1210 lands for the same
+    # unchecked reason as the 10 uF above.
+    "4u7/50V X7R":    "CGA6P3X7R1H475K250AB",
+    "22u/16V X5R":    "C3225X5R1C226M250AA",
     "470n/50V X7R":   "GRM21BR71H474KA88L",
     VCA:              "SSI2164S-RT",
     LOGIC:            "SN74AHC541DWR",
@@ -6835,7 +6932,19 @@ ORDER_CODES = {
     # T here is *not* a grade: for the SOT-23 and SOT-89 packages the MCP1700
     # is only sold on tape, so the T is part of the code rather than a choice.
     V3V3_PART:        V3V3_MPN,
-    "10u/50V X7R":    "GRM32ER71H106KA12L",
+    # **CNA6P1X7R1H106K250AE, and the Murata it replaces is not "gone" --
+    # it is uncharacterised, which is a different and more useful statement.**
+    # GRM32ER71H106KA12L is still listed by distributors, so it exists as
+    # stock; what Murata's own SimSurfing says of it is "The specified
+    # partnumber not exist", while the 63 V sibling returns 7 kB of data.
+    # A part the manufacturer no longer characterises is a part with no bias
+    # curve, and on this board five of them sit at 12 to 20 V.
+    #
+    # The TDK part keeps the 50 V rating, so this value string does not move
+    # and nobody can substitute a 50 V part back in against a 63 V line. It
+    # is AEC-Q200 with soft termination, 3.20 x 2.50 x 2.50 mm on the same
+    # 1210 land -- 0.5 mm taller, which is a body and not a footprint.
+    "10u/50V X7R":    "CNA6P1X7R1H106K250AE",
     # SCHURTER print the rating and the packaging in one code: 3403.0168 is
     # the 1.6 A UMT 250 and the .11 is a hundred in a bag rather than two
     # thousand on a reel. Off the Variants table on page 4 of the datasheet,
@@ -7091,6 +7200,7 @@ class Design:
         self.check_rails_are_drawn()
         self.check_pin_numbers()
         self.check_orderable()
+        self.check_order_codes()
         self.check_controller_functions()
         check_settled()
 
@@ -7246,6 +7356,89 @@ class Design:
                 out.setdefault(ref, []).append(pin.strip("<>"))
         return out
 
+    def check_order_codes(self):
+        """A capacitor's order code says what its value string and land say.
+
+        **Three of these were wrong at once and none of them was catchable.**
+        A ceramic capacitor's part number encodes its case, dielectric,
+        voltage and capacitance, and this repository compared none of them to
+        anything. What it had was check_orderable(), which asks whether a
+        value *has* a code and never whether the code is that part. So:
+
+          * `10u/16V X7R` carried GRM21BR61C106KE15L for four passes -- an
+            **0805** part (Murata's GRM21) on a **1210** land, in **X5R**
+            against a value string saying X7R. Wrong twice, on eight parts;
+          * a re-sourcing pass offered GRM2195C1H**562**JA01D for a 56 nF
+            line. `562` is 5.6 nF. The third digit of an EIA code is a decimal
+            exponent, so a one-character slip is an order of magnitude and
+            nothing about the number looks wrong;
+          * and this file's own author proposed CGA4J2X7R1H563K125AE, which is
+            not a part TDK makes. It was constructed by pattern from a part
+            number that does exist, which is the ORDER_CODES rule -- "a URL
+            that has been fetched and seen to resolve" -- broken on the thing
+            the URL points at rather than on the URL.
+
+        **The third one is the one this check would not have caught, and
+        saying so is the point.** It decodes as 56 nF, 0805, X7R, 50 V --
+        exactly what the line it was offered for wants. Put it on that line
+        and every field agrees and the part still does not exist. This
+        compares a code against what it is ordered *for*; **whether the code
+        names a real part is a question only a distributor can answer**, and
+        nothing here can or should pretend otherwise. It caught that MPN in
+        testing only because it was planted on the wrong line.
+
+        **What it does not do is the limit worth stating.** It parses the
+        vendor schemes it has been taught -- Murata GRM/GCM, TDK C and CGA,
+        Yageo CC -- and an order code it cannot parse is **reported as
+        unchecked**, not passed. A checker that silently accepts what it does
+        not understand is the failure this whole file catalogues; the count of
+        unparsed codes is returned so it cannot quietly grow.
+
+        Capacitance is compared as a ratio rather than for equality, because
+        a value string says "10u" and a code says 106 and the two are floats
+        by the time they meet.
+        """
+        problems, unparsed = [], []
+        for ref, part in sorted(self.parts.items()):
+            if not part.mpn or not part.footprint or not part.value:
+                continue
+            if "Capacitor_SMD" not in part.footprint:
+                continue
+            decoded = decode_capacitor_code(part.mpn)
+            wanted = capacitor_value_parts(part.value)
+            if decoded is None or wanted is None:
+                # Reported and counted, never assumed. An unparsed code or an
+                # unparsed value string is a line this check did not cover,
+                # and the caller is handed both so the number cannot grow
+                # quietly -- which is the way a partial checker becomes a
+                # checker that passes everything.
+                unparsed.append((ref, part.mpn, part.value))
+                continue
+            land = "1210" if "1210" in part.footprint else (
+                "0805" if "0805" in part.footprint else None)
+            if decoded["case"] != land:
+                problems.append(
+                    f"{ref}: {part.mpn} is a {decoded['case']} part and the "
+                    f"land is {land}")
+            if decoded["dielectric"] != wanted["dielectric"]:
+                problems.append(
+                    f"{ref}: {part.mpn} is {decoded['dielectric']} and "
+                    f"{part.value!r} says {wanted['dielectric']}")
+            if not math.isclose(decoded["farads"], wanted["farads"],
+                                rel_tol=1e-6):
+                problems.append(
+                    f"{ref}: {part.mpn} is {decoded['farads']:g} F and "
+                    f"{part.value!r} is {wanted['farads']:g} F")
+            if decoded["volts"] < wanted["volts"]:
+                problems.append(
+                    f"{ref}: {part.mpn} is rated {decoded['volts']:g} V and "
+                    f"{part.value!r} asks for {wanted['volts']:g}")
+        if problems:
+            raise AssertionError(
+                "order codes disagree with what they are ordered for:\n  "
+                + "\n  ".join(sorted(set(problems))))
+        return unparsed
+
     def check_orderable(self):
         """Every part on the BOM names a buyable part, or is declared unbuyable.
 
@@ -7263,6 +7456,299 @@ class Design:
                 f"no manufacturer's part number for {missing} -- ORDER_CODES "
                 f"is where the answer goes, UNSPECIFIED is where 'not chosen "
                 f"yet' goes")
+
+
+# Vendor code tables for decode_capacitor_code(). Each is read off the
+# manufacturer's own part-numbering guide and each is deliberately partial:
+# only the schemes this board actually buys from are here, and an unknown
+# prefix is *reported* rather than assumed. See Design.check_order_codes().
+#
+# Case codes are the same physical part under three naming conventions --
+# Murata numbers by an internal series index, TDK's C series by metric
+# millimetres, TDK's CGA series by an EIA-ish index. All three appear on this
+# BOM, which is exactly why they had to be written down rather than eyeballed.
+CAP_CASE_CODES = {
+    "murata": {"18": "0603", "21": "0805", "31": "1206", "32": "1210"},
+    "tdk_c": {"1608": "0603", "2012": "0805", "3216": "1206", "3225": "1210"},
+    "tdk_cga": {"3": "0603", "4": "0805", "5": "1206", "6": "1210"},
+    "yageo": {"0603": "0603", "0805": "0805", "1206": "1206", "1210": "1210"},
+}
+# Murata's two-letter dielectric field. C0G is "5C" and not "0G", which is the
+# kind of thing that is obvious once seen and unguessable before.
+CAP_DIELECTRIC_CODES = {"5C": "C0G", "R6": "X5R", "R7": "X7R"}
+# The EIA voltage field, shared by Murata and TDK. Yageo's CC series uses its
+# own two-character code in the same position.
+CAP_VOLTAGE_CODES = {"0J": 6.3, "1A": 10.0, "1C": 16.0, "1E": 25.0,
+                     "1V": 35.0, "1H": 50.0, "2A": 100.0}
+CAP_VOLTAGE_CODES_YAGEO = {"5B": 50.0, "8B": 25.0, "9B": 50.0, "BB": 50.0}
+
+
+def _eia_farads(code):
+    """A three-digit EIA capacitance code, in farads.
+
+    **The third digit is a decimal exponent**, which is why 562 and 563 differ
+    by ten and look identical. Two of the three wrong order codes this check
+    exists for were exactly this.
+    """
+    if len(code) != 3 or not code.isdigit():
+        return None
+    return int(code[:2]) * 10 ** int(code[2]) * 1e-12
+
+
+def decode_capacitor_code(mpn):
+    """(case, dielectric, volts, farads) from a ceramic capacitor's part
+    number, or None if the scheme is not one this file has been taught."""
+    found = re.match(r"^GR[MC](\d\d)\w(\w\w)(\w\w)(\d{3})", mpn)
+    if found:
+        case, dielectric, volts, farads = found.groups()
+        return _decoded(CAP_CASE_CODES["murata"].get(case),
+                        CAP_DIELECTRIC_CODES.get(dielectric),
+                        CAP_VOLTAGE_CODES.get(volts), _eia_farads(farads))
+    # CGA, CNA and CNC share one scheme: series, case index, thickness letter,
+    # a digit, then dielectric/voltage/capacitance. CNA is CNC's AEC-Q200
+    # sibling and CGA is the older automotive line; all three number their
+    # cases the same way, which is why one pattern covers them and why that
+    # is stated rather than left for the next reader to rediscover.
+    found = re.match(r"^C(?:GA|NA|NC)(\d)\w\d(C0G|X5R|X7R)(\w\w)(\d{3})",
+                     mpn)
+    if found:
+        case, dielectric, volts, farads = found.groups()
+        return _decoded(CAP_CASE_CODES["tdk_cga"].get(case), dielectric,
+                        CAP_VOLTAGE_CODES.get(volts), _eia_farads(farads))
+    found = re.match(r"^C(\d{4})(C0G|X5R|X7R)(\w\w)(\d{3})", mpn)
+    if found:
+        case, dielectric, volts, farads = found.groups()
+        return _decoded(CAP_CASE_CODES["tdk_c"].get(case), dielectric,
+                        CAP_VOLTAGE_CODES.get(volts), _eia_farads(farads))
+    found = re.match(r"^CC(\d{4})\w\w(C0G|X5R|X7R)(\w\w)\w(\d{3})", mpn)
+    if found:
+        case, dielectric, volts, farads = found.groups()
+        return _decoded(CAP_CASE_CODES["yageo"].get(case), dielectric,
+                        CAP_VOLTAGE_CODES_YAGEO.get(volts),
+                        _eia_farads(farads))
+    return None
+
+
+def _decoded(case, dielectric, volts, farads):
+    """None if any field failed to decode -- a partial answer is worse than
+    an admitted one, because it would check three fields and pass the
+    fourth silently."""
+    if None in (case, dielectric, volts, farads):
+        return None
+    return {"case": case, "dielectric": dielectric, "volts": volts,
+            "farads": farads}
+
+
+def capacitor_value_parts(value):
+    """(farads, volts, dielectric) from a value string like "10u/16V X7R".
+
+    **Two notations, and the second is the one that broke the first draft.**
+    This repo writes both "100n" and "2u2" -- the second is the European form
+    where the multiplier stands in for the decimal point, so 2u2 is 2.2 uF and
+    2n2 is 2.2 nF. A regex that expects the letter last parses "10u" and
+    silently fails on "2u2", which is four of the capacitors on this board.
+    """
+    found = re.match(r"^(\d+)([pnu])(\d*)/(\d+)V (C0G|X5R|X7R)$", value)
+    if not found:
+        return None
+    whole, multiplier, fraction, volts, dielectric = found.groups()
+    scale = {"p": 1e-12, "n": 1e-9, "u": 1e-6}[multiplier]
+    number = float(f"{whole}.{fraction}") if fraction else float(whole)
+    return {"farads": number * scale, "volts": float(volts),
+            "dielectric": dielectric}
+
+
+# ---------------------------------------------------------------------------
+# What a ceramic is worth at the voltage it actually sits at
+# ---------------------------------------------------------------------------
+#
+# **Nothing in this repository modelled DC bias, and two of these capacitors
+# have a datasheet-stated minimum.** A class 2 ceramic loses capacitance under
+# bias -- it is a property of the ferroelectric dielectric, not a defect -- and
+# every value on this board was declared at zero volts and used as though it
+# were the value in circuit. That is RAIL_FILTER_ESR's shape exactly: not a
+# wrong number, a number computed without the term that dominates.
+#
+# **The curves below are TDK's own characterisation**, read off each part's
+# page at product.tdk.com (the "DC Bias Characteristic" chart, eleven points
+# per part). They are not a rule of thumb and not a per-class approximation:
+# a derating figure is specific to a part number, and a table of typical
+# percentages by case size is precisely the invented constant section 6 of the
+# spec forbids.
+#
+# **Three parts have curves and the Murata lines do not**, which is stated
+# rather than papered over. Murata publishes the same data through SimSurfing,
+# behind a terms-of-use acceptance this project has not clicked through.
+# check_capacitor_bias() reports every capacitor it could not evaluate, so the
+# unchecked set is a number that cannot quietly grow.
+CAP_DC_BIAS = {
+    # The part C840 was, kept because it is what the finding is about: at the
+    # 12 V this node sits at it holds 1.65 uF of its 2.2, and TI asks for
+    # "2.2 uF or higher".
+    "CGA6M3X7R1H225K200AB": (
+        (0, 2.2e-6), (1, 2.17481e-6), (2, 2.15399e-6), (4, 2.09604e-6),
+        (6.3, 1.99382e-6), (10, 1.77496e-6), (16, 1.39178e-6),
+        (25, 9.66074e-7), (35, 6.933e-7), (40, 6.02663e-7), (50, 4.66803e-7)),
+    # C807, C808, C811, C812, C813 -- the primary bulk, both rail filters and
+    # the NCP1117's input. At 12 V it holds 7.89 uF and at 19.65 V, 5.75.
+    "CNA6P1X7R1H106K250AE": (
+        (0, 10e-6), (4, 9.96942e-6), (6.3, 9.5185e-6), (10, 8.50903e-6),
+        (16, 6.64957e-6), (25, 4.44154e-6), (35, 3.04005e-6),
+        (50, 1.99252e-6)),
+    # ...and the part it became. Same 1210 land, 2.5 mm tall instead of 2.0.
+    "CGA6P3X7R1H475K250AB": (
+        (0, 4.7e-6), (4, 4.74315e-6), (6.3, 4.69843e-6), (10, 4.42976e-6),
+        (16, 3.84274e-6), (25, 2.89864e-6), (35, 2.11764e-6),
+        (50, 1.44713e-6)),
+    "C3225X5R1C226M250AA": (
+        (0, 22e-6), (1, 21.9526e-6), (2, 21.8204e-6), (3.15, 21.4242e-6),
+        (4, 21.001e-6), (5, 20.4003e-6), (6.3, 19.4177e-6), (8, 17.8814e-6),
+        (10, 15.8936e-6), (12.5, 13.451e-6), (16, 10.5681e-6)),
+    "CGA6M3X7R1C106K200AB": (
+        (0, 10e-6), (1, 10.0834e-6), (2, 10.0574e-6), (3.15, 9.76239e-6),
+        (4, 9.4102e-6), (5, 8.94461e-6), (6.3, 8.25808e-6), (8, 7.30909e-6),
+        (10, 6.24432e-6), (12.5, 5.12434e-6), (16, 3.79949e-6)),
+}
+
+# **Where each capacitor actually sits, which is a fact about the circuit and
+# nothing else.** Separated from the requirement table below because the two
+# are different kinds of claim and were briefly one: a bias is read off the
+# schematic and is true whether or not any datasheet states a minimum, while a
+# minimum is a quotation. Merging them meant a capacitor could only have a
+# bias if it also had a requirement, and the five that feed the arithmetic
+# have no stated minimum at all.
+#
+# The six VCA input blocking caps are absent because they sit at zero: both
+# ends are at 0 V DC, so there is no derating to compute and an entry would
+# only be there to say so.
+CAP_BIAS_V = {
+    "C807": INLET_UNLOADED_MAX - INLET_DIODE_VF,   # primary bulk, at the inlet
+    "C808": INLET_UNLOADED_MAX - INLET_DIODE_VF,   # primary bulk, at the pin
+    "C811": MODULE_RAIL,                           # VA+ rail filter
+    "C812": MODULE_RAIL,                           # VA- rail filter, magnitude
+    "C813": MODULE_RAIL,                           # NCP1117 input, on VA_RAW
+    "C814": V5_VOLTS,                              # NCP1117 output
+    "C802": VREF,                                  # reference reservoir
+    "C840": MODULE_RAIL,                           # U22 input, on VA_RAW
+    "C843": V5_VOLTS,                              # U22 output, on VMOD
+}
+
+# The minimum the part each one serves *states*, quoted. A requirement with no
+# datasheet line behind it is not in here -- C807, C808, C811, C812 and C813
+# have none, and their effective capacitance still matters because it is what
+# the arithmetic runs on. That is what effective_farads() is for.
+CAP_BIAS_DUTY = {
+    "C840": (2.2e-6, 'TPS560430 9.2.2.6, "2.2 uF or higher"'),
+    "C843": (22e-6, "TPS560430 Table 1, 22 uF"),
+    "C802": (0.1e-6, "MAX6126, output capacitor 0.1 to 10 uF"),
+    "C814": (10e-6, "NCP1117 output capacitor, 10 uF"),
+}
+
+
+def effective_farads(ref):
+    """What a capacitor is actually worth at the bias it sits at.
+
+    **The number the arithmetic should have been using all along.** Falls back
+    to the nominal where no curve is held -- and says so through
+    check_capacitor_bias()'s unchecked list rather than silently, because a
+    fallback that looks like an answer is the whole failure this file is
+    about.
+    """
+    part = DESIGN.parts[ref]
+    nominal = capacitor_value_parts(part.value)
+    nominal = nominal["farads"] if nominal else None
+    effective = capacitor_at_bias(part.mpn, CAP_BIAS_V.get(ref, 0.0))
+    return nominal if effective is None else effective
+
+
+# Shortfalls that are inside the part's own tolerance band, declared with the
+# figure so a *worse* one still shows. The mixer's ERC_ALLOWED shape: a
+# residue that is named and counted is different from one that is ignored.
+#
+# The argument, and it is the same for both: a datasheet that asks for "22 uF"
+# and is satisfied by a part sold at +/-20 % is a datasheet asking for the
+# tolerance band, not the nominal. So the comparison that means something is
+# against the bottom of the band the part is sold at, and both of these clear
+# it or miss it by less than the precision of a characterisation graph.
+#
+# **C840 is deliberately not in here.** It misses by 25 %, which is four
+# times its own tolerance, and the honest answer to that is a different part
+# rather than a declaration.
+CAP_BIAS_ALLOWED = {
+    "C843": ("20.40 uF of a 22 uF +/-20 % part, so inside a band whose "
+             "bottom is 17.6 uF -- and TI specifies 22 uF against parts of "
+             "that tolerance"),
+    "C814": ("8.94 uF against the 9.0 uF bottom of a +/-10 % band: short by "
+             "0.7 %, which is finer than a curve read off a graph resolves"),
+}
+
+
+def check_capacitor_bias():
+    """Every biased capacitor still meets the minimum its own part states.
+
+    **Reported, not raised**, for verify.py's reason: a check that throws
+    takes the whole run with it, and this one has a live finding in it.
+
+    What it compares is the effective capacitance at the bias the part
+    actually sits at against a minimum some *datasheet* states -- never
+    against a number this file invented. A capacitor with no stated minimum
+    is absent from CAP_BIAS_DUTY rather than present with a guess.
+
+    **And it reports what it could not evaluate.** Three parts on this board
+    have TDK characterisation curves and the Murata lines do not, so the
+    count of unchecked capacitors is returned rather than left as silence.
+    """
+    problems, unchecked = [], []
+    for row in capacitor_bias_table():
+        if row["effective"] is None:
+            unchecked.append((row["ref"], row["mpn"]))
+            continue
+        if row["meets"] or row["ref"] in CAP_BIAS_ALLOWED:
+            continue
+        problems.append(
+            f"{row['ref']}: {row['mpn']} gives {row['effective'] * 1e6:.2f} uF "
+            f"at {row['volts']:.1f} V, {row['fraction'] * 100:.0f} % of "
+            f"nominal, against {row['needs'] * 1e6:.1f} uF -- "
+            f"{row['source']}")
+    return problems, unchecked
+
+
+def capacitor_at_bias(mpn, volts):
+    """Effective capacitance at a DC bias, interpolated from TDK's curve.
+
+    Linear between the published points, which is the honest reading of a
+    characterisation graph: the curve is smooth and the points are close, and
+    fitting anything cleverer would be inventing precision the source does
+    not carry. Returns None for a part with no curve here.
+    """
+    points = CAP_DC_BIAS.get(mpn)
+    if points is None:
+        return None
+    if volts <= points[0][0]:
+        return points[0][1]
+    for (v0, c0), (v1, c1) in zip(points, points[1:]):
+        if v0 <= volts <= v1:
+            return c0 + (c1 - c0) * (volts - v0) / (v1 - v0)
+    return points[-1][1]
+
+
+def capacitor_bias_table():
+    """Every biased capacitor against the minimum its own part states."""
+    rows = []
+    for ref, (needs, source) in sorted(CAP_BIAS_DUTY.items()):
+        part = DESIGN.parts[ref]
+        volts = CAP_BIAS_V[ref]
+        effective = capacitor_at_bias(part.mpn, volts)
+        nominal = capacitor_value_parts(part.value)
+        nominal = nominal["farads"] if nominal else None
+        rows.append({
+            "ref": ref, "mpn": part.mpn, "volts": volts, "needs": needs,
+            "source": source, "nominal": nominal, "effective": effective,
+            "fraction": None if effective is None or not nominal
+                        else effective / nominal,
+            "meets": None if effective is None else effective >= needs,
+        })
+    return rows
 
 
 def _resistor(design, ref, value, net_a, net_b, description=""):
@@ -9297,6 +9783,25 @@ def _report():
           f"mixer's own string says \"{inlet['mixer_range']}\"")
     print()
 
+    bias_problems, bias_unchecked = check_capacitor_bias()
+    print("ceramics under DC bias, against what their own datasheets state")
+    for row in capacitor_bias_table():
+        if row["effective"] is None:
+            print(f"  {row['ref']:6s} {row['volts']:5.1f} V   no curve -- "
+                  f"{row['mpn']} is Murata and SimSurfing is behind a "
+                  f"terms acceptance")
+            continue
+        verdict = ("ok" if row["meets"] else
+                   "declared" if row["ref"] in CAP_BIAS_ALLOWED else "SHORT")
+        print(f"  {row['ref']:6s} {row['volts']:5.1f} V   "
+              f"{row['effective'] * 1e6:6.2f} uF of {row['nominal'] * 1e6:.1f} "
+              f"({row['fraction'] * 100:3.0f} %) against "
+              f"{row['needs'] * 1e6:.1f} -- {verdict}")
+    for problem in bias_problems:
+        print(f"      {problem}")
+    if bias_unchecked:
+        print(f"  {len(bias_unchecked)} biased ceramics have no curve here")
+    print()
     print("assumptions still open here")
     for name, assumption in sorted(MEASURED.items()):
         if name not in SETTLED:

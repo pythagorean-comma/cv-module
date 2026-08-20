@@ -242,10 +242,15 @@ PRICES = {
 
     "100p/50V C0G": band(0.02, 0.08, "GBP", 100, "0805 C0G"),
     "1200p/50V C0G": band(0.02, 0.08, "GBP", 100, "0805 C0G"),
-    "100n/50V C0G": band(0.15, 0.45, "GBP", 10,
-                         "0805 C0G at 100 nF is a large part for the class "
-                         "and priced accordingly. It is the reference's NR "
-                         "capacitor, which is worth C0G."),
+    # ~~"100n/50V C0G"~~ -- **removed with the value string, and its own note
+    # was the only argument for C0G that existed anywhere.** It read: "0805
+    # C0G at 100 nF is a large part for the class and priced accordingly. It
+    # is the reference's NR capacitor, which is worth C0G." The first sentence
+    # is why it could not be sourced; the second is an assertion with nothing
+    # behind it, sitting in a *price* table rather than beside the constant --
+    # which is why nobody looking at design.py ever saw a reason and nobody
+    # looking here expected one. See design.VREF_NR_CAP for what the datasheet
+    # actually says.
     "22n/50V X7R": band(0.02, 0.08, "GBP", 100, "0805 X7R"),
     "56n/50V X7R": band(0.02, 0.08, "GBP", 100, "0805 X7R"),
     "150n/50V X7R": band(0.02, 0.08, "GBP", 100, "0805 X7R"),
@@ -353,7 +358,9 @@ PRICES = {
     # about a *shorted* output rather than about this current.
     "33R 5%": band(0.01, 0.05, "GBP", 100, "0805 5%"),
     "10R 5%": band(0.01, 0.05, "GBP", 100, "0805 5%"),
-    "2u2/50V X7R": band(0.05, 0.20, "GBP", 25, "1210 X7R at 50 V"),
+    "4u7/50V X7R": band(0.08, 0.30, "GBP", 25,
+                        "1210 X7R at 50 V, 2.5 mm body. It was a 2u2 and the "
+                        "DC bias curve is why -- see design.MCU_DCDC_CIN"),
     "22u/16V X5R": band(0.08, 0.30, "GBP", 25, "1210 X5R"),
 
     # -- not chosen --------------------------------------------------------
