@@ -23,13 +23,32 @@ can be shown to fail, and everything guessed is in
 **The programmatic approach has passed its useful limit at the geometry, and
 this pass acts on that.** Code keeps the logic — the netlist, the algebraic
 values, the pin configuration, the constraints, the checks — and the board is
-handed to KiCad. `gen_pcb.py` places, pours and stitches; `route.py` runs
-**once**, as `--seed-routing`, so that what is handed over is a legal route to
-adjust rather than 486 airwires. The rule that follows is the one to read
-before anything else here:
+handed to KiCad. `gen_pcb.py` places, pours and stitches and lays no signal
+copper at all. **Every millimetre of signal copper on the board today was laid
+by KiCadRoutingTools**, through `krt.py`, in three passes — it replaced
+`route.py`'s seed, and [`routing-tool.md`](docs/routing-tool.md) is the record.
+The rule that follows is the one to read before anything else here:
 
-> **The netlist is generated and authoritative. The board is hand-laid and
-> verified.**
+> **The netlist is generated and authoritative. The board is not regenerated —
+> it is edited, and verified by reading it back.**
+
+**That rule read "the board is hand-laid and verified" for two passes, and by
+the end of them not one millimetre of this board had been laid by hand** —
+measured, not assumed: `out/cv-module.kicad_pcb` and the router's own candidate
+`out/cv-module-krt.kicad_pcb` carry the same 5121 segments and 995 vias,
+endpoint for endpoint, layer for layer, net for net. The
+half that was ever load-bearing is the second: `verify.py` asks DRC, the
+netlist against KiCad's own export, the ground split, the isolation region and
+both barriers *of the board*, by reading it back, and none of those questions
+ever cared who drew the copper. "Hand-laid" was the means at the time it was
+written, promoted into the wording of the rule, and then quoted after the means
+changed. `floorplan.CROSSING_RULE` is the same shape one artefact along —
+a rule whose stated *test* was narrower than its stated mechanism, quoted long
+after it stopped being true — and the general form is that **a rule written in
+terms of how it is currently satisfied outlives the thing that satisfied
+it.** What has to stay true is that the board is *not* a
+function of `design.py`, so that a question about geometry can be asked of the
+artefact rather than answered in Python first.
 
 Running `gen_pcb.py` over a routed board destroys the copper, and
 `gen_pcb_guard.refuse_to_discard_routing()` refuses rather than warns — whether
@@ -54,11 +73,14 @@ does not choose. See [`controller.md`](docs/controller.md).
 | ERC | ✅ **0 errors and 0 warnings** — `ERC_ALLOWED` is empty |
 | the envelope rectifier | ✅ derived, drawn and checked — τ from the transient, not from a target |
 | the fail-safe | ✅ drawn: de-energised **is** bypass, and the pump's own rise time is the power-up interlock |
-| section 5 constraints | ✅ checked mechanically, **92** planted faults caught — and the faults themselves are checked too. Five faults went dead when their targets left the board, and the guard named all five before a case ran |
+| section 5 constraints | ✅ checked mechanically, **94** planted faults caught — and the faults themselves are checked too. Five faults went dead when their targets left the board, and the guard named all five before a case ran |
 | deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
-| board | ✅ **placed, poured, stitched and seeded — 0 unconnected items and 0 DRC violations, and `check_board_is_the_design()` passes for the first time.** 290 footprints on 106.9 × 233.6 mm, 151 ground stitches, **1652 track runs and 595 vias** laid by one run of `route.py` as a *seed*. It is a starting point somebody adjusts in KiCad, not an output the build reproduces: `gen_pcb_guard.refuse_to_discard_routing()` refuses the next run whether the copper came from the router or from a person |
-| the fan-out | ✅ **back with `route.py`, and it laid two escapes on this board.** Was: Four escapes at U17 closed the board it was written for and nothing on this board exercises it: the finest pitch left is a TSSOP's 0.65 mm. This repo's rule about a declaration nothing is obliged to use, applied to code |
+| board | ✅ **placed, poured and stitched by `gen_pcb.py`, and routed end to end by KiCadRoutingTools — 0 unconnected items, 0 DRC violations, and `check_board_is_the_design()` passes.** 290 footprints on 106.9 × 233.5 mm, 151 ground stitches, and **5121 segments and 995 vias**, of which 844 vias are the router's. Measured off the tracked board: **one track width (0.2 mm), one via size (0.7/0.3), 12998 mm of track, and no signal copper on either reference plane.** It is not an output the build reproduces — `gen_pcb.py` writes a board with no signal copper at all, and `gen_pcb_guard.refuse_to_discard_routing()` refuses whether the copper came from a router or from a person. **The previous row said 1652 track runs and 595 vias laid by `route.py` as a seed**, which was true of the board `route.py` left and not of the one on disk: the seed was replaced, and a row quoting the artefact it described stayed behind |
+| the fan-out | ✅ **history, and it is `route.py`'s.** It closed the QFN board it was written for with four escapes at U17, and it laid two on the seed. Neither is on the board now — KiCadRoutingTools laid every millimetre of the current copper and has an escape model of its own. The arithmetic is kept at `rules.fan_out_class()` because it is what a *package* is chosen against, which is a question that outlives whichever router is drawing |
+| the second router | ✅ **adopted, and its defaults would have wrecked this board.** Pointed at it unconfigured, KiCadRoutingTools laid **4106 mm of signal track through both ground planes** with its own DRC, its own connectivity check and its own improvement gate all reporting success. `krt.py` generates the four things it has to be told — the poured layers, the fabrication floor, the primary's keep-out and the project rebuild afterwards — from the files that already own each number. `krt.check_planes_intact()` is the instrument, and it exists because until this tool nothing here could put copper on a plane. **And its four post-route checkers have now been run against the tracked board** — DRC, connectivity, orphan stubs and copper hygiene — with **0 dangling, unsupported or stacked vias and 0 orphan islands**; the one "dangling end" it reports is a T-junction mid-segment, which is a fact about its endpoint model rather than about the copper. [`routing-tool.md`](docs/routing-tool.md) |
+| the stackup | ✅ **chosen, and it never had been.** The board carried no `(stackup ...)` block at all, so KiCad's defaults set the dielectric height every coupling figure depends on. PCBWay's own 4-layer 1.61 mm construction now: 0.1855 mm of prepreg at Dk 4.74 between an outer layer and its plane, held by `verify.check_stackup()`. A value that exists only as somebody else's default cannot be wrong — `RAILS["V3V3"]` and zone P, a third time |
+| trace-to-trace coupling | ✅ **measured on the copper, and it never had been.** `constraint_5()` computes coupling between two wires in a *loom*; nothing computed it between two traces, and trace adjacency is a property of the board — so replacing the seed changed it and no instrument could say by how much. `constraints.parallel_runs()` reads the board back: the worst same-layer parallel run is IVOUT4/SIN5, 181.2 mm at 0.40 mm pitch, and at the chosen stackup that is **−114.4 dB against a −54 dB requirement, 60 dB inside it** |
 | DC bias | ⚠️ **modelled for the first time, and one capacitor is genuinely short.** TDK's own curves, read off their characterisation pages: `C840` gives **1.65 µF at 12 V against TI's "2.2 µF or higher"** — 25 %, four times its own tolerance, and it wants a higher-CV part in the same 1210 land. `C843` and `C814` are short of nominal and inside their parts' tolerance bands, declared in `CAP_BIAS_ALLOWED` with the figures. The six VCA input blocking caps sit at **zero bias** and do not derate at all. Three Murata lines have no curve here and are reported as unchecked |
 | the BOM | ✅ **re-sourced, and the exercise found three wrong part numbers and one that had been wrong for four passes.** Six obsolete Murata lines became TDK and Yageo parts; `Design.check_order_codes()` now decodes a ceramic's part number and compares its case, dielectric, voltage and capacitance against the value string and the land. It says plainly what it cannot do: whether a code names a *real* part is a question only a distributor answers |
 | the design rules | ✅ one copy in `rules.py`, and DRC is finally enforcing them — including the two hole rules, which were the fifth and sixth "left alone deliberately" and ran at KiCad's defaults while nobody owned them |
@@ -131,11 +153,14 @@ python3 gen_pcb.py --discard-routing   # and this is how you mean it
 python3 gen_pcb.py --discard-routing --seed-routing   # ...with one router pass
 ```
 
-The third form is how the handover board was made: place, pour, stitch, and
-then **one** run of `route.py` so that what somebody opens is a legal route to
-adjust rather than a ratsnest. It is a starting point and not an output --
-nothing downstream reads it, and the guard refuses the next run whether the
-copper came from the router or from a person.
+The third form is how the *seed* was made: place, pour, stitch, and then
+**one** run of `route.py` so that what somebody opens is a legal route to
+adjust rather than a ratsnest. **The board on disk is no longer that seed** —
+`krt.py` re-routed every net on it and `--commit` promoted the result — so the
+third form is now the way to start again from nothing rather than the way this
+board was built. It is a starting point and not an output: nothing downstream
+reads it, and the guard refuses the next run whether the copper came from a
+router or from a person.
 
 `krt.py` is a third way copper gets laid and it is not in either pipeline
 either: it routes a scope with KiCadRoutingTools and writes
@@ -155,6 +180,13 @@ those two, not a guard. See the section above.
 The refusal is `gen_pcb_guard.refuse_to_discard_routing()` and it is enforced
 rather than documented, because for one pass it was documented in three files
 while this very code block still had `gen_pcb.py` in the middle of it.
+
+**`krt.py` is the one thing here that is not stdlib-only, and it is a
+subprocess for exactly that reason.** The tool needs numpy, scipy and shapely;
+this repo must keep running anywhere KiCad runs. Give the tool an interpreter
+of its own — `~/code/KiCadRoutingTools/krt-venv`, or `$KRT_PYTHON` — and
+`krt.py` finds it and refuses with instructions if it cannot. See
+[`routing-tool.md`](docs/routing-tool.md#installing-the-tools-dependencies).
 
 **To move a netlist change onto a routed board**, use KiCad's own **Tools ->
 Update PCB from Schematic** against `out/cv-module.kicad_sch`, which the first
@@ -230,7 +262,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | `gen_plots.py` | the schematic, the layout and a render — the outputs you can look at without KiCad |
 | `placement.py` | the floorplan as coordinates. It does not import KiCad |
 | `gen_pcb.py` | the board, through the deprecated `pcbnew` bindings — **place and pour**, and `--seed-routing` for one pass of the router |
-| `route.py` | the maze router. **Restored, and it runs once**, as a seed somebody then edits |
+| `route.py` | the maze router. **It runs once, as a seed, and no copper it laid is on the board any more** — `krt.py` re-routed every net. Kept because a board started from nothing still wants a legal route rather than a ratsnest |
 | `krt.py` | drives KiCadRoutingTools under this repo's own constraints — layers, fab floor, keep-outs and net scope all generated. Writes a candidate; `--commit` promotes it |
 | `verify.py` / `test_verify.py` | the constraints against KiCad's own netlist, and proof the checks can fail |
 | [`FINDINGS.md`](docs/FINDINGS.md) | things wrong in the mixer repo — noted, never fixed |
@@ -1324,7 +1356,7 @@ Three more things the pass turned up, each recorded where it happened:
 ## Open, in the order worth taking
 
 **Everything a check can decide is decided.** `verify.py` passes end to end,
-`test_verify.py` catches all 92 planted faults, `placement.check_courtyard_gap()`
+`test_verify.py` catches all 94 planted faults, `placement.check_courtyard_gap()`
 is at zero, DRC is at zero and so is the unrouted count. What is open is work
 on a bench and one decision about copper that is a person's to take.
 
@@ -1333,16 +1365,27 @@ pass moved: one closed by reading a page, two retired against their own whole
 declared range, and one decided with a trigger attached.
 [`bench.md`](docs/bench.md) is the list and the order.
 
-1. **Route the board by hand — Tim's step, and it is the longest one in the
-   project.** What opens in KiCad is 290 footprints, the outline, two inner
-   ground pours, 151 stitch vias and a seeded route with **nothing unmade**.
-   The seed is legal and it is not finished: `route.py` optimises path cost and
-   knows nothing about which nets are audio, where a return current wants to go,
-   or which of two equal paths runs beside the 1.1 MHz switcher. `verify.py` is
-   what checks the result — DRC, the netlist against KiCad's own export, the
-   ground split, the isolation region and both barriers — and
-   `verify.UNROUTED_ITEMS` is the ratchet: **down as copper is laid, up only
-   with the nets named there.**
+1. **Review the copper — and it is a review now, not a routing job.** What
+   opens in KiCad is 290 footprints, the outline, two inner ground pours, 151
+   stitch vias and **every net closed**, at one track width and one via size,
+   with nothing on either reference plane. What is left is the judgement
+   neither router has: which nets are audio, where a return current wants to
+   go, and which of two equal paths runs beside the 1.1 MHz switcher.
+   `krt.py --nets "…"` re-lays a region inside the same constraints and leaves
+   every other net's copper alone, measured per-net; `verify.py` grades the
+   result — DRC, the netlist against KiCad's own export, the ground split, the
+   isolation region and both barriers — and `verify.UNROUTED_ITEMS` is the
+   ratchet: **down as copper is laid, up only with the nets named there.**
+
+   **Two numbers now exist that would have decided this and did not before.**
+   `constraints.parallel_runs()` says the worst channel-to-channel adjacency
+   the router chose is **−114.4 dB against a −54 dB requirement**, so trace
+   adjacency is not a reason to move any of it. The via count is the other
+   half and it points the other way: **844 router vias against the seed's
+   595**, 33 % more perforations of both reference planes for 9.8 % less
+   track, which is the one trade [`routing-tool.md`](docs/routing-tool.md)
+   flags as not obviously good on this board. Neither is a check that can
+   fail; both are a person's call.
 2. **`MEASURED["noise_floor"]`** — a meter on the mixer's mono output, and
    the only one of the three that can be taken before this board exists. It is
    still this module's most load-bearing unknown: across its declared range
@@ -1360,8 +1403,18 @@ declared range, and one decided with a trigger attached.
    `UNSPECIFIED` are empty, every part has a footprint, and the unrouted count
    is zero. **Nothing in the repository gates a fabrication package any more**,
    which makes writing one a decision somebody takes rather than a step that
-   becomes available — and it should be taken after item 1, not after this
-   sentence.
+   becomes available.
+
+   **What gates it is item 1 and not item 2, and that is derived rather than
+   assumed.** The ordering written here used to say "after item 1" while item 1
+   was hand routing, which was right for the reason that a fab package is a
+   picture of copper. It is *not* right about the bench: the decision waiting
+   on `MEASURED["noise_floor"]` moves `R_IN` from 12k1 to 7.5 kΩ, and every
+   resistor on this board is `R_FP` — one 0805 land — so that change is twelve
+   **values** and not one millimetre of copper. It gates the assembly BOM, and
+   only matters to a board order at all if the two are placed together. So
+   gerbers are blocked by nothing except somebody deciding the router's board
+   is the board to fabricate.
 
 ### Closed this pass
 

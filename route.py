@@ -8,8 +8,8 @@ design.py: no question about geometry could be asked of a layout until it had
 been answered in Python first. That cost was real and the rule it produced
 stands:
 
-    **the netlist is generated and authoritative; the board is hand-laid and
-    verified.**
+    **the netlist is generated and authoritative; the board is not
+    regenerated -- it is edited, and verified by reading it back.**
 
 What is restored is not that rule's opposite. This file runs **once**, as a
 seed -- `gen_pcb.py --seed-routing` -- and what it produces is a starting

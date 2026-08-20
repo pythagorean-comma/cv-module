@@ -900,7 +900,7 @@ def main():
     # only the pipeline was executable.
     import gen_pcb_guard
     for label, text, expect in (
-            ("gen_pcb refuses to discard hand-routed copper",
+            ("gen_pcb refuses to discard routed copper",
              '(segment (start 1 1) (end 2 1) (width 0.09) (net "SIN1"))', True),
             ("...and lets a placed-and-poured board through",
              '(segment (start 1 1) (end 2 1) (width 0.09) (net "MDGND"))',
@@ -917,8 +917,8 @@ def main():
         report(label, fired if expect else not fired)
         probe.unlink()
 
-    # **The board drifting away from the netlist, which is the failure the
-    # hand-laid workflow makes possible and the generated one could not.** The
+    # **The board drifting away from the netlist, which is the failure an
+    # edited board makes possible and a generated one could not.** The
     # fault is a part on the board under a reference design.py does not know,
     # which is what a board looks like after a netlist change that nobody
     # synced. Planted in a copy, like the pour overlap above, because

@@ -495,9 +495,17 @@ def check(rows):
 
 
 def write_csv(rows):
+    # **lineterminator is "\n" so that the file this writes is the file git
+    # stores.** csv.writer defaults to CRLF, and this repository is committed
+    # with core.autocrlf=input, so the blob is LF -- which made a freshly
+    # generated BOM show as modified in `git status` after every run, with an
+    # empty `git diff` underneath it. Nothing was wrong with the content and
+    # that is the point: a tracked artefact that is dirty on every run is one
+    # whose status says nothing, which is PDF_EPOCH's argument arriving at the
+    # one generated file nobody had applied it to.
     path = OUT / "cv-module-bom.csv"
     with path.open("w", newline="") as handle:
-        writer = csv.writer(handle)
+        writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(["Reference", "Value", "Footprint", "MPN", "Fitted",
                          "Order", "Unit low", "Unit high", "Currency",
                          "Qty break", "Basis", "Source"])

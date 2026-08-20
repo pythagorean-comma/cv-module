@@ -38,16 +38,16 @@ is the part worth carrying, was that the *board* had to be a function of
 design.py, so no question about geometry could be asked of a layout until it
 had been answered in Python first.
 
-**So the board is hand-laid from here and this file will destroy that copper
-if it is run again.** It writes a fresh board with the footprints placed and
+**So the board is edited from here -- by a person in KiCad, or by a scoped
+krt.py run -- and this file will destroy that copper if it is run again.** It writes a fresh board with the footprints placed and
 the planes poured and nothing else on it; pcbnew has no notion of "the parts
 moved, keep the tracks". The sync path for a netlist change is KiCad's own
 **Update PCB from Schematic**, against the generated out/cv-module.kicad_sch.
 The rule, stated the same way here and in CLAUDE.md and README.md because one
 copy is the wrong number for this one:
 
-    **the netlist is generated and authoritative; the board is hand-laid and
-    verified.**
+    **the netlist is generated and authoritative; the board is not
+    regenerated -- it is edited, and verified by reading it back.**
 
 What this pass does and does not do:
 
@@ -988,8 +988,8 @@ def build(seed_routing=False):
     # runs on, and it is in CLAUDE.md and README.md as well because one copy
     # in one place is the wrong number of copies for this one:
     #
-    #     **the netlist is generated and authoritative; the board is
-    #     hand-laid and verified.**
+    #     **the netlist is generated and authoritative; the board is not
+    #     regenerated -- it is edited, and verified by reading it back.**
     #
     # verify.py is unchanged in what it asks -- DRC, the netlist against
     # KiCad's own export, the ground split, the isolation region, both

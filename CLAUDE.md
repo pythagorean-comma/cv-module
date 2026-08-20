@@ -370,7 +370,7 @@ of them disagreed. That list is at the head of the ADC section in `design.py`.
 
 ---
 
-## The board is hand-laid now, and that is the rule to read first
+## The board is not regenerated, and that is the rule to read first
 
 **`gen_pcb.py` places and pours. It does not route.** `route.py` -- a maze
 router with rip-up and retry, a fan-out escape and a three-way via-exclusion
@@ -390,6 +390,14 @@ reason to have it is the person: a board handed over with 486 airwires and a
 board handed over with a legal route to adjust are two different jobs, and only
 the second one is editing.
 
+**And none of the seed's copper is on the board any more.** KiCadRoutingTools,
+through `krt.py`, re-routed every net and `--commit` promoted the result -- so
+`route.py` is now how a board is started from nothing, and not how this board
+was built. Measured on the tracked board: **5121 segments and 995 vias**, of
+which 151 are `gen_pcb.py`'s ground stitches and 844 the router's; one track
+width (0.2 mm), one via size (0.7/0.3), 12998 mm of track, and no signal copper
+on `In1.Cu` or `In2.Cu`.
+
 Two things about it that are worth not re-deriving. **The board is inside its
 competence rather than at the edge of it**: it closed the QFN board at
 0.09/0.09 on a 0.23 mm grid, and the fitted class is 0.20/0.20 on 0.45 mm with
@@ -400,8 +408,20 @@ as an argument, which is why deleting and restoring it cost one `git show`.
 **The workflow consequence, and nobody may be allowed to discover it by
 accident:**
 
-> **The netlist is generated and authoritative. The board is hand-laid and
-> verified.**
+> **The netlist is generated and authoritative. The board is not regenerated
+> -- it is edited, and verified by reading it back.**
+
+**That rule said "hand-laid and verified" for two passes and no millimetre of
+this board was ever laid by hand.** Only the second half was ever load-bearing:
+every question `verify.py` asks is asked *of* the board, by reading it back,
+and not one of them cares who drew the copper. "Hand-laid" was the means at the
+moment the sentence was written, promoted into the wording of the rule, and
+then quoted after the means changed. `floorplan.CROSSING_RULE` is the same
+shape one artefact along, and the general form is that **a rule written in
+terms of how it is currently satisfied outlives the thing that satisfied it.**
+That is why the restatement names the mechanism instead: the board is not a function of `design.py`, so
+a question about geometry is asked of the artefact instead of being answered in
+Python first.
 
 * running `gen_pcb.py` writes a fresh board with the footprints placed, the
   planes poured, the ground pads stitched and **no signal copper at all** -- so
@@ -414,10 +434,9 @@ accident:**
   every one of those questions is asked *of the board*, by reading it back.
   None of them ever needed the board to have been written by us;
 * **`verify.UNROUTED_ITEMS` is a progress marker and the check around it is a
-  ratchet.** It is **0**: the seed closed every net, DRC reports nothing, and
-  `check_board_is_the_design()` passes for the first time. Zero at the *start*
-  of hand-routing is not the same claim as zero at the end of it -- the seed is
-  laid by a maze router that optimises path cost and knows nothing about which
+  ratchet.** It is **0**: every net is closed, DRC reports nothing, and
+  `check_board_is_the_design()` passes. Zero laid by a router is not the same
+  claim as zero at the end of a person's pass -- neither router knows which
   nets are audio or where a return current wants to go, so moving copper is
   expected and moving copper can open a connection. The rule is unchanged:
   **down as copper is laid, up only with the nets named there.** Zero is the
@@ -482,8 +501,20 @@ so the rescue reads the failed net off the run rather than carrying a name.
 
 Measured: 185/185 nets, one track width, one via size, no plane copper, the
 primary's region clear, in **5 min 50 s** -- and 9.8 % less track than the seed
-for **33 % more vias**, which is why the recommendation is scoped re-routing
-rather than replacing the board.
+for **33 % more vias**.
+
+**And the board was replaced anyway, which is worth stating plainly rather
+than leaving the two sentences to be reconciled.** The full three-pass reroute
+is what `--commit` promoted and what is on disk: `verify.py` exits 0 and
+`test_verify.py` catches all 94 faults on copper the tool laid. What the via
+row argues is not "revert it" but that **a whole-board reroute is not a free
+improvement**: 844 router vias against the seed's 595 is 33 % more holes
+through both reference planes, bought with 9.8 % less track. Whether that trade
+is right on this board is a person's call and no check here can make it --
+`constraints.parallel_runs()` is the only instrument that has since said
+anything about the copper as laid, and it says the worst channel-to-channel
+adjacency is **-114.4 dB against -54 dB**. So the recommendation for *future*
+runs is unchanged and is about scope: re-route a region, not the board.
 
 ## The placement is packed, not nudged, and the two functions are the rule
 
@@ -507,10 +538,15 @@ no step could say *why* a part was where it ended up. What replaced them:
 3.6 mm of length and 1.7 mm of width, on a board already 3.8x the enclosure it
 does not fit. Millimetres in y are the cheapest thing this design has and
 assembly comfort is what they buy. **The cost written down at `SUPPLY_Y` --
-"moving them costs 11 nets and 114 connections of re-routing" -- is dated**: it
-was true of the routed board on disk at the time, and the same edit made over
-hand-laid copper is expensive again. A cost that depends on the state of an
-artefact somewhere else has to be re-read, not quoted.
+"moving them costs 11 nets and 114 connections of re-routing" -- is dated, and
+it has now been dated twice in opposite directions.** It was true of the routed
+board on disk when it was written; it became expensive again the moment the
+copper was something a person would have to re-lay; and it is cheap again now,
+because `krt.py --nets` re-routes a named scope inside the design's own
+constraints in seconds and leaves every other net's copper alone. **A cost that
+depends on the state of an artefact somewhere else has to be re-read, not
+quoted** -- and this one also depends on which tools exist, which is a second
+way for a number in prose to go stale without anything touching it.
 
 **And the one that will happen again: a fix that asks what the two parts in the
 violation need and never asks what the rest of the row already has.** `R901`

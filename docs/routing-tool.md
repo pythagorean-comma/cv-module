@@ -282,9 +282,21 @@ says nothing, and the way to ask whether anything changed is to compare
 extracted geometry. Worth knowing before somebody reads a 23,000-line diff as
 a design change.
 
-One DRC violation remains at this board's real class: the `RUN` track 0.013 mm
-inside U19's mounting hole — correction 4 above, the copper-to-hole rule the
-override format has no key for. It is a minute's work in KiCad.
+One DRC violation remained in *these two runs* at this board's real class: the
+`RUN` track 0.013 mm inside U19's mounting hole — correction 4 above, the
+copper-to-hole rule the override format has no key for. It was recorded as a
+minute's work in KiCad and **that minute was never spent**: the run that was
+finally committed is a different routing — **5121 segments and 995 vias against
+the 5122 and 991 measured here** — and `kicad-cli pcb drc` reports **0
+violations** on it. Nothing moved the track; a different route did not lay it
+there.
+
+**And the committed board is exactly the candidate, measured rather than
+assumed.** `out/cv-module-krt.kicad_pcb` and `out/cv-module.kicad_pcb` carry
+the same 5121 segments and 995 vias, with every segment matching on endpoints,
+layer and net — no piece of copper on this board has been moved by hand since
+the tool laid it. That is worth knowing before reading any sentence in this
+repository that says "hand-laid".
 
 ---
 
@@ -342,11 +354,66 @@ earned its place the same day the bug was written.
 
 ```
 python3 verify.py       -> exit 0, every check ok
-python3 test_verify.py  -> all 92 faults caught
+python3 test_verify.py  -> all 94 faults caught
 ```
 
 on a board whose every millimetre of signal copper was laid by
 KiCadRoutingTools.
+
+## The four checkers, and this board had only ever been run through two
+
+The tool ships more graders than `krt.py` calls, and its `review-routed-board`
+skill names four. Two of them had never been pointed at this board. Run at
+v0.21.2 against the tracked board:
+
+| checker | what it owns | result |
+|---|---|---|
+| `check_drc.py` | copper clearance at the routed floor | **no violations**, one warning: `same-net self-crossing: 1` |
+| `check_connected.py` | every net reaches every pad | **all nets fully connected**, and its KiCad refill cross-check agrees |
+| `check_orphan_stubs.py` | segment endpoints that go nowhere | **none** |
+| `check_weird.py` | the classes the other three structurally cannot see | 0 `dangling-via`, 0 `unsupported-via`, 0 `stacked-copper`, 0 `orphan-island` — **and 227 findings in three classes that are not defects; see below** |
+
+**The classes that would have mattered are all zero, and that is the result.**
+`dangling-via` is the one worth naming: a barrel with same-net copper on only
+one of the layers it spans is a via that is not a connection, and it is
+invisible to a connectivity check because the *net* is still whole. This board
+has none. Nor is any copper stacked on itself, unsupported, or islanded.
+
+### The one "dangling end" is a T-junction, and the model is why
+
+`check_weird` reports `dangling-end: 1` — `PWM6` on F.Cu, a 0.424 mm run from
+(55.300, 172.100) to (55.000, 172.400) with a free end. It is not free. The
+net's main run is a single segment from (55.500, 172.100) to (43.400, 172.100),
+and 55.300 is an **interior point of it**: the branch tees off mid-segment,
+which is copper touching copper and connected everywhere it matters. KiCad's
+own DRC agrees — `track_dangling` is a declared severity in this project and it
+reports none — and `check_drc.py`'s single warning, `same-net self-crossing`,
+is the same geometry seen from the other side.
+
+So the finding is about the checker: **its model of a connection is an endpoint
+meeting an endpoint, and what the router draws is copper.** That is this
+repository's own recurring shape, arriving from the tool's side for the second
+time — `check_fine_pitch_access()` measured a pad while the router drew a
+track, and this measures a vertex while the router draws a rectangle. It is
+worth writing down rather than fixing: the checker is right about its own
+model, and a board reviewed by it will report one item that a person has to
+walk over to dismiss.
+
+### The 220 removable segments are 0.75 % of the track and mostly inside pads
+
+`removable-segment: 220` and `redundant-cycle: 6` are copper whose removal
+changes no connectivity. Measured: **97.7 mm of 12998**, median length
+**0.400 mm**, longest 3.677 mm. Classified against the board's own 825 pads,
+**144 have both endpoints inside a pad of their own net** and 65 have one —
+copper drawn across a pad that the pad already connects, which is what a router
+lays when it enters a landing from two directions. None duplicates another
+segment along its own line.
+
+**It is not worth chasing and the reason is a number.** The longest of them is
+3.7 mm of 0.2 mm track on a board whose fastest edge is a 1.1 MHz switcher;
+they cost 0.75 % of the copper, no connectivity and no clearance. What they
+would be worth removing for is a tidier board, and the risk of editing 220
+pieces of copper by hand to get one is larger than the thing being bought.
 
 ## The measurement
 
@@ -493,17 +560,34 @@ Rust core ships as an abi3 `.so` and imports on any modern Python; KiCad's own
 bundled 3.9 is **not** a candidate — it carries `pcbnew` and none of the three,
 and `route.py` never imports `pcbnew` anyway.
 
+**On this machine that venv exists and is permanent** —
+`~/code/KiCadRoutingTools/krt-venv`, numpy 2.5.2, scipy 1.18.0, shapely 2.1.2,
+against the tool at v0.21.2. It was previously made inside a session scratchpad,
+which is a directory that is deleted: an interpreter kept where the operating
+system reclaims it is a dependency that reinstalls itself once a session, and
+`krt.py`'s refusal is the only reason that was ever noticed.
+
 ---
 
 ## Recommendation
 
-**Use it for scoped re-routing, not to replace the seed.** The board is already
-at 0 unrouted and 0 DRC; what a full reroute buys is 11 % less track for 32 %
-more plane perforations, which is a trade this board should not obviously take.
-What it buys on a *region* — a band that is congested, a net that took an ugly
-path, a change synced in from the schematic — is a legal route in seconds
-instead of an evening, inside constraints the design already owns, with a gate
-that refuses to hand back anything worse than what it was given.
+**Use it for scoped re-routing.** What it buys on a *region* — a band that is
+congested, a net that took an ugly path, a change synced in from the schematic
+— is a legal route in seconds instead of an evening, inside constraints the
+design already owns, with a gate that refuses to hand back anything worse than
+what it was given.
+
+**This section said "not to replace the seed", and then the seed was
+replaced** — by the three-pass run described above, which `--commit` promoted
+and which is the copper on the tracked board today. The sentence is corrected
+rather than deleted, because the arithmetic under it did not change and is the
+thing to carry: a whole-board reroute bought **9.8 % less track for 33 % more
+vias**, 844 against 595, every extra one a hole through both reference planes.
+That is a trade nothing in this repository can grade — `verify.py` asks
+whether the copper is legal, not whether it is the copper you want — so it
+stays a person's call, and the only measurement since taken of the copper as
+laid is `constraints.parallel_runs()`: worst channel-to-channel adjacency
+**−114.4 dB against a −54 dB requirement**, 60 dB inside it.
 
 The rule from `CLAUDE.md` is unchanged and now has a second tool under it:
 

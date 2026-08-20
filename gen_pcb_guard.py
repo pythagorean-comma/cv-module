@@ -17,7 +17,7 @@ GROUND_NETS = frozenset({"MAGND", "MDGND"})
 
 
 def refuse_to_discard_routing(board, argv=None, out_name=None):
-    """Stop, if the board on disk has hand-routed copper on it.
+    """Stop, if the board on disk has signal copper on it.
 
     **This exists because documenting the hazard was not enough, and the proof
     is that the same pass that documented it left the trigger in the run
@@ -32,7 +32,8 @@ def refuse_to_discard_routing(board, argv=None, out_name=None):
     is worth more than a rule it is caught breaking, which is the argument
     gen_pcb.py already makes about the router and the isolation region.
 
-    **What counts as hand-routed is a net name and not a count.** Everything
+    **What counts as copper somebody would lose is a net name and not a
+    count.** Everything
     gen_pcb.py lays by default is a ground stitch -- a via and a stub on MAGND
     or MDGND -- so a segment on any other net is copper somebody else put
     there. That is exact in both directions: a freshly generated board has
@@ -66,7 +67,7 @@ def refuse_to_discard_routing(board, argv=None, out_name=None):
     if not signal:
         return
     raise SystemExit(
-        f"{out_name or board.name} carries hand-routed copper on "
+        f"{out_name or board.name} carries signal copper on "
         f"{len(signal)} nets ({', '.join(sorted(signal)[:6])}"
         f"{', ...' if len(signal) > 6 else ''}).\n"
         f"\n"

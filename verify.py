@@ -987,9 +987,10 @@ def check_fail_safe(nets, values):
 # Everything above is the record of a generated board and it is kept whole,
 # because it is where six real findings came from and because the arithmetic
 # in it is still true. What is no longer true is its subject. gen_pcb.py places
-# and pours and lays no signal copper; the board is hand-routed in KiCad, and
-# out/cv-module.kicad_pcb in this repository is whatever state that routing has
-# reached.
+# and pours and lays no signal copper; the board is routed elsewhere -- by
+# route.py once as a seed, by KiCadRoutingTools through krt.py, or by a person
+# in KiCad -- and out/cv-module.kicad_pcb in this repository is whatever state
+# that copper has reached. Every net on it today was laid by the tool.
 #
 # **So the declaration below is a progress marker, and the check around it is
 # a ratchet.** It comes down as copper is laid and it may not go up without the
