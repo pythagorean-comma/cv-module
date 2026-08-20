@@ -73,6 +73,10 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE / "out"
+# Declared up here rather than beside FOOTPRINT_DIR, where it used to be:
+# _relaunch() runs before that point and needs the board's path to write the
+# stackup into it after the child process has saved.
+PROJECT = "cv-module"
 BOARD = OUT / "cv-module.kicad_pcb"
 
 # Design rules, and **they are not here any more.** They were, with a comment
@@ -127,6 +131,15 @@ def _relaunch():
     if again.returncode != 0:
         raise SystemExit(again.stdout + again.stderr)
 
+    # **And the stackup, for the same reason one line up.** pcbnew can set it,
+    # and setting it there would mean it could only ever be written by the one
+    # generator that cannot run on a routed board -- so it is written to the
+    # file instead, by rules.apply_stackup(), which works on a board this file
+    # just made and on one somebody has since edited. verify.check_stackup()
+    # is what holds the two together.
+    if rules.apply_stackup(OUT / f"{PROJECT}.kicad_pcb"):
+        print("  wrote rules.FAB_STACKUP into the board")
+
 
 if os.environ.get("CV_PCB_CHILD") != "1":
     _relaunch()
@@ -152,7 +165,6 @@ from toolchain import kicad                                      # noqa: E402
 from toolchain.kisch import _uuid as symbol_uuid                 # noqa: E402
 
 FOOTPRINT_DIR = kicad.FOOTPRINT_DIR
-PROJECT = "cv-module"
 # The project's own footprint library, written by gen_project.py, holding the
 # one land pattern KiCad does not ship. Resolved here rather than by copying
 # the file into KiCad's installation, which is the same argument gen_project

@@ -53,6 +53,8 @@ the one escape_corridor() below turns out to hinge on.
 """
 
 import math
+import pathlib
+import re
 
 # ---------------------------------------------------------------------------
 # The rules as fitted
@@ -472,6 +474,141 @@ HOLE_LIMITS = {
 # and because the rule below is "the stricter of these and the fabricator's".
 KICAD_HOLE_CLEARANCE_MM = 0.25
 KICAD_HOLE_TO_HOLE_MM = 0.25
+
+
+# ---------------------------------------------------------------------------
+# The stackup, which had never been chosen
+# ---------------------------------------------------------------------------
+#
+# **out/cv-module.kicad_pcb carried no (stackup ...) block at all**, so KiCad's
+# defaults applied and the dielectric height between an outer layer and the
+# plane beneath it -- the number that sets every impedance and every coupling
+# figure on this board -- was whatever KiCad happened to assume. Nothing
+# noticed, because nothing asked: no net here is impedance-controlled, so the
+# only consumer was constraints.board_coupling(), and it had to quote a
+# *range* of heights because there was no value to quote.
+#
+# **PCBWay's own 4-layer table, read 2026-08-20**, the 1.6 mm construction at
+# 1 oz outer copper -- which is this board's class, COPPER_OZ = 1:
+#
+#     L1  F.Cu    0.5 oz base, plated to 1 oz      0.0350 mm
+#     PP          7628 RC46%, DK 4.74              0.1855 mm  (after lamination)
+#     L2  In1.Cu  1 oz                             0.0350 mm
+#     CORE        DK 4.6                           1.0300 mm
+#     L3  In2.Cu  1 oz                             0.0350 mm
+#     PP          7628 RC46%, DK 4.74              0.1855 mm
+#     L4  B.Cu    0.5 oz base, plated to 1 oz      0.0350 mm
+#
+#     finished 1.61 mm +/-10 %
+#
+# The copper and dielectric sum to 1.541 mm; the rest is solder mask, which is
+# why the published finished figure is larger than the layers add to. Quoted as
+# published rather than reconciled, because a number adjusted to make an
+# arithmetic check pass is no longer the fabricator's number.
+#
+# **Two things this settles that were being assumed.** The prepreg is DK 4.74
+# and not the 4.3 that design.PCB_ER carried as "FR-4, the usual figure, not
+# measured" -- the usual figure is for the laminate class, and 7628 is a
+# specific glass style with a specific resin content. And h is 0.1855 mm, which
+# is close to the middle of the range constraints.board_coupling() was sweeping,
+# so the pessimistic end it had been quoting was 0.5 mm of prepreg that this
+# fabricator does not offer in a 1.6 mm four-layer board.
+FAB_STACKUP = (
+    # (name, kind, thickness mm, dielectric constant or None)
+    ("F.Cu",   "copper",     0.0350, None),
+    ("PP1",    "prepreg",    0.1855, 4.74),
+    ("In1.Cu", "copper",     0.0350, None),
+    ("Core",   "core",       1.0300, 4.60),
+    ("In2.Cu", "copper",     0.0350, None),
+    ("PP2",    "prepreg",    0.1855, 4.74),
+    ("B.Cu",   "copper",     0.0350, None),
+)
+FAB_FINISHED_MM = 1.61
+
+
+def outer_dielectric():
+    """The prepreg an outer layer references, as (thickness mm, Dk).
+
+    Both outer layers see the same construction, which is what makes the board
+    symmetric and is the reason a four-layer stackup is built this way. This is
+    the `h` and `er` every microstrip figure on this board depends on, and
+    before FAB_STACKUP existed there was no value to hand them.
+    """
+    for index, (name, kind, thickness, dk) in enumerate(FAB_STACKUP):
+        if kind in ("prepreg", "core"):
+            return thickness, dk
+    raise AssertionError("FAB_STACKUP has no dielectric in it")
+
+
+def stackup_thickness():
+    """What the declared layers add to, mm. Not the finished figure."""
+    return sum(row[2] for row in FAB_STACKUP)
+
+
+def stackup_sexp():
+    """FAB_STACKUP as the `(stackup ...)` block KiCad keeps inside `(setup)`.
+
+    Emitted as text rather than set through `pcbnew`, and that is the point:
+    **gen_pcb.py cannot run on a routed board.** It places and pours and lays
+    no signal copper, so re-running it to change a piece of metadata would
+    destroy the routing -- which is exactly the hazard
+    gen_pcb_guard.refuse_to_discard_routing() exists to refuse. A stackup is
+    not copper, so it does not need the generator that draws copper.
+
+    So this writes a string and apply_stackup() edits the file, which works on
+    a fresh board and on a hand-edited one alike. gen_pcb.py calls it after
+    SaveBoard() for the same reason it re-runs gen_project.py there: KiCad's
+    own save is what flattens both.
+    """
+    lines = ['\t\t(stackup']
+    for name, kind, thickness, dk in FAB_STACKUP:
+        if kind == "copper":
+            lines += [f'\t\t\t(layer "{name}"',
+                      '\t\t\t\t(type "copper")',
+                      f'\t\t\t\t(thickness {thickness})',
+                      '\t\t\t)']
+        else:
+            lines += [f'\t\t\t(layer "dielectric {name}"',
+                      '\t\t\t\t(type "prepreg")' if kind == "prepreg"
+                      else '\t\t\t\t(type "core")',
+                      f'\t\t\t\t(thickness {thickness})',
+                      '\t\t\t\t(material "FR4")',
+                      f'\t\t\t\t(epsilon_r {dk})',
+                      '\t\t\t\t(loss_tangent 0.02)',
+                      '\t\t\t)']
+    lines += ['\t\t\t(copper_finish "None")',
+              '\t\t\t(dielectric_constraints no)',
+              '\t\t)']
+    return "\n".join(lines) + "\n"
+
+
+_STACKUP_BLOCK = re.compile(r"\n\t\t\(stackup\n(?:.*?\n)*?\t\t\)\n")
+
+
+def apply_stackup(board):
+    """Put the declared stackup into a board file, replacing any it has.
+
+    Idempotent, and it touches nothing but the `(setup ...)` block -- no
+    footprint, no segment, no via, no zone. Returns True if the file changed.
+
+    **The board had none at all**, which is how the dielectric height stayed
+    unchosen through every pass: KiCad supplies defaults for a board that does
+    not declare one, and a default is invisible to every check that reads what
+    is written.
+    """
+    board = pathlib.Path(board)
+    text = board.read_text()
+    replacement = "\n" + stackup_sexp()
+    if _STACKUP_BLOCK.search(text):
+        updated = _STACKUP_BLOCK.sub(replacement, text, count=1)
+    else:
+        marker = "\t(setup\n"
+        index = text.index(marker) + len(marker)
+        updated = text[:index] + stackup_sexp() + text[index:]
+    if updated == text:
+        return False
+    board.write_text(updated)
+    return True
 
 
 def hole_rules(fabricator=None):
@@ -1005,9 +1142,33 @@ def write():
     path = docs / "rules.md"
     path.write_text(
         "# Design rules, and the fabrication class behind them\n\n"
-        "Generated by `rules.py`. Every number is read from JLCPCB's published "
-        "capabilities page or derived from the two that are fitted; the "
-        "quotations and the date read are in that file's docstring.\n\n"
+        f"Generated by `rules.py`. Every number is read from "
+        f"{FABRICATOR}'s published capabilities page or derived from the two "
+        f"that are fitted; the quotations and the date read are in that "
+        f"file's docstring.\n\n"
+        "**This sentence said JLCPCB for four passes after the board moved to "
+        "PCBWay** — in a generated document whose own body quotes PCBWay's "
+        "figures three lines below it. A header is prose and the table is "
+        "data, and only the data was ever regenerated against the constant "
+        "that changed. It reads `FABRICATOR` now.\n\n"
+        "## The stackup\n\n"
+        f"{FABRICATOR}'s own 4-layer {FAB_FINISHED_MM} mm construction at "
+        f"{COPPER_OZ} oz outer copper, which is this board's class. It had "
+        "never been chosen: the board carried no `(stackup ...)` block at all, "
+        "so KiCad's defaults were in force and the dielectric height — the "
+        "number every impedance and coupling figure depends on — was whatever "
+        "KiCad assumed. `verify.check_stackup()` is what holds it now.\n\n"
+        "| layer | kind | thickness mm | Dk |\n|---|---|---|---|\n"
+        + "".join(f"| {name} | {kind} | {thickness} | "
+                  f"{dk if dk else '—'} |\n"
+                  for name, kind, thickness, dk in FAB_STACKUP)
+        + f"\nThe layers sum to {stackup_thickness():.3f} mm against a "
+        f"published finished {FAB_FINISHED_MM} mm; the difference is solder "
+        "mask. Quoted as published rather than reconciled, because a number "
+        "adjusted to make an arithmetic check pass is no longer the "
+        f"fabricator's number. An outer layer references "
+        f"{outer_dielectric()[0]} mm of prepreg at Dk {outer_dielectric()[1]}."
+        "\n\n"
         "```\n" + buffer.getvalue().rstrip() + "\n```\n\n"
         "## Does a routing cell fit between two SOIC pins?\n\n"
         "The question the routing pass was left with, and the reason the "

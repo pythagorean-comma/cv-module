@@ -1205,6 +1205,53 @@ def check_rules(project, board):
     return problems
 
 
+def check_stackup(board):
+    """The board's stackup is rules.FAB_STACKUP, layer by layer.
+
+    **The board had no stackup at all for the whole life of the design**, which
+    is how the dielectric height stayed unchosen: KiCad supplies defaults for a
+    board that does not declare one, and a default is invisible to every check
+    that reads what is written. Nothing failed, because nothing asked -- no net
+    here is impedance-controlled, so the only consumer was
+    constraints.board_coupling(), which could not quote a height and swept a
+    range instead.
+
+    That is this repository's own recurring shape one more time: a value that
+    exists only as somebody else's default cannot be wrong, the way
+    RAILS["V3V3"] with no net could not be wrong and zone P with no parts could
+    not be wrong. The fix is the same each time -- make it real, then check it.
+
+    Compared by thickness and dielectric constant rather than by name, because
+    the names are this file's own invention and the numbers are PCBWay's.
+    """
+    if not board.exists():
+        raise SystemExit(f"{board} does not exist -- run gen_pcb.py")
+    tree = sexp.parse(board.read_text())
+    setup = sexp.find(tree, "setup")
+    stackup = sexp.find(setup, "stackup") if setup is not None else None
+    if stackup is None:
+        return ["the board declares no stackup, so KiCad's defaults are in "
+                "force and rules.FAB_STACKUP is not what will be built -- "
+                "rules.apply_stackup() is what writes it"]
+    found = []
+    for layer in sexp.find_all(stackup, "layer"):
+        thickness = sexp.find(layer, "thickness")
+        if thickness is None:
+            continue
+        epsilon = sexp.find(layer, "epsilon_r")
+        found.append((round(float(thickness[1]), 6),
+                      round(float(epsilon[1]), 6) if epsilon else None))
+    declared = [(round(row[2], 6), round(row[3], 6) if row[3] else None)
+                for row in rules.FAB_STACKUP]
+    problems = []
+    if found != declared:
+        problems.append(
+            f"the board's stackup is {found} and rules.FAB_STACKUP declares "
+            f"{declared} -- run rules.apply_stackup(); the dielectric height "
+            f"is what every coupling figure on this board is computed at")
+    return problems
+
+
 def check_ground_split_on_the_board(board):
     """The two ground pours do not overlap, which DRC will not tell you.
 
@@ -2215,6 +2262,7 @@ CHECKS = (
      ("board",)),
     ("   the two pours do not overlap", check_ground_split_on_the_board,
      ("board",)),
+    ("   the stackup is rules.py's stackup", check_stackup, ("board",)),
     ("   DRC's rules are rules.py's rules", check_rules, ("project", "board")),
     ("   the converter is wired and not overrun", check_supply,
      ("nets", "values")),

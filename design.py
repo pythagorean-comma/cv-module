@@ -1063,24 +1063,37 @@ def rail_crosstalk(width_mm=None, psrr_db=OPAMP_PSRR_20K_DB,
 # Sixty-two decibels, from one substitution. The same substitution is available
 # here and would be just as wrong.
 
-# **The stackup is not declared, and h is the widest term in the answer.**
-# out/cv-module.kicad_pcb carries no (stackup ...) block, so KiCad's defaults
-# apply and the dielectric height between an outer layer and the plane beneath
-# it has never been chosen. Across the plausible range for a 1.6 mm four-layer
-# board it is worth about 9 dB, which does not change the verdict -- the
-# pessimistic end is quoted everywhere -- but it is the one input to this
-# calculation that nobody has picked. Recorded here rather than assumed
-# silently.
+# **The stackup is declared now, and this used to be a range.** These read:
+#
+#     "out/cv-module.kicad_pcb carries no (stackup ...) block, so KiCad's
+#     defaults apply and the dielectric height between an outer layer and the
+#     plane beneath it has never been chosen. Across the plausible range for a
+#     1.6 mm four-layer board it is worth about 9 dB ... it is the one input to
+#     this calculation that nobody has picked."
+#
+# Somebody picked it. rules.FAB_STACKUP is PCBWay's own 4-layer 1.6 mm
+# construction at 1 oz outer copper, read off their table, and it supplies both
+# numbers: 0.1855 mm of 7628 prepreg at DK 4.74. **Two assumptions went with
+# it.** PCB_ER was 4.3 -- "FR-4, the usual figure, not measured" -- and the
+# usual figure is for the laminate class rather than for a named glass style at
+# a stated resin content. And the sweep's pessimistic end was 0.50 mm, which is
+# not a prepreg this fabricator puts in a 1.6 mm four-layer board at all.
+#
+# The range is kept as PCB_H_SWEEP, because a figure quoted at one height wants
+# something to say how much the height was worth -- and because if the board
+# ever moves to another fabricator this is what has to be re-read rather than
+# re-derived.
+PCB_H_MM = rules.outer_dielectric()[0]
+PCB_ER = rules.outer_dielectric()[1]
+PCB_H_SWEEP = (0.10, PCB_H_MM, 0.50)   # what it was worth: about 9 dB
+PCB_COPPER_MM = 0.035                  # 1 oz, rules.COPPER_OZ_UM
+
 # Speed of light in vacuum, m/s. The second physical constant this file needs
 # that is not a component value; COPPER_RHO above is the first.
 LIGHT_M_PER_S = 299_792_458.0
 
-PCB_H_MM = (0.10, 0.20, 0.50)          # low, likely, pessimistic
-PCB_ER = 4.3                           # FR-4, the usual figure, not measured
-PCB_COPPER_MM = 0.035                  # 1 oz, rules.COPPER_OZ_UM
 
-
-def microstrip_z0(w_mm=None, h_mm=0.20, t_mm=PCB_COPPER_MM, er=PCB_ER):
+def microstrip_z0(w_mm=None, h_mm=None, t_mm=PCB_COPPER_MM, er=None):
     """Characteristic impedance of a microstrip, IPC-2141 / Hammerstad.
 
     Implemented here rather than imported: KiCadRoutingTools carries the same
@@ -1097,6 +1110,8 @@ def microstrip_z0(w_mm=None, h_mm=0.20, t_mm=PCB_COPPER_MM, er=PCB_ER):
     agreeing is exactly the sort this repo has recorded going unread.
     """
     w = rules.TRACK_MM if w_mm is None else w_mm
+    h_mm = PCB_H_MM if h_mm is None else h_mm
+    er = PCB_ER if er is None else er
     # Thickness correction: a trace of finite copper behaves as a slightly
     # wider one.
     w_eff = w + (t_mm / math.pi) * (1 + math.log(2 * h_mm / t_mm))
@@ -1109,7 +1124,7 @@ def microstrip_z0(w_mm=None, h_mm=0.20, t_mm=PCB_COPPER_MM, er=PCB_ER):
     return z_air / math.sqrt(er_eff), er_eff
 
 
-def trace_mutual_capacitance(pitch_mm, h_mm=0.20, w_mm=None):
+def trace_mutual_capacitance(pitch_mm, h_mm=None, w_mm=None):
     """Mutual capacitance between two parallel traces, farads per millimetre.
 
         k    = 0.48 exp(-0.96 s / h)         edge-coupled microstrip coupling
@@ -1128,6 +1143,7 @@ def trace_mutual_capacitance(pitch_mm, h_mm=0.20, w_mm=None):
     constant.
     """
     w = rules.TRACK_MM if w_mm is None else w_mm
+    h_mm = PCB_H_MM if h_mm is None else h_mm
     s = pitch_mm - w
     if s <= 0:
         raise ValueError(f"pitch {pitch_mm} mm is not wider than the {w} mm track")
@@ -1137,7 +1153,7 @@ def trace_mutual_capacitance(pitch_mm, h_mm=0.20, w_mm=None):
     return c_self * k / (2 * (1 - k)) * 1e-3               # F/mm
 
 
-def trace_mutual_inductance(pitch_mm, h_mm=0.20, w_mm=None):
+def trace_mutual_inductance(pitch_mm, h_mm=None, w_mm=None):
     """Mutual inductance between the same pair, henries per millimetre.
 
     The other half of the mechanism, and it is computed rather than dismissed:
@@ -1147,6 +1163,7 @@ def trace_mutual_inductance(pitch_mm, h_mm=0.20, w_mm=None):
     reason is the aggressor current: 123 uA into a 10k front end, not amps.
     """
     w = rules.TRACK_MM if w_mm is None else w_mm
+    h_mm = PCB_H_MM if h_mm is None else h_mm
     s = pitch_mm - w
     z0, er_eff = microstrip_z0(w, h_mm)
     l_self = z0 * math.sqrt(er_eff) / LIGHT_M_PER_S * 1e-3  # H/mm

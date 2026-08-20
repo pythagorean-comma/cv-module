@@ -1022,6 +1022,32 @@ def main():
         report(label, found)
         copy_path.unlink()
 
+    # **The stackup, mutated on the board rather than in the netlist.** A
+    # stackup is not a net, so no netlist mutation can reach it -- and the
+    # failure it guards against is not a wrong value but an *absent* one, since
+    # KiCad supplies defaults for a board that declares no stackup and a
+    # default is invisible to every check that reads what is written. Both are
+    # planted: a dielectric a hair thinner than PCBWay's, and the block deleted
+    # outright.
+    for label, mutate in (
+            ("a stackup dielectric drifts off rules.py",
+             lambda text: text.replace("(thickness 0.1855)",
+                                       "(thickness 0.1800)", 1)),
+            ("the board declares no stackup at all",
+             lambda text: re.sub(r"\n\t\t\(stackup\n(?:.*?\n)*?\t\t\)\n",
+                                 "\n", text, count=1))):
+        original = verify.PCB.read_text()
+        planted = mutate(original)
+        if planted == original:
+            report(f"{label} [DEAD: the mutation matched nothing]", [])
+            continue
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(planted)
+            copy_path = pathlib.Path(handle.name)
+        report(label, verify.check_stackup(copy_path))
+        copy_path.unlink()
+
     # The declaration-only checks cannot be mutated through the netlist, so
     # they are exercised against TRIADS directly and restored afterwards.
     for field, bad in (("module_end", "grounded"),

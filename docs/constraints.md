@@ -51,9 +51,10 @@ what verify.py prints and what every 'constraint N' in design.py means
     constraint 5 asks this of the loom; nothing asked it of the copper
    IVOUT4/SIN5       181.2 mm at 0.40 mm pitch, into 8 ohm
    BUF5/CVX1          20.6 mm at 0.93 mm pitch, into 142 ohm
-   capacitive, worst of 3 heights  -111.6 dB   (58 dB inside the requirement)
+   capacitive, at h = 0.1855 mm  -114.4 dB   (60 dB inside the requirement)
+   the same across the sweep    -110.9 dB   the height is worth 3.5 dB, and rules.FAB_STACKUP is what settled it
    inductive, the same         -127.6 dB   computed, not dismissed: a stiff node still takes a series emf
-   would fail at                 6071 ohm  <- the impedance decides it; the loom node is 8
+   would fail at                 8361 ohm  <- the impedance decides it; the loom node is 8
    verdict     good practice, not load-bearing
 ```
 

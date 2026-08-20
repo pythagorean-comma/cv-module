@@ -472,7 +472,7 @@ def board_coupling(board=BOARD, hz=20_000.0):
         if kind not in runs:
             continue
         run = runs[kind]
-        for height in design.PCB_H_MM:
+        for height in design.PCB_H_SWEEP:
             farads = design.trace_mutual_capacitance(
                 run["pitch_mm"], height) * run["length_mm"]
             henries = design.trace_mutual_inductance(
@@ -485,17 +485,27 @@ def board_coupling(board=BOARD, hz=20_000.0):
                 "capacitive_db": coupling_db(hz, farads, impedance),
                 "inductive_db": 20 * math.log10(induced / peak),
             })
-    capacitive = max(r["capacitive_db"] for r in rows)
+    # **The answer is at the declared height; the sweep is what it was worth.**
+    # Before rules.FAB_STACKUP existed this had to quote the worst of a range,
+    # because no height had been chosen. It is quoted at PCBWay's own 0.1855 mm
+    # now, and the sweep is kept beside it so the sensitivity stays visible --
+    # a figure that depends on an input the fabricator supplies should say so.
+    declared = [r for r in rows if r["height_mm"] == design.PCB_H_MM]
+    capacitive = max(r["capacitive_db"] for r in declared)
+    swept = max(r["capacitive_db"] for r in rows)
     # What impedance the victim would need for the worst geometry to fail. The
     # bound that makes the rest of this robust: it is the impedance, not the
     # copper, that decides the answer, and nothing here is near it.
-    worst = max(rows, key=lambda r: r["capacitive_db"])
+    worst = max(declared, key=lambda r: r["capacitive_db"])
     farads = design.trace_mutual_capacitance(
         worst["pitch_mm"], worst["height_mm"]) * worst["length_mm"]
     fails_at = 10 ** (ISOLATION_DB / 20) / (2 * math.pi * hz * farads)
     return {
         "rows": rows,
+        "declared_h_mm": design.PCB_H_MM,
         "worst_db": capacitive,
+        "worst_swept_db": swept,
+        "height_costs_db": swept - capacitive,
         "margin_db": ISOLATION_DB - capacitive,
         "fails_at_ohms": fails_at,
         "verdict": ("good practice, not load-bearing"
@@ -591,13 +601,16 @@ def _report():
         print("    constraint 5 asks this of the loom; nothing asked it of "
               "the copper")
         for row in b["rows"]:
-            if row["height_mm"] != design.PCB_H_MM[1]:
+            if row["height_mm"] != design.PCB_H_MM:
                 continue
             print(f"   {row['pair']:<16} {row['length_mm']:6.1f} mm at "
                   f"{row['pitch_mm']:.2f} mm pitch, into {row['ohms']:.0f} ohm")
-        print(f"   capacitive, worst of {len(design.PCB_H_MM)} heights "
+        print(f"   capacitive, at h = {b['declared_h_mm']:.4f} mm "
               f"{b['worst_db']:>7.1f} dB   "
               f"({b['margin_db']:.0f} dB inside the requirement)")
+        print(f"   the same across the sweep   {b['worst_swept_db']:>7.1f} dB   "
+              f"the height is worth {b['height_costs_db']:.1f} dB, and "
+              f"rules.FAB_STACKUP is what settled it")
         induced = max(r["inductive_db"] for r in b["rows"])
         print(f"   inductive, the same        {induced:>7.1f} dB   "
               f"computed, not dismissed: a stiff node still takes a series emf")
