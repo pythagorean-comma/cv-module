@@ -194,3 +194,11 @@ out/krt-work/
 out/*.drc.json
 out/cv-module-krt.kicad_pro
 out/cv-module-krt.kicad_prl
+
+# The fabrication upload. gen_fab.py writes fab/ as loose files -- gerbers, the
+# drill, the job file, the placement list and ORDER.md -- and those are tracked,
+# because they are text, they diff, and normalised they are a function of the
+# board. The zip is a container built from exactly those files, and its bytes
+# additionally depend on the zlib that built it, so tracking it would put a
+# machine into the history of a board. Rebuild it with `python3 gen_fab.py`.
+fab/*.zip

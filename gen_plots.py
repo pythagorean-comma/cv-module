@@ -17,28 +17,33 @@ their awkward flags are lifted from it, with its reasons carried across rather
 than rediscovered -- see plot_layout() in particular, where three settings that
 look cosmetic are not.
 
-**They go in `docs/` and not in a `fab/`, and that is derived rather than
-copied.** The mixer keeps its equivalents in `fab/` because they travel with
+**They go in `docs/` and not in a `fab/`, and that survived a `fab/`
+appearing.** The mixer keeps its equivalents in `fab/` because they travel with
 gerbers to a fabricator and an assembler. CLAUDE.md's rule is that the split is
 by audience: `out/` is what another tool reads next, `docs/` is what a person
-reads at a screen. A `fab/` appears when there is something to fabricate, and
-these move into it then.
+reads at a screen. This paragraph used to end *"a `fab/` appears when there is
+something to fabricate, and these move into it then"* -- and one now has, so
+the prediction was due. It is not taken: `gen_fab.py` writes what a fabricator
+is *given*, and a schematic PDF, a per-layer layout and a raytraced render are
+not that. They are how a person reviews this design, which is the audience rule
+deciding it rather than the sibling's arrangement.
 
-**No gerbers, and the reason has changed from a gate to a decision.** This
-paragraph used to say that a gerber set here "would be a complete-looking
+**No gerbers here, and orderable() is still what says why -- it is just no
+longer the last word.** This paragraph has been through three states, which is
+the useful part of it. It said a gerber set "would be a complete-looking
 package for a board that must not be ordered" -- three parts with no footprint,
 three blocks not drawn -- and orderable() read both facts off design.py rather
 than restating them, so that drawing the last block would change the answer
-without anybody remembering to edit prose. It has. `design.DEFERRED` and
-`design.UNSPECIFIED` are both empty, every part has a footprint, and
-orderable() returns nothing.
+without anybody remembering to edit prose. It did. Then it said that what was
+left was a decision rather than a gate, and named the decision: which layers,
+which format, which fabricator's drill convention.
 
-So what stops a fabrication package now is not the design. It is that writing
-one is a decision -- which layers, which format, which fabricator's drill
-convention, and whether the hole clearance this board is routed to is the one
-it should be ordered at (docs/fabrication-class.md's last section). That
-decision has not been taken, and orderable()'s empty list is how this file says
-so rather than by carrying a paragraph that is no longer true.
+**That decision has been taken and `gen_fab.py` is it.** orderable() is
+imported there, unchanged and still authoritative, as one of the things that
+must be empty before a package is written -- the others being KiCad's own DRC,
+run at the moment of writing rather than read off whatever report was lying
+about. What this file still does not write is a gerber, and that is now a
+division of labour rather than a refusal.
 """
 
 import pathlib
@@ -321,8 +326,8 @@ def main():
         for reason in reasons:
             print(f"      {reason}")
     else:
-        print("  nothing left unresolved -- a fab package is writable now, "
-              "and gen_plots.py is where it goes")
+        print("  nothing left unresolved -- and the fabrication package is "
+              "written by gen_fab.py, which imports orderable() as its gate")
 
 
 if __name__ == "__main__":

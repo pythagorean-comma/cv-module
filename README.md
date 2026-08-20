@@ -89,7 +89,8 @@ does not choose. See [`controller.md`](docs/controller.md).
 | the Schottky clamp | ✅ **read, and it had failed** — the BAT54 missed by 5.5 dB. PMEG2010AEH fits with 1.5 dB |
 | the supply | ✅ **chosen, drawn, placed, routed and checked** — Traco TMR 6-2422WI, isolated, ±12 V at 250 mA, **580 kHz PWM**, on this board. The isolation barrier is copper `verify.py` measures |
 | the +5 V rail | ✅ NCP1117 — and **the package is the answer**: 0.77 W against the SOT-223's own 160 °C/W is 124 degrees of rise, so it is a DPAK |
-| documents to look at | ✅ the [schematic](docs/cv-module-schematic.pdf), the [layout](docs/cv-module-layout.pdf) one page per copper layer, and a [render](docs/cv-module-top.png) — **all three of the same design and the same board**, which they were not last pass. `gen_plots.py --verify` replots the tracked board into a temporary directory and compares bytes. ❌ no gerbers: `orderable()` returns nothing now, so writing them is a decision rather than a gate |
+| the fabrication package | ✅ **written, and it was a decision rather than a gate** — `fab/` holds nine gerbers, one combined drill file, the job file, the placement list and a generated `ORDER.md`. The layer set is *measured*: `package_layers()` exports the candidates and reads them back, so `B.Paste` and `B.SilkS` are absent because this board draws nothing on them rather than because a list says so. `check_holes()` counts the drill against the board — 995 vias + 34 plated + 4 unplated = **1033 hits**, both ways — and `--verify` says the tracked package is a package of the tracked board. **`ORDER.md` leaves finish, colours, test and panelisation open**, because nothing here derives them |
+| documents to look at | ✅ the [schematic](docs/cv-module-schematic.pdf), the [layout](docs/cv-module-layout.pdf) one page per copper layer, and a [render](docs/cv-module-top.png) — **all three of the same design and the same board**, which they were not last pass. `gen_plots.py --verify` replots the tracked board into a temporary directory and compares bytes. The gerbers are no longer here: they are in [`fab/`](fab/ORDER.md), written by `gen_fab.py`, because what a fabricator is given and what a person reviews are two audiences |
 | the inlet choke | ✅ **fitted, and it is the second half of `barrier_return()`** — a WE-SL2 744222, 2 × 1 mH at 800 mA. The 580 kHz residual at the audio bond goes from 1.24 mV to **1.14 µV**: 42 dB *under* the mixer's own noise floor, where it was 18.7 dB over |
 | the envelope ADC | ✅ **chosen, drawn, placed, routed and checked** — MCP3564. The ADS131M08 lost on full scale: its reference input stops at 1.3 V, so 1.20 V of full scale against a 1.233 V signal |
 | the 3.3 V rail | ✅ **real now, and it had been declared for four passes with no net** — `RAILS` said `V3V3` and `supply-decision.md` said there is no such rail. `check_rails_are_drawn()` is the instrument |
@@ -106,10 +107,12 @@ deleted along with the coarse pad it existed to drive. Every part has a
 footprint, no courtyard is reserved, and no pin is still a role.
 
 **What follows from that is worth stating rather than discovering.**
-`gen_plots.orderable()` reads both of those and returns nothing now, so
-**nothing in the design stops a fabrication package being written** — and
-`gen_plots.py` still writes none. Gerbers are a decision somebody takes, and it
-is on the open list below rather than in the code.
+`gen_plots.orderable()` reads both of those and returns nothing, so **nothing
+in the design stopped a fabrication package being written** — and one is
+written now, by `gen_fab.py`, into [`fab/`](fab/ORDER.md). It was a decision
+somebody took rather than a step that became available, and `orderable()` is
+still the gate: it is imported there, unchanged, beside a DRC run of the
+package's own.
 
 Choosing them also settled a bug that only existed while they were not. The
 dict is keyed by a part's *value*, and an unchosen part's value is `None` — so
@@ -139,7 +142,7 @@ python3 design.py && python3 gen_netlist.py && python3 gen_sch.py \
   && python3 verify.py && python3 test_verify.py \
   && python3 constraints.py && python3 delta.py && python3 floorplan.py \
   && python3 gen_bom.py && python3 gen_assumptions.py && python3 rules.py \
-  && python3 gen_plots.py
+  && python3 gen_plots.py && python3 gen_fab.py
 ```
 
 **`gen_pcb.py` is not in it.** It places, pours and stitches, and it lays no
@@ -260,6 +263,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | `gen_sch.py` / `gen_project.py` | the sheet, the project KiCad needs to read it, and **the project's own symbol and footprint libraries** — `out/cv.kicad_sym` and `out/cv.pretty`, the second holding the one land pattern KiCad does not ship |
 | `rules.py` | the fabrication rules, the routing pitch derived from them, and the fab class read first-hand |
 | `gen_plots.py` | the schematic, the layout and a render — the outputs you can look at without KiCad |
+| `gen_fab.py` | the fabrication package: gerbers, drill, job file, CPL and `ORDER.md`. Gated on `gen_plots.orderable()` and a DRC run of its own; `--verify` compares the tracked package against a fresh export of the tracked board |
 | `placement.py` | the floorplan as coordinates. It does not import KiCad |
 | `gen_pcb.py` | the board, through the deprecated `pcbnew` bindings — **place and pour**, and `--seed-routing` for one pass of the router |
 | `route.py` | the maze router. **It runs once, as a seed, and no copper it laid is on the board any more** — `krt.py` re-routed every net. Kept because a board started from nothing still wants a legal route rather than a ratsnest |
@@ -268,6 +272,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | [`FINDINGS.md`](docs/FINDINGS.md) | things wrong in the mixer repo — noted, never fixed |
 | [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) | everything guessed, with what it costs if wrong |
 | `out/` | for machines: schematic, board, project, netlist, BOM as CSV. All generated |
+| [`fab/`](fab/ORDER.md) | for a fabricator: gerbers, drill, job file, CPL and `ORDER.md`. All generated; the `.zip` is the upload and is not tracked |
 | `docs/` | for people: [floorplan](docs/floorplan.md), [constraint audit](docs/constraints.md), [design rules](docs/rules.md), [shopping list](docs/SHOPPING.md), and the three plots. All generated |
 
 ## The results worth knowing
@@ -1009,12 +1014,13 @@ They live in `docs/` rather than a `fab/`, and that is derived rather than
 copied from the sibling. The mixer's equivalents sit in `fab/` because they
 travel with gerbers to a fabricator. Nothing here can travel anywhere yet, so
 these are documents for reviewing an unfinished design, and CLAUDE.md's rule is
-that the split is by audience. **There are deliberately no gerbers**, and
-`gen_plots.orderable()` states why by reading `design.UNSPECIFIED` and
+that the split is by audience. **There were deliberately no gerbers**, and
+`gen_plots.orderable()` stated why by reading `design.UNSPECIFIED` and
 `design.DEFERRED` rather than by carrying a paragraph somebody has to remember
-to delete: three parts have no footprint because nobody has chosen them, and
-three blocks are not drawn. A gerber set would be a complete-looking package for
-a board that must not be ordered.
+to delete: three parts had no footprint because nobody had chosen them, and
+three blocks were not drawn. A gerber set would have been a complete-looking
+package for a board that must not be ordered. **All three counts are zero now
+and `fab/` exists** — written by `gen_fab.py`, gated on that same function.
 
 The two PDFs are byte-normalised, which is the mixer's `--quality basic`
 argument arriving one file type later. Two runs over an unchanged board differed
@@ -1357,8 +1363,9 @@ Three more things the pass turned up, each recorded where it happened:
 
 **Everything a check can decide is decided.** `verify.py` passes end to end,
 `test_verify.py` catches all 94 planted faults, `placement.check_courtyard_gap()`
-is at zero, DRC is at zero and so is the unrouted count. What is open is work
-on a bench and one decision about copper that is a person's to take.
+is at zero, DRC is at zero and so is the unrouted count. The fabrication
+package is written. What is open is work on a bench, a review of copper that no
+check can grade, and the order-form fields `fab/ORDER.md` lists as open.
 
 **Ten assumptions were open and eight are**, which is the other thing this
 pass moved: one closed by reading a page, two retired against their own whole
@@ -1399,22 +1406,27 @@ declared range, and one decided with a trigger attached.
    VSYS pin with GPIO23 high. Floors of **53 %** and **45 %**, each with the
    other stage at its own pessimistic end, against declared ranges starting at
    75 and 86.
-4. **Gerbers.** `gen_plots.orderable()` returns nothing now: `DEFERRED` and
-   `UNSPECIFIED` are empty, every part has a footprint, and the unrouted count
-   is zero. **Nothing in the repository gates a fabrication package any more**,
-   which makes writing one a decision somebody takes rather than a step that
-   becomes available.
+4. ~~**Gerbers.**~~ **Written — `fab/`, by `gen_fab.py`.** The gate was
+   empty and what was left was a decision, and it has been taken. Nine
+   gerbers, one combined drill file, the job file, the CPL and a generated
+   `ORDER.md`; the layer set derived by exporting and reading back, every
+   timestamp normalised so the package is a function of the board, and
+   `check_holes()` counting 1033 drill hits against the board's own 995 vias,
+   34 plated and 4 unplated pads.
 
-   **What gates it is item 1 and not item 2, and that is derived rather than
-   assumed.** The ordering written here used to say "after item 1" while item 1
-   was hand routing, which was right for the reason that a fab package is a
-   picture of copper. It is *not* right about the bench: the decision waiting
-   on `MEASURED["noise_floor"]` moves `R_IN` from 12k1 to 7.5 kΩ, and every
-   resistor on this board is `R_FP` — one 0805 land — so that change is twelve
-   **values** and not one millimetre of copper. It gates the assembly BOM, and
-   only matters to a board order at all if the two are placed together. So
-   gerbers are blocked by nothing except somebody deciding the router's board
-   is the board to fabricate.
+   **What is still open is the order, and `ORDER.md` says which parts:**
+   surface finish, mask and silkscreen colour, electrical test, panelisation,
+   IPC class, quantity. Not one of them is derivable from anything in this
+   repository, so not one of them is filled in.
+
+   **And it found a third board thickness.** The job file hands a fabricator
+   `BoardThickness: 1.6`, which is KiCad's own default — against
+   `rules.FAB_FINISHED_MM` = 1.61, what PCBWay publishes for this
+   construction, and the 1.541 mm `rules.FAB_STACKUP` sums to without solder
+   mask. The stackup pass made the layer table real and left the summary field
+   behind; nothing owned it until this file read it. `ORDER.md` names the
+   figure to order to. **Setting it is a one-field edit in KiCad's Board
+   Setup, and it is a person's edit because the board is nobody's to rewrite.**
 
 ### Closed this pass
 

@@ -34,6 +34,7 @@ import copy
 import json
 import pathlib
 import re
+import shutil
 import sys
 import tempfile
 import types
@@ -889,6 +890,56 @@ def main():
     label = "the two ground pours overlap on an inner layer"
     report(label, found)
     planted.unlink()
+
+    # **gen_fab.py's two checks, which are not verify.py checks either.** A
+    # fabrication package is the one artefact in this repository that leaves
+    # it, so "the check passed" has to mean something stronger here than
+    # anywhere else -- and both of its checks answer questions a byte
+    # comparison against itself cannot.
+    #
+    # The faults are planted in a *copy* of the package, the way the pour
+    # overlap above is planted in a copy of the board, because both checks read
+    # files rather than a model of them. Nothing under fab/ is touched.
+    import gen_fab
+    drill = gen_fab.FAB / f"{gen_fab.PROJECT}.drl"
+    if not drill.exists():
+        report("gen_fab: the package exists to be checked", False)
+    else:
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch = pathlib.Path(scratch)
+            for path in gen_fab.FAB.iterdir():
+                if path.is_file() and path.suffix.lower() != ".zip":
+                    shutil.copy2(path, scratch / path.name)
+
+            # A drill file that has lost holes. This is the fault a byte
+            # comparison structurally cannot see: re-exporting the same board
+            # with the same wrong option gives the same wrong file, for ever.
+            short = scratch / "short.drl"
+            lines = drill.read_text().splitlines(keepends=True)
+            kept = [line for index, line in enumerate(lines)
+                    if not (line.startswith("X") and index % 3 == 0)]
+            short.write_text("".join(kept))
+            report("gen_fab: the drill file has lost holes",
+                   bool(gen_fab.check_holes(verify.PCB, short)))
+
+            # A mounting hole plated by mistake -- one word in one attribute
+            # line, no change to any coordinate, and a short to whatever pours
+            # around it. The count check above passes on this file: the hits
+            # are all still there, and only their plating moved.
+            replated = scratch / "replated.drl"
+            replated.write_text(
+                drill.read_text().replace("TA.AperFunction,NonPlated",
+                                          "TA.AperFunction,Plated"))
+            report("gen_fab: an unplated hole is offered up plated",
+                   bool(gen_fab.check_holes(verify.PCB, replated)))
+
+            # And the stale package: a tracked file that is not what this board
+            # exports. One character inside a coordinate, which is what a
+            # package left behind by an older board looks like from here.
+            edge = scratch / f"{gen_fab.PROJECT}-Edge_Cuts.gm1"
+            edge.write_text(edge.read_text().replace("X10", "X11", 1))
+            report("gen_fab: the tracked package is of an older board",
+                   bool(gen_fab.check_package(verify.PCB, scratch)))
 
     # **gen_pcb.py's own guard, which is not a verify.py check and so cannot be
     # planted through CASES.** It is the slot route.check_no_shorts() used to

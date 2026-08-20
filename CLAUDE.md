@@ -102,9 +102,11 @@ converter, the envelope ADC, the envelope rectifier and the fail-safe went
 before it, and the relay drive was deleted rather than drawn. What follows from
 that is worth knowing before it is discovered: `gen_plots.orderable()` reads
 `DEFERRED` and `UNSPECIFIED`, both are empty, and every part has a footprint —
-so **nothing stops a fabrication package being written any more**, and
-`gen_plots.py` still deliberately writes none. Gerbers are a decision, not an
-oversight; see the open list in `README.md`.
+so **nothing stopped a fabrication package being written any more** -- and one
+is written now, by `gen_fab.py`, into `fab/`. `orderable()` is still the gate
+and is imported there rather than restated. Gerbers were a decision and the
+decision has been taken; what is still open is the *order*, and `fab/ORDER.md`
+lists which fields.
 
 1. **Do not invent values.** If something is not in `docs/hardware-spec-v0.md` and
    cannot be *derived* from it, stop and ask. A schematic full of plausible values
@@ -515,6 +517,62 @@ is right on this board is a person's call and no check here can make it --
 anything about the copper as laid, and it says the worst channel-to-channel
 adjacency is **-114.4 dB against -54 dB**. So the recommendation for *future*
 runs is unchanged and is about scope: re-route a region, not the board.
+
+## The fabrication package exists, and what it will not decide is the point
+
+**`gen_fab.py` writes `fab/`, and the gate it reads is the one that was
+already there.** `gen_plots.orderable()` is imported rather than restated, and
+KiCad's own DRC is run *at the moment of writing* rather than read off whatever
+report happened to be on disk -- the sibling's rule, whose `build.sh` deletes
+the zip when DRC is not clean rather than leaving the last good one beside a
+broken board.
+
+Four things about it that must survive compaction:
+
+* **The layer set is a measurement, not a list.** `package_layers()` exports
+  the candidate set, reads each file back, and drops any that draws nothing.
+  On this board that is `B.Paste` and `B.SilkS`, because all 290 parts are on
+  the top. The sibling writes its layer list down and asserts separately that
+  its back silk is empty -- two artefacts that have to agree, and its own
+  record is that they did not: an empty `B.SilkS` shipped in two zips for the
+  life of the design. A derivation cannot go stale that way, and if somebody
+  puts a legend on the back tomorrow the layer comes back by itself.
+* **`F.Fab` is never in the package and that is the one mistake nothing
+  downstream would catch.** It carries a second closed board outline, so CAM
+  picking it up instead of `Edge.Cuts` returns the wrong board shape. `NEVER`
+  is the denial list, each entry with its reason.
+* **`check_holes()` is the check that is not a byte comparison**, and it is
+  the one that could catch a wrong export *option*. The drill file's hits are
+  counted against the board's own vias, plated and unplated pads -- 995 + 34
+  + 4 = 1033, measured both ways -- and its unplated hits against the board's
+  unplated pads, because a mounting hole plated by mistake is a short to
+  whatever pours around it. `--verify` proves the package is of *this* board;
+  only this proves it is *right about* it. `test_verify.py` plants both, plus
+  a stale package, and catches all three.
+* **The package is tracked loose and the zip is ignored**, which inverts the
+  sibling deliberately. There the zip is tracked because `zip` updates an
+  archive in place -- a layer that stops being generated never leaves it.
+  Here the directory is rebuilt and the archive rewritten by `zipfile`, so
+  that failure is unavailable; what is left is that gerbers are text that
+  diffs and a zip's bytes carry the zlib that built it. Two exports of one
+  board are byte-identical once `FAB_EPOCH` has replaced four timestamps --
+  `PDF_EPOCH`'s argument, one artefact along, measured the same way.
+
+**And it found a third thickness.** `(general (thickness 1.6))` on the board is
+KiCad's default; `rules.FAB_FINISHED_MM` is 1.61, what PCBWay publishes for
+this construction; `rules.FAB_STACKUP` sums to 1.541, the same construction
+without solder mask. The job file hands a CAM operator the *first* of those as
+`BoardThickness`, and nothing in this repository owned it until `gen_fab.py`
+read it -- the stackup pass fixed the layer table and left the summary field
+behind. `ORDER.md` states the figure to order to and names the disagreement;
+the board is not edited to fix it, because the board is not this file's to
+edit.
+
+**What it refuses to do is finish the order.** Surface finish, mask and silk
+colour, electrical test, panelisation, IPC class, quantity: none is derivable
+from anything here, so `ORDER.md` lists them as open. A package that looks
+complete with a guess in it is the failure `ASSUMPTIONS.md` exists to prevent,
+arriving at the one artefact that leaves the repository.
 
 ## The placement is packed, not nudged, and the two functions are the rule
 
@@ -1189,10 +1247,19 @@ cv-module/
                          own symbols *and* its one own footprint
   gen_bom.py             -> out/cv-module-bom.csv, docs/SHOPPING.md
   gen_plots.py           -> docs/cv-module-{schematic,layout}.pdf, -top.png
+  gen_fab.py             -> fab/ -- the gerbers, the drill, the job file, the
+                         placement list and ORDER.md. Reads gen_plots.orderable()
+                         and KiCad's own DRC as its gate, derives the layer set
+                         by exporting and reading back, and normalises every
+                         timestamp so the package is a function of the board.
+                         --verify says the tracked package is that board's
   gen_assumptions.py     -> docs/ASSUMPTIONS.md
   constraints.py         -> docs/constraints.md
   floorplan.py           -> docs/floorplan.md
   rules.py               -> docs/rules.md
+
+  fab/                   what a fabricator is given. Generated, tracked as
+                         loose text; fab/*.zip is the upload and is ignored
 
   out/                   for machines: the sheet, the board, the project, the
                          netlist, the BOM as CSV, and from-kicad.net /
@@ -1223,7 +1290,7 @@ python3 design.py && python3 gen_netlist.py && python3 gen_sch.py \
   && python3 verify.py && python3 test_verify.py \
   && python3 constraints.py && python3 delta.py && python3 floorplan.py \
   && python3 gen_bom.py && python3 gen_assumptions.py && python3 rules.py \
-  && python3 gen_plots.py
+  && python3 gen_plots.py && python3 gen_fab.py
 ```
 
 **`gen_pcb.py` is not in it.** It places, pours and stitches, and it lays no
@@ -1323,9 +1390,11 @@ installing KiCad** — the schematic, one plotted page per copper layer, and a
 render of the board. It must run after `gen_pcb.py`, and it rewrites each PDF's
 `/CreationDate` to the epoch so that two builds of one board give byte-identical
 files: these are tracked binaries, and a tracked binary that churns on every run
-is one whose history says nothing. **It deliberately writes no gerbers.**
-`gen_plots.orderable()` holds the reason and reads it off `design.UNSPECIFIED`
-and `design.DEFERRED`, so choosing the last part is what changes the answer.
+is one whose history says nothing. **It writes no gerbers, and that is now a
+division of labour rather than a refusal:** `gen_fab.py` writes them, and
+imports `gen_plots.orderable()` -- which still reads `design.UNSPECIFIED` and
+`design.DEFERRED` -- as one of its two gates. The other is KiCad's own DRC, run
+when the package is written rather than read off an old report.
 
 **`gen_pcb.py` comes before `verify.py` for the same reason the schematic
 generators do**: verify.py runs `kicad-cli pcb drc` over the board and reads the
