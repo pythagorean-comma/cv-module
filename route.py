@@ -1,5 +1,32 @@
 """A maze router: pads in, polylines out, and no KiCad anywhere in it.
 
+**Deleted for one pass and restored, and the restoration is a narrower claim
+than the deletion was.** It went when the RP2040 became a Pico module, on the
+reasoning that the problem it existed for -- a 0.40 mm pin pitch -- had gone
+with the QFN, and that its real cost was making the *board* a function of
+design.py: no question about geometry could be asked of a layout until it had
+been answered in Python first. That cost was real and the rule it produced
+stands:
+
+    **the netlist is generated and authoritative; the board is hand-laid and
+    verified.**
+
+What is restored is not that rule's opposite. This file runs **once**, as a
+seed -- `gen_pcb.py --seed-routing` -- and what it produces is a starting
+point somebody edits in KiCad, not an output the build reproduces. Nothing
+downstream consults it: verify.py asks its questions of the saved board by
+reading it back, and UNROUTED_ITEMS counts what is unmade whoever left it
+unmade. gen_pcb_guard.refuse_to_discard_routing() is what stops a second run
+happening by accident, and it was written before this file came back.
+
+**And the board it now runs on is inside its competence rather than at the
+edge of it**, which is the other half of the argument. It closed the QFN board
+at 0 unrouted and 0 DRC on a 0.23 mm grid at 0.09/0.09 -- the finest class
+this project has costed. The fitted class is 0.20/0.20 on a 0.45 mm grid: two
+adjacent tracks are 0.25 mm apart against the 0.20 they need, the finest pitch
+left is the MCP3564's 0.65 mm TSSOP, and there are 3.7x fewer cells. Nothing
+in it changed to come back.
+
 Separate from gen_pcb.py for the reason placement.py is: this is arithmetic on
 coordinates, and arithmetic that can only run inside KiCad's own interpreter is
 arithmetic nobody can check. gen_pcb.py hands it pad positions and lays down
@@ -618,6 +645,24 @@ class Grid:
         for column, row in self._cells_within(x0, y0, x1, y1, reach):
             self.no_via.setdefault(self.index(column, row), set()).add(net)
 
+    def block_no_via(self, x0, y0, x1, y1):
+        """Cells where no via may go at all, whatever net it is on.
+
+        **The one keep-out on this grid that is not about whose copper is
+        near.** Everything else block_pad_for_vias() records is a clearance --
+        a via on the pad's own net may sit inside its halo, which is what a
+        fan-out via does. A *hole* rule is not that: two drills 0.41 mm apart
+        collide whether or not the same current flows through them, and DRC
+        found exactly that between a routed via and the through-hole pin it
+        was serving. gen_pcb.drill_halos() is where the distance is computed.
+
+        Recorded through the same `no_via` table under a name no net can have,
+        so via_fits() refuses it without a second rule.
+        """
+        for column, row in self._cells_within(x0, y0, x1, y1, 0.0):
+            self.no_via.setdefault(self.index(column, row), set()).add(
+                "\0drill")
+
     def via_fits(self, column, row, net, crossable=()):
         held = self.no_via.get(self.index(column, row))
         if held and held - {net}:
@@ -864,7 +909,7 @@ def _connect(grid, net, entries, access, crossable=None, claim=True):
 
 
 def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None,
-              escapes=None):
+              escapes=None, no_via=()):
     """Route every net once, on a clean grid, in an order this pass is given.
 
     `first` is the nets to attempt before the rest; everything else follows in
@@ -910,6 +955,10 @@ def _one_pass(rect, pads, obstacles, rules, skip, first, reserve=None,
         for layer in layers:
             grid.block_box(layer, x - half_w, y - half_h, x + half_w,
                            y + half_h, "blocked")
+    # Plated holes, which are a via keep-out and not a clearance -- see
+    # Grid.block_no_via().
+    for x0, y0, x1, y1 in no_via:
+        grid.block_no_via(x0, y0, x1, y1)
 
     # **The big nets go first and the small ones after**, which is the opposite
     # of the usual advice and is what this board wants. VA+ and VA- have
@@ -1100,7 +1149,7 @@ RETRY_PASSES = 4
 
 
 def route_all(rect, pads, obstacles, rules, skip=(), reserve=None,
-              escapes=None):
+              escapes=None, no_via=()):
     """Route every net in `pads`. Returns tracks, vias and what was missed.
 
     `pads` is {net: [(x, y, half_width, half_height, layers), ...]} in
@@ -1173,7 +1222,7 @@ def route_all(rect, pads, obstacles, rules, skip=(), reserve=None,
     first, tally = [], {}
     for _ in range(RETRY_PASSES):
         result = _one_pass(rect, pads, obstacles, rules, skip, first, reserve,
-                           escapes)
+                           escapes, no_via)
         if best is None or len(result[2]) < len(best[2]):
             best = result
         if not result[2]:

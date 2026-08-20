@@ -29,23 +29,43 @@ stops the discipline from decaying into a comment.
 `SetFPIDAsString()` KiCad cannot tie it back to a library and "Update
 Footprints from Library" has nothing to work from.
 
+**This file places and pours. It does not route, and that is the decision this
+pass took rather than the limit it started from.** route.py -- a maze router
+with rip-up and retry, a fan-out for fine pitch and a three-way via exclusion
+model -- closed this board at 0 unrouted and 0 DRC, and it is deleted. The
+problem it existed for went with the RP2040's QFN-56; what it cost, and this
+is the part worth carrying, was that the *board* had to be a function of
+design.py, so no question about geometry could be asked of a layout until it
+had been answered in Python first.
+
+**So the board is hand-laid from here and this file will destroy that copper
+if it is run again.** It writes a fresh board with the footprints placed and
+the planes poured and nothing else on it; pcbnew has no notion of "the parts
+moved, keep the tracks". The sync path for a netlist change is KiCad's own
+**Update PCB from Schematic**, against the generated out/cv-module.kicad_sch.
+The rule, stated the same way here and in CLAUDE.md and README.md because one
+copy is the wrong number for this one:
+
+    **the netlist is generated and authoritative; the board is hand-laid and
+    verified.**
+
 What this pass does and does not do:
 
-  * places all 225 parts at placement.py's coordinates, with every pad on its
-    net from design.py;
+  * places every part at placement.py's coordinates, with every pad on its net
+    from design.py;
   * reserves a courtyard for each part that has no footprint because it is not
-    chosen -- the three bypass relays -- on the User.Drawings layer, so the
-    area is committed even though the part is not;
+    chosen -- there are none left, and the mechanism stays;
   * draws the outline that placement.extents() derives, and the two ground
     zones either side of the split;
-  * stitches every ground pad to the plane under it, and routes everything
-    else through route.py -- **which now rips the board up and re-routes it in
-    a different order until nothing is missed.** This list used to end "does
-    not route. Not one track", then "routes all but 23 nets"; it is 0 now, and
-    verify.UNROUTED_ITEMS holds the number rather than the prose.
+  * stitches every ground pad to the plane under it, because a plane
+    connection is not routing: it is a hole to the copper already underneath,
+    and it is the one piece of geometry a person laying this board out would
+    otherwise have to reproduce 100 times by hand;
+  * **lays no signal copper at all.**
 """
 
 import math
+import re
 import os
 import pathlib
 import subprocess
@@ -53,6 +73,10 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE / "out"
+# Declared up here rather than beside FOOTPRINT_DIR, where it used to be:
+# _relaunch() runs before that point and needs the board's path to write the
+# stackup into it after the child process has saved.
+PROJECT = "cv-module"
 BOARD = OUT / "cv-module.kicad_pcb"
 
 # Design rules, and **they are not here any more.** They were, with a comment
@@ -66,6 +90,7 @@ BOARD = OUT / "cv-module.kicad_pcb"
 # existed; see rules.py.
 sys.path.insert(0, str(HERE))
 import rules                                                      # noqa: E402
+import gen_pcb_guard                                              # noqa: E402
 
 TRACK_MM = rules.TRACK_MM
 CLEARANCE_MM = rules.CLEARANCE_MM
@@ -93,7 +118,8 @@ def _relaunch():
             "pcbnew lives in KiCad's own Python and this install does not "
             "bundle one.\nOn Linux, run: python3 -c 'import pcbnew' to check, "
             "then invoke this file with whichever interpreter has it.")
-    result = subprocess.run([str(interpreter), str(HERE / "gen_pcb.py")],
+    result = subprocess.run([str(interpreter), str(HERE / "gen_pcb.py")]
+                            + sys.argv[1:],
                             env={**os.environ, "CV_PCB_CHILD": "1"})
     if result.returncode != 0:
         raise SystemExit(result.returncode)
@@ -104,6 +130,15 @@ def _relaunch():
                            capture_output=True, text=True)
     if again.returncode != 0:
         raise SystemExit(again.stdout + again.stderr)
+
+    # **And the stackup, for the same reason one line up.** pcbnew can set it,
+    # and setting it there would mean it could only ever be written by the one
+    # generator that cannot run on a routed board -- so it is written to the
+    # file instead, by rules.apply_stackup(), which works on a board this file
+    # just made and on one somebody has since edited. verify.check_stackup()
+    # is what holds the two together.
+    if rules.apply_stackup(OUT / f"{PROJECT}.kicad_pcb"):
+        print("  wrote rules.FAB_STACKUP into the board")
 
 
 if os.environ.get("CV_PCB_CHILD") != "1":
@@ -119,18 +154,36 @@ import pcbnew                                                    # noqa: E402
 sys.path.insert(0, str(HERE))
 import design as circuit                                         # noqa: E402
 import placement                                                 # noqa: E402
+# **Imported again, and it runs only when asked.** route.py is back as a
+# *seed* -- gen_pcb.py --seed-routing lays a first pass of copper so that the
+# board handed over is one to adjust rather than 485 airwires. Nothing else in
+# the build consults it, and the default path through this file still lays no
+# signal copper at all. See route.py's own docstring for why the restoration
+# is a narrower claim than the deletion was.
 import route                                                     # noqa: E402
 from toolchain import kicad                                      # noqa: E402
 from toolchain.kisch import _uuid as symbol_uuid                 # noqa: E402
 
 FOOTPRINT_DIR = kicad.FOOTPRINT_DIR
-PROJECT = "cv-module"
 # The project's own footprint library, written by gen_project.py, holding the
 # one land pattern KiCad does not ship. Resolved here rather than by copying
 # the file into KiCad's installation, which is the same argument gen_project
 # makes for `${KIPRJMOD}` in fp-lib-table: a build that writes into the
 # toolchain is a build that cannot run on another machine.
 PROJECT_LIBS = {"cv": HERE / "out" / "cv.pretty"}
+
+
+# **Which side a piece of copper is on.** These were local strings for the
+# pass where route.py did not exist, and they are the router's own constants
+# again -- because pad_boxes() hands its boxes straight to route_all() and two
+# notions of "front" between the two files is exactly the class of fault this
+# repo keeps finding. pad_boxes() and stitch_grounds() still have to say which
+# layers a pad and a via occupy whether or not anything routes: the first
+# because verify.py's geometric checks read the boxes, the second because a
+# stitch via is copper on both signal layers and whoever finishes this board
+# by hand needs to see it as such.
+FRONT, BACK = route.FRONT, route.BACK
+LAYERS = route.LAYERS
 
 
 def point(x, y):
@@ -312,18 +365,48 @@ class Board:
                 # it 64 times. The pad knows what layers it is on; asking it is
                 # both shorter and true of parts nobody has fitted yet.
                 if pad.GetDrillSize().x > 0:
-                    layers = route.LAYERS
+                    layers = LAYERS
                 else:
                     layers = tuple(
-                        side for side, copper in ((route.FRONT, pcbnew.F_Cu),
-                                                  (route.BACK, pcbnew.B_Cu))
+                        side for side, copper in ((FRONT, pcbnew.F_Cu),
+                                                  (BACK, pcbnew.B_Cu))
                         if pad.IsOnLayer(copper))
                 boxes.setdefault(self._owner.get(key, ""), []).append(
                     ((left + right) / 2, (top + bottom) / 2,
                      (right - left) / 2, (bottom - top) / 2, layers))
         return boxes
 
+    @staticmethod
+    def _merge_collinear(points):
+        """Drop the interior points of every straight run.
+
+        **The router thinks in cells and KiCad thinks in segments, and the two
+        met here.** route.segments() returns a run as one point per grid cell,
+        because that is what route.check_no_shorts() walks -- it asserts the
+        router's own bookkeeping by looking at every cell a track occupies, and
+        a merged polyline would hide the cells between the corners. So the
+        merge belongs *after* that check and before the board is written, which
+        is this line and not that function.
+
+        Left alone it costs the person the board is for: a straight 9 mm run
+        arrives as twenty 0.45 mm segments, so dragging a track moves one cell
+        of it and re-routing a net by hand means selecting twenty objects. The
+        first seed wrote **31,218 segments of which 31,218 were one grid pitch
+        long**. Merged, the copper is identical to the nanometre and there is
+        one object per straight.
+        """
+        if len(points) < 3:
+            return points
+        kept = [points[0]]
+        for before, here, after in zip(points, points[1:], points[2:]):
+            if ((here[0] - before[0]) * (after[1] - here[1])
+                    != (here[1] - before[1]) * (after[0] - here[0])):
+                kept.append(here)
+        kept.append(points[-1])
+        return kept
+
     def track(self, net, layer, points, width=None):
+        points = self._merge_collinear(points)
         for start, end in zip(points, points[1:]):
             item = pcbnew.PCB_TRACK(self.board)
             item.SetStart(point(*start))
@@ -404,6 +487,31 @@ class Board:
                  for entries in self.pad_boxes().values()
                  for x, y, half_w, half_h, _ in entries]
         keep = VIA_DIAMETER_MM / 2 + 0.25
+        # **And the stitches already laid, which this did not look at.** Every
+        # candidate was tested against the *pads* and against nothing else, so
+        # two neighbouring parts whose ground pads face each other could both
+        # stitch into the same gap: DRC found two MAGND vias 0.25 mm apart on
+        # a 0.30 mm drill -- overlapping holes, on a rule that has been in
+        # force at every hole clearance this board has ever declared.
+        #
+        # It survived because the collision needs two pads close enough to
+        # share a landing spot and far enough apart that neither pad blocks
+        # the other's candidate, which is a window a placement falls into
+        # rather than a state it tends to. Packing the bypass field one gap
+        # east of the ground star was enough to find it.
+        #
+        # **Two distances and the net decides which**, because the two rules
+        # this is between are of different kinds. Two vias on *different* nets
+        # need the copper rule, rules.via_exclusion()["to_via_mm"] -- which is
+        # what the router keeps and is 0.9 mm here. Two vias on the *same* net
+        # have no clearance to keep at all and still have two drills: that is
+        # the hole rule, and it is what DRC reported against the pair 0.25 mm
+        # apart. Using the copper figure for both would be 0.2 mm of margin
+        # invented on a rule that does not exist, and the bypass field is
+        # packed tightly enough that inventing it costs a stitch.
+        cross_keep = rules.via_exclusion()["to_via_mm"]
+        same_keep = VIA_DRILL_MM + rules.hole_rules()["min_hole_to_hole"]
+        laid_vias = []
         for ref, footprint in self.footprints.items():
             for pad in footprint.Pads():
                 key = (ref, pad.GetNumber())
@@ -424,51 +532,172 @@ class Board:
                 body = footprint.GetPosition()
                 dx, dy = x - pcbnew.ToMM(body.x), y - pcbnew.ToMM(body.y)
 
+                # **Off the pad's own long end first, and across it if that
+                # is full.** A chip pad is longer across the body than along
+                # it, so its long axis points into open board and the short
+                # one points at the next part in the row -- which is why the
+                # long axis is tried first and why it was, for four passes,
+                # the only axis tried at all.
+                #
+                # **That failed on the first board where a row was packed to
+                # its assembly gaps.** placement.pack_east() lays the supply
+                # row at GAP_MM, and 0.6 mm between an 0805 and a 1210 is an
+                # iron's clearance, not a via's: C811's MDGND pad wanted 3.9
+                # mm of clear x between R804 and R805 and had 3.15, so all
+                # three reaches on both directions landed inside a neighbour's
+                # halo and the build stopped. Across the pad instead, the same
+                # via is 0.8 mm south of the capacitor in empty board.
+                #
+                # **Reach is the outer loop and axis the inner**, so a short
+                # stub across the pad beats a long one off its end. The
+                # preference is about which way is usually clear; the stub's
+                # length is inductance.
                 if height >= width:
-                    axis, half, delta = "y", height / 2, dy
+                    long_axis, long_half, long_delta = "y", height / 2, dy
+                    across, across_half, across_delta = "x", width / 2, dx
                 else:
-                    axis, half, delta = "x", width / 2, dx
-                sign = 1.0 if delta >= 0 else -1.0
+                    long_axis, long_half, long_delta = "x", width / 2, dx
+                    across, across_half, across_delta = "y", height / 2, dy
 
-                spot = None
+                spot, tried = None, []
                 for reach in (0.9, 1.3, 1.7):
-                    for direction in (sign, -sign):
-                        step = direction * (half + reach)
-                        candidate = ((x + step, y) if axis == "x"
-                                     else (x, y + step))
-                        candidate = self._in_pour(net, candidate)
-                        if self._clear_of_pads(candidate, boxes, keep):
-                            spot = candidate
+                    for axis, half, delta in ((long_axis, long_half,
+                                               long_delta),
+                                              (across, across_half,
+                                               across_delta)):
+                        sign = 1.0 if delta >= 0 else -1.0
+                        for direction in (sign, -sign):
+                            step = direction * (half + reach)
+                            candidate = ((x + step, y) if axis == "x"
+                                         else (x, y + step))
+                            candidate = self._in_pour(net, candidate)
+                            blocker = self._stitch_blocker(
+                                candidate, net, boxes, keep, laid_vias,
+                                same_keep, cross_keep)
+                            if blocker is None:
+                                spot = candidate
+                                break
+                            tried.append((candidate, blocker))
+                        if spot:
                             break
                     if spot:
                         break
                 if spot is None:
+                    # **The candidates and what stopped each, because "move
+                    # the part" is not actionable without them.** The first
+                    # version of this message named the pad and nothing else,
+                    # and the two placements that hit it both took a probe
+                    # script to diagnose -- on a build that already knew the
+                    # answer and was throwing it away.
+                    detail = "\n  ".join(
+                        f"({x:.2f}, {y:.2f}) -> {why}" for (x, y), why in tried)
                     raise SystemExit(
                         f"nowhere to stitch {ref}.{pad.GetNumber()} ({net}) "
-                        f"-- every candidate is inside another pad's "
-                        f"clearance. Move the part in placement.py")
+                        f"-- every candidate on both axes is blocked. Move "
+                        f"the part in placement.py:\n  {detail}")
                 self.via(net, *spot)
                 self.track(net, pcbnew.F_Cu, [(x, y), spot])
+                laid_vias.append((spot, net))
                 placed += 1
                 # Both the via and the stub are copper the router has to see.
                 # The via is through-plated so it blocks both signal layers;
                 # the stub is on F.Cu alone, and saying so is worth 104 pieces
                 # of back-side routing space.
-                obstacles.append((route.LAYERS, spot[0], spot[1],
+                obstacles.append((LAYERS, spot[0], spot[1],
                                   VIA_DIAMETER_MM / 2, VIA_DIAMETER_MM / 2))
                 obstacles.append((
-                    (route.FRONT,), (x + spot[0]) / 2, (y + spot[1]) / 2,
+                    (FRONT,), (x + spot[0]) / 2, (y + spot[1]) / 2,
                     abs(spot[0] - x) / 2 + TRACK_MM / 2,
                     abs(spot[1] - y) / 2 + TRACK_MM / 2))
         return placed, obstacles
 
+    def keepouts(self):
+        """Rule areas the footprints bring with them, as router obstacles.
+
+        **KiCad footprints can carry keep-out zones and this build had never
+        met one.** `Module:RaspberryPi_Pico_SMD_HandSolder` has twelve, named
+        "Pad Keep Out TP1" to "TP6", each declaring `tracks not_allowed`,
+        `vias not_allowed`, `pads not_allowed` and `copperpour not_allowed` --
+        the clearance the module's own underside test pads need from anything
+        this board puts under it.
+
+        Nothing here knew. The zone filler honours them by itself, so the
+        pours came out right; the router does not read the board, only the pad
+        boxes it is handed, so it laid **five VMCU tracks straight through
+        one** and DRC reported them as `items_not_allowed`. That is the same
+        shape as the QFN's exposed pad two passes ago -- a property of a
+        footprint that the generator inferred instead of asking for -- and the
+        answer is the same: ask the footprint.
+
+        Returned as obstacles rather than modelled per rule. A keep-out that
+        forbids tracks and vias is, to a maze router, board that is not there.
+        """
+        boxes = []
+        for footprint in self.footprints.values():
+            for zone in footprint.Zones():
+                if not zone.GetIsRuleArea():
+                    continue
+                if not (zone.GetDoNotAllowTracks()
+                        or zone.GetDoNotAllowVias()):
+                    continue
+                box = zone.GetBoundingBox()
+                left, top = pcbnew.ToMM(box.GetLeft()), pcbnew.ToMM(box.GetTop())
+                right = pcbnew.ToMM(box.GetRight())
+                bottom = pcbnew.ToMM(box.GetBottom())
+                boxes.append((LAYERS, (left + right) / 2, (top + bottom) / 2,
+                              (right - left) / 2 + CLEARANCE_MM,
+                              (bottom - top) / 2 + CLEARANCE_MM))
+        return boxes
+
+    def drill_halos(self):
+        """Where a via may not go because a plated hole is already there.
+
+        **A hole rule is not a copper rule and the router only models copper.**
+        Its pads are boxes with a net on them, and its via keep-out is
+        `rules.via_exclusion()["to_pad_mm"]` measured to that box -- which is
+        right about etching and says nothing about drilling. DRC found a
+        VA_RAW via 0.41 mm from U15's own VA_RAW pin: same net, so no
+        clearance rule of any kind objects, and two overlapping 0.3 and 1.0 mm
+        holes.
+
+        **Same net is exactly why it needs its own mechanism.** Every other
+        distance the router keeps is a question about whose copper is nearby,
+        and this one is not a question about copper at all. So the halo is
+        blocked for *all* nets including the pad's own, which is what
+        route.Grid.block_no_via() is for.
+
+        The distance is centre to centre: half the pad's drill, the hole-to-
+        hole rule, and half the via's drill.
+        """
+        holes = rules.hole_rules()["min_hole_to_hole"]
+        boxes = []
+        for footprint in self.footprints.values():
+            for pad in footprint.Pads():
+                drill = pcbnew.ToMM(pad.GetDrillSize().x)
+                if drill <= 0:
+                    continue
+                spot = pad.GetPosition()
+                reach = drill / 2 + holes + VIA_DRILL_MM / 2
+                x, y = pcbnew.ToMM(spot.x), pcbnew.ToMM(spot.y)
+                boxes.append((x - reach, y - reach, x + reach, y + reach))
+        return boxes
+
     @staticmethod
-    def _clear_of_pads(spot, boxes, keep):
+    def _stitch_blocker(spot, net, boxes, keep, laid, same_keep, cross_keep):
+        """What stops a via here, as a sentence, or None if nothing does."""
         x, y = spot
         for px, py, half_w, half_h in boxes:
             if (abs(x - px) < half_w + keep and abs(y - py) < half_h + keep):
-                return False
-        return True
+                return (f"pad copper at ({px:.2f}, {py:.2f}), "
+                        f"{max(abs(x - px) - half_w, abs(y - py) - half_h):.2f}"
+                        f" mm against {keep:.2f}")
+        for other, other_net in laid:
+            need = same_keep if other_net == net else cross_keep
+            gap = math.dist(spot, other)
+            if gap < need - 1e-9:
+                return (f"the stitch at ({other[0]:.2f}, {other[1]:.2f}) on "
+                        f"{other_net}, {gap:.2f} mm against {need:.2f}")
+        return None
 
     @staticmethod
     def _in_pour(net, spot):
@@ -499,6 +728,15 @@ class Board:
         settings.m_ViasMinSize = pcbnew.FromMM(VIA_DIAMETER_MM)
         settings.m_MinClearance = pcbnew.FromMM(CLEARANCE_MM)
         settings.m_CopperEdgeClearance = pcbnew.FromMM(EDGE_CLEARANCE_MM)
+        # The two hole rules, set here as well as written by gen_project.py
+        # for the reason every other rule is: SaveBoard() serialises what the
+        # board carries, and this file re-runs gen_project.py afterwards so
+        # the project keeps them. rules.hole_rules() owns the choice -- see
+        # its comment for why PCBWay's hole-to-hole is the stricter of the two
+        # sources and its hole-to-copper is not.
+        holes = rules.hole_rules()
+        settings.m_HoleToHoleMin = pcbnew.FromMM(holes["min_hole_to_hole"])
+        settings.m_HoleClearance = pcbnew.FromMM(holes["min_hole_clearance"])
 
     def save(self, path):
         self.board.BuildListOfNets()
@@ -613,10 +851,15 @@ def escape_plan(board):
     return plan
 
 
-def build():
-    # Before anything is placed: the rules this board is about to be built to
-    # are inside what the fabricator publishes. Cheap, and it fails at the top
-    # rather than at DRC.
+def build(seed_routing=False):
+    # Before anything is placed: does the board on disk have copper on it that
+    # a person drew? gen_pcb_guard.refuse_to_discard_routing() is the rule and
+    # it lives in its own file so test_verify.py can exercise it without
+    # KiCad -- this is the first thing that happens, because everything after
+    # it is unrecoverable.
+    gen_pcb_guard.refuse_to_discard_routing(BOARD)
+    # Then: the rules this board is about to be built to are inside what the
+    # fabricator publishes. Cheap, and it fails at the top rather than at DRC.
     rules.check_fab_class()
     board = Board()
     board.rules()
@@ -668,6 +911,7 @@ def build():
     # remove. Seven pins of primary is a routed net.
     iso_x = placement.ISOLATION_X
     iso_y = placement.ISOLATION_Y
+    iso_south = placement.isolation_south()
     for layer in (pcbnew.In1_Cu, pcbnew.In2_Cu):
         board.zone("MAGND", layer,
                    (left + inset, top + inset, right - inset, split - half))
@@ -686,80 +930,153 @@ def build():
         # count rather than anything here -- which is the argument for
         # verify.UNROUTED_ITEMS being zero rather than small.
         board.zone("MDGND", layer,
-                   (iso_x + half, split + half, right - inset, bottom - inset),
-                   priority=1)
+                   (iso_x + half, split + half, right - inset,
+                    bottom - inset), priority=1)
+        # **The third rectangle, and its absence left the module over bare
+        # laminate.** The two above make an L whose inside corner is the
+        # primary's, and with no southern edge to that corner the bare region
+        # ran to the bottom of the board -- which stopped being the supply
+        # row's own band the moment the Pico got a strip below it. D806 and
+        # the western third of U19 sat over no plane at all, and
+        # check_isolation_gap() reported their copper as *inside the
+        # primary's region*, which was true of the region as written.
+        # placement.isolation_south() is the edge; this is the pour that
+        # follows it, and the three overlap into a C rather than abutting for
+        # the reason the second one overlaps the first.
+        # Priority 2 and not 1: two zones on one layer at the same priority
+        # is `zones_intersect` to DRC, whatever net they are on. The northern
+        # pair get away with 0 and 1; this one overlaps the second, so it
+        # needs a third number. Nothing about the fill changes -- they are the
+        # same net and the priority only orders who yields to whom.
+        board.zone("MDGND", layer,
+                   (left + inset, iso_south + half, right - inset,
+                    bottom - inset), priority=2)
 
     stitched, stitch_copper = board.stitch_grounds()
 
-    # Everything else, through the router. The two grounds are skipped because
-    # stitch_grounds() has already given them the only connection they want.
-    # **The primary's corner is reserved, and it is a keep-out with an
-    # exception list.** It has no ground pour under it by construction, which
-    # to a maze router reads as the widest free channel on the board -- and on
-    # the build that added the ADC the router duly ran VA+ through it, twenty
-    # tracks of secondary rail across the isolation barrier.
-    # verify.check_isolation_gap() caught every one, which is the check doing
-    # exactly its job and is still the wrong place to catch it: a rule the
-    # router cannot break is worth more than a rule it is caught breaking. So
-    # the region goes in as a reservation, and the five primary nets are the
-    # only ones admitted.
-    tracks, vias, missed, refused, escaped = route.route_all(
-        rectangle, board.pad_boxes(), obstacles=stitch_copper,
-        rules={"pitch": ROUTE_PITCH_MM, "track": TRACK_MM,
-               "clearance": CLEARANCE_MM, "via": VIA_DIAMETER_MM,
-               "edge": EDGE_CLEARANCE_MM,
-               # Derived, not assumed. rules.via_exclusion() is three
-               # distances -- to a track, to another via, to a pad's copper --
-               # each the stricter of a copper rule that shrinks with the
-               # fabrication class and a hole rule that does not. route.py used
-               # to carry the first of them as a ring of four cells, correct at
-               # a 0.5 mm grid and written as though it were geometry.
-               "via_reach": rules.via_exclusion()},
-        skip=("MAGND", "MDGND"),
-        reserve=((left, iso_y, iso_x, bottom),
-                 ("VIN", "VIN_J", "IGND", "IGND_J", "VIN_P")),
-        escapes=escape_plan(board))
-    shorts = route.check_no_shorts(tracks, vias, ROUTE_PITCH_MM)
-    if shorts:
-        raise SystemExit("the router shorted nets, which it cannot do if its "
-                         "own bookkeeping is right:\n  "
-                         + "\n  ".join(shorts[:8]))
-    layers = {route.FRONT: pcbnew.F_Cu, route.BACK: pcbnew.B_Cu}
-    for net, layer, points in tracks:
-        board.track(net, layers[layer], points)
-    for net, spot in vias:
-        board.via(net, *spot)
+    # -- and this is where the generator stops, unless it is asked to seed ---
+    #
+    # **The board is placed and poured and it is not routed, and that is a
+    # decision rather than a limit.** route.py is a maze router with rip-up
+    # and retry, a fan-out for fine pitch, and a via-exclusion model derived
+    # three ways; it closed this board -- 0 unrouted, 0 DRC. What it was
+    # solving stopped existing when the RP2040's QFN-56 became a 2.54 mm
+    # module, and what it cost was never the copper: it was that the *board*
+    # had to be a function of design.py, so every question about geometry had
+    # to be answerable in Python before it could be asked of the layout.
+    #
+    # **--seed-routing runs it once and that is a different claim.** A person
+    # opening a board with 485 airwires on it and a person opening one with a
+    # legal route to adjust are doing two different jobs, and only the second
+    # one is editing. The seed is a starting point: it is not reproduced by
+    # the build, nothing downstream reads it, and the moment it lands the
+    # board is the person's. gen_pcb_guard.refuse_to_discard_routing() is what
+    # keeps a second run from happening by accident, and it was written a pass
+    # before the router came back.
+    #
+    # **The consequence is the one thing on this page nobody can be allowed to
+    # discover by accident: the board is no longer generated.** Running this
+    # file writes a fresh out/cv-module.kicad_pcb with the footprints placed
+    # and the planes poured and *no tracks on it at all* -- so running it over
+    # a hand-routed board destroys the routing. There is no undo and no
+    # warning, because pcbnew has no notion of "the parts changed, keep the
+    # copper".
+    #
+    # The way to move a netlist change onto a routed board is KiCad's own
+    # **Update PCB from Schematic**, against out/cv-module.kicad_sch, which is
+    # still generated and still the authority. The rule the whole repo now
+    # runs on, and it is in CLAUDE.md and README.md as well because one copy
+    # in one place is the wrong number of copies for this one:
+    #
+    #     **the netlist is generated and authoritative; the board is
+    #     hand-laid and verified.**
+    #
+    # verify.py is unchanged in what it asks -- DRC, the netlist against
+    # KiCad's own export, the ground split, the isolation region, both
+    # barriers -- and every one of those questions is asked *of the board* by
+    # reading it back. None of them ever needed the board to have been
+    # written from here.
+    laid = None
+    if seed_routing:
+        # The two grounds are skipped because stitch_grounds() has already
+        # given them the only connection they want.
+        #
+        # **The primary's corner is reserved, and it is a keep-out with an
+        # exception list.** It has no ground pour under it by construction,
+        # which to a maze router reads as the widest free channel on the board
+        # -- and on the build that added the ADC the router duly ran VA+
+        # through it, twenty tracks of secondary rail across the isolation
+        # barrier. verify.check_isolation_gap() caught every one, which is the
+        # check doing exactly its job and is still the wrong place to catch
+        # it: a rule the router cannot break is worth more than a rule it is
+        # caught breaking. So the region goes in as a reservation, and
+        # design.PRIMARY_NETS -- the same list check_isolation_gap() measures
+        # against -- is the only thing admitted.
+        tracks, vias, missed, refused, escaped = route.route_all(
+            rectangle, board.pad_boxes(),
+            obstacles=stitch_copper + board.keepouts(),
+            rules={"pitch": ROUTE_PITCH_MM, "track": TRACK_MM,
+                   "clearance": CLEARANCE_MM, "via": VIA_DIAMETER_MM,
+                   "edge": EDGE_CLEARANCE_MM,
+                   # Derived, not assumed. rules.via_exclusion() is three
+                   # distances -- to a track, to another via, to a pad's
+                   # copper -- each the stricter of a copper rule that shrinks
+                   # with the fabrication class and a hole rule that does not.
+                   "via_reach": rules.via_exclusion()},
+            skip=("MAGND", "MDGND"),
+            reserve=((left, iso_y, iso_x, iso_south),
+                     tuple(sorted(circuit.PRIMARY_NETS))),
+            escapes=escape_plan(board), no_via=board.drill_halos())
+        shorts = route.check_no_shorts(tracks, vias, ROUTE_PITCH_MM)
+        if shorts:
+            raise SystemExit("the router shorted nets, which it cannot do if "
+                             "its own bookkeeping is right:\n  "
+                             + "\n  ".join(shorts[:8]))
+        layers = {route.FRONT: pcbnew.F_Cu, route.BACK: pcbnew.B_Cu}
+        for net, layer, points in tracks:
+            board.track(net, layers[layer], points)
+        for net, spot in vias:
+            board.via(net, *spot)
+        laid = (len(tracks), len(vias), missed, refused, escaped)
 
     board.fill()
     OUT.mkdir(exist_ok=True)
     board.save(BOARD)
-    return (board, rectangle, stitched, len(tracks), len(vias), missed,
-            escaped, refused)
+    return board, rectangle, stitched, laid
 
 
 def main():
-    (board, rectangle, stitched, tracks, vias, missed, escaped,
-     refused) = build()
+    seed = "--seed-routing" in sys.argv
+    board, rectangle, stitched, laid = build(seed_routing=seed)
     left, top, right, bottom = rectangle
     width, height = right - left, bottom - top
     print(f"{BOARD.name}: {len(board.footprints)} footprints, "
           f"{len(RESERVED_MM)} reserved, {len(board.nets)} nets")
     print(f"  outline {width:.1f} x {height:.1f} mm = {width * height:.0f} mm2, "
           f"four layers, ground split at y = {placement.SPLIT_Y:.1f}")
-    print(f"  {stitched} ground pads stitched to the planes, "
-          f"{tracks} track runs and {vias} vias routed")
-    print(f"  {len(escaped)} fine-pitch escapes laid before the router ran, "
-          f"{len(refused)} refused -- see rules.track_offset_limit()")
-    for net, pad_x, pad_y, land_x, land_y in escaped:
-        print(f"      {net} leaves its pad at ({pad_x:.3f}, {pad_y:.3f}) "
-              f"and picks the grid up at ({land_x:.2f}, {land_y:.2f})")
-    for net, why in sorted(refused.items()):
-        print(f"      REFUSED {net}: {why}")
-    if missed:
-        print(f"  {len(missed)} nets the router could not finish, and they are "
-              f"named rather than counted:")
-        for index in range(0, len(missed), 6):
-            print(f"      {', '.join(missed[index:index + 6])}")
+    print(f"  {stitched} ground pads stitched to the planes")
+    if laid is None:
+        print("  no signal copper: place and pour only. The board is "
+              "hand-routed in KiCad from here.")
+    else:
+        tracks, vias, missed, refused, escaped = laid
+        print(f"  seeded: {tracks} track runs and {vias} vias, "
+              f"{len(escaped)} fine-pitch escapes laid first, "
+              f"{len(refused)} refused -- see rules.track_offset_limit()")
+        for net, why in sorted(refused.items()):
+            print(f"      REFUSED {net}: {why}")
+        if missed:
+            print(f"  {len(missed)} nets the router could not finish, named "
+                  f"rather than counted -- they go in verify.UNROUTED_ITEMS:")
+            for index in range(0, len(missed), 6):
+                print(f"      {', '.join(missed[index:index + 6])}")
+        else:
+            print("  nothing missed: every net is closed. The seed is a "
+                  "starting point, not an answer -- it is the person's board "
+                  "from here.")
+    print("  ** re-running this file discards hand-routed copper. To move a "
+          "netlist change onto a routed board, use KiCad's Update PCB from "
+          "Schematic against out/cv-module.kicad_sch. **")
 
 
 if __name__ == "__main__":

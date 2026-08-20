@@ -36,11 +36,17 @@ import design
 import delta
 import contract.socket as socket
 from contract.socket import source
+from toolchain import sexp
 
 # Hoisted out of write(), where it was built inline with __import__("pathlib")
 # and named OUT while every other generator's OUT means the machine-readable
 # directory. One name, one meaning: this file's only output is a document.
 DOCS = pathlib.Path(__file__).resolve().parent / "docs"
+# The board this file measures trace adjacency on. Read, never written: the
+# only thing here that needs geometry is board_coupling(), and it needs the
+# copper as laid rather than as designed -- the same argument verify.py makes
+# for reading KiCad's netlist instead of design.py.
+BOARD = pathlib.Path(__file__).resolve().parent / "out" / "cv-module.kicad_pcb"
 
 # ---------------------------------------------------------------------------
 # Loom geometry, assumed
@@ -62,7 +68,11 @@ AGGRESSORS = (
 # What the requirement is, and where it comes from: 00-current-state.md, "For
 # 40 dB of musical gate depth: per-channel depth >=47 dB, per-pair isolation
 # <=-54 dB. Crosstalk remains the binding constraint."
-ISOLATION_DB = -54.0
+#
+# Moved to design.py, because design.rail_crosstalk() has to compare against it
+# too and this file imports that one. Re-exported under the same name so every
+# existing reference here still reads constraints.ISOLATION_DB.
+ISOLATION_DB = design.ISOLATION_DB
 
 SIGNAL_RMS = socket.MEASURED["channel_peak"].value / math.sqrt(2)
 
@@ -316,6 +326,193 @@ it.
 """
 
 
+# ---------------------------------------------------------------------------
+# The same question, asked of the copper instead of the loom
+# ---------------------------------------------------------------------------
+#
+# **Constraint 5 computes channel-to-channel coupling between two wires in a
+# loom and nothing has ever computed it between two traces on the board.** The
+# gap went unnoticed for as long as it did because the loom is the thing the
+# spec names, and because the seed routing was never going to be shipped -- but
+# trace adjacency is a property of the copper, so replacing route.py's seed
+# with KiCadRoutingTools' board changed it, and no instrument in this repo
+# could say by how much. Neither board had been measured.
+#
+# It is reported here rather than asserted in verify.py, on this project's own
+# rule: a constraint with thin margin is load-bearing and verify.py must hold
+# it, and one with sixty decibels of margin is good practice that should not be
+# defended as though the design depended on it. This has 59.
+
+# How close two traces have to be to be worth counting, and how finely the
+# overlap is sampled. 2 mm is about five track widths, past which the coupling
+# coefficient has fallen by more than 20 dB at every plausible height; 0.25 mm
+# is a quarter of the shortest segment worth measuring.
+COUPLING_REACH_MM = 2.0
+COUPLING_STEP_MM = 0.25
+
+# The per-channel net families, by what the coupling current flows into.
+# **This split is the whole calculation**, for the reason pin_impedance()
+# records: everything below is decided by the victim's impedance and not by
+# the geometry, and getting it wrong is worth 62 dB.
+AUDIO_FAMILIES = ("PIN", "SIN", "BUF", "IVOUT", "AOUT")
+CV_FAMILIES = ("CVX",)
+
+
+def _segments(board):
+    """Every copper segment on a per-channel net, by (family, channel, layer).
+
+    Read through toolchain/sexp.py, which is what verify.check_rules() uses --
+    there is one reader for this format in this repository.
+    """
+    import re
+    import collections
+    tree = sexp.parse(pathlib.Path(board).read_text())
+    want = re.compile(r"^(%s)(\d)$" % "|".join(AUDIO_FAMILIES + CV_FAMILIES))
+    out = collections.defaultdict(list)
+    for segment in sexp.find_all(tree, "segment"):
+        net = sexp.find(segment, "net")
+        layer = sexp.find(segment, "layer")
+        if net is None or layer is None:
+            continue
+        match = want.match(str(net[1]))
+        if not match:
+            continue
+        start, end = sexp.find(segment, "start"), sexp.find(segment, "end")
+        out[(match.group(1), int(match.group(2)), layer[1])].append(
+            (float(start[1]), float(start[2]), float(end[1]), float(end[2])))
+    return out
+
+
+def _overlap(a, b, reach=COUPLING_REACH_MM):
+    """Length of `a` that runs within `reach` of `b`, and the mean gap there.
+
+    Sampled along `a` rather than solved. The closed form for "the part of one
+    segment within d of another" is a quartic in the general case, and the
+    answer is wanted to a decibel, not to a micron -- so the approximation is
+    declared instead of hidden. COUPLING_STEP_MM sets the resolution.
+    """
+    ax, ay, bx, by = a
+    length = math.hypot(bx - ax, by - ay)
+    cx, cy, dx, dy = b
+    other = math.hypot(dx - cx, dy - cy)
+    if length < 1e-9 or other < 1e-9:
+        return 0.0, None
+    steps = max(2, int(length / COUPLING_STEP_MM))
+    hits, total = 0, 0.0
+    for i in range(steps):
+        t = (i + 0.5) / steps
+        px, py = ax + (bx - ax) * t, ay + (by - ay) * t
+        u = ((px - cx) * (dx - cx) + (py - cy) * (dy - cy)) / (other * other)
+        u = 0.0 if u < 0.0 else (1.0 if u > 1.0 else u)
+        gap = math.hypot(px - (cx + (dx - cx) * u), py - (cy + (dy - cy) * u))
+        if gap <= reach:
+            hits += 1
+            total += gap
+    if not hits:
+        return 0.0, None
+    return length * hits / steps, total / hits
+
+
+def parallel_runs(board):
+    """The worst same-layer parallel run between two channels, per victim class.
+
+    Returns the coupled length and the tightest pitch found, for audio against
+    audio and for audio against the CV filter's passive node. Two channels are
+    what the requirement is about, so runs within one channel are skipped.
+    """
+    segments = _segments(board)
+    keys = sorted(segments)
+    worst = {}
+    for i, first in enumerate(keys):
+        f1, c1, layer1 = first
+        for second in keys[i + 1:]:
+            f2, c2, layer2 = second
+            if layer1 != layer2 or c1 == c2:
+                continue
+            kinds = {f1 in CV_FAMILIES, f2 in CV_FAMILIES}
+            if kinds == {True}:
+                continue                       # CV against CV is not the ask
+            kind = "audio_cv" if True in kinds else "audio_audio"
+            length, pitch = 0.0, None
+            for sa in segments[first]:
+                for sb in segments[second]:
+                    piece, gap = _overlap(sa, sb)
+                    if piece > 0.0:
+                        length += piece
+                        pitch = gap if pitch is None else min(pitch, gap)
+            if length <= 0.0:
+                continue
+            name = f"{f1}{c1}/{f2}{c2}"
+            if kind not in worst or length > worst[kind]["length_mm"]:
+                worst[kind] = {"pair": name, "length_mm": length,
+                               "pitch_mm": pitch}
+    return worst
+
+
+def board_coupling(board=BOARD, hz=20_000.0):
+    """Channel-to-channel coupling through the copper, at every declared height.
+
+    Capacitive and inductive both, because for a *low impedance* victim -- and
+    every audio node on this board is one -- the inductive term is usually the
+    one that bites. Here it does not, and the reason is that the aggressor
+    current is 123 uA into a 10 kohm front end rather than amps.
+
+    The victim impedances are the two that exist. `pin_impedance()` is the loom
+    node, tens of ohms; `design.cv_node_impedance()` is CVX{n}, the MFB
+    filter's passive internal node and the only per-channel net on the board
+    with no active pin on it -- 4.9 kohm resistive, shunted by C1 to 142 ohm at
+    exactly the frequency where the coupling would otherwise peak.
+    """
+    runs = parallel_runs(board)
+    peak = socket.clipping_peak()
+    current = peak / socket.RIN_OHMS
+    rows = []
+    for kind, impedance in (("audio_audio", pin_impedance(hz)),
+                            ("audio_cv", design.cv_node_impedance(hz))):
+        if kind not in runs:
+            continue
+        run = runs[kind]
+        for height in design.PCB_H_SWEEP:
+            farads = design.trace_mutual_capacitance(
+                run["pitch_mm"], height) * run["length_mm"]
+            henries = design.trace_mutual_inductance(
+                run["pitch_mm"], height) * run["length_mm"]
+            induced = 2 * math.pi * hz * henries * current
+            rows.append({
+                "kind": kind, "pair": run["pair"],
+                "length_mm": run["length_mm"], "pitch_mm": run["pitch_mm"],
+                "height_mm": height, "ohms": impedance,
+                "capacitive_db": coupling_db(hz, farads, impedance),
+                "inductive_db": 20 * math.log10(induced / peak),
+            })
+    # **The answer is at the declared height; the sweep is what it was worth.**
+    # Before rules.FAB_STACKUP existed this had to quote the worst of a range,
+    # because no height had been chosen. It is quoted at PCBWay's own 0.1855 mm
+    # now, and the sweep is kept beside it so the sensitivity stays visible --
+    # a figure that depends on an input the fabricator supplies should say so.
+    declared = [r for r in rows if r["height_mm"] == design.PCB_H_MM]
+    capacitive = max(r["capacitive_db"] for r in declared)
+    swept = max(r["capacitive_db"] for r in rows)
+    # What impedance the victim would need for the worst geometry to fail. The
+    # bound that makes the rest of this robust: it is the impedance, not the
+    # copper, that decides the answer, and nothing here is near it.
+    worst = max(declared, key=lambda r: r["capacitive_db"])
+    farads = design.trace_mutual_capacitance(
+        worst["pitch_mm"], worst["height_mm"]) * worst["length_mm"]
+    fails_at = 10 ** (ISOLATION_DB / 20) / (2 * math.pi * hz * farads)
+    return {
+        "rows": rows,
+        "declared_h_mm": design.PCB_H_MM,
+        "worst_db": capacitive,
+        "worst_swept_db": swept,
+        "height_costs_db": swept - capacitive,
+        "margin_db": ISOLATION_DB - capacitive,
+        "fails_at_ohms": fails_at,
+        "verdict": ("good practice, not load-bearing"
+                    if ISOLATION_DB - capacitive > 20 else "load-bearing"),
+    }
+
+
 def _report():
     print("Testing the five constraints for a mechanism")
     print(f"requirement for isolation: {ISOLATION_DB:.0f} dB per pair "
@@ -397,6 +594,36 @@ def _report():
               f"at {row['hz'] / 1e3:.0f} kHz")
     print(f"   verdict     {c['verdict']}")
     print()
+
+    if BOARD.exists():
+        b = board_coupling()
+        print("5b. the same coupling, between two traces on the board")
+        print("    constraint 5 asks this of the loom; nothing asked it of "
+              "the copper")
+        for row in b["rows"]:
+            if row["height_mm"] != design.PCB_H_MM:
+                continue
+            print(f"   {row['pair']:<16} {row['length_mm']:6.1f} mm at "
+                  f"{row['pitch_mm']:.2f} mm pitch, into {row['ohms']:.0f} ohm")
+        print(f"   capacitive, at h = {b['declared_h_mm']:.4f} mm "
+              f"{b['worst_db']:>7.1f} dB   "
+              f"({b['margin_db']:.0f} dB inside the requirement)")
+        print(f"   the same across the sweep   {b['worst_swept_db']:>7.1f} dB   "
+              f"the height is worth {b['height_costs_db']:.1f} dB, and "
+              f"rules.FAB_STACKUP is what settled it")
+        induced = max(r["inductive_db"] for r in b["rows"])
+        print(f"   inductive, the same        {induced:>7.1f} dB   "
+              f"computed, not dismissed: a stiff node still takes a series emf")
+        print(f"   would fail at              {b['fails_at_ohms']:>7.0f} ohm  "
+              f"<- the impedance decides it; the loom node is "
+              f"{pin_impedance(20_000.0):.0f}")
+        print(f"   verdict     {b['verdict']}")
+        print()
+    else:
+        print("5b. board coupling not measured -- no board at "
+              f"{BOARD.name}; run gen_pcb.py")
+        print()
+
     print(VERDICTS.strip())
 
 

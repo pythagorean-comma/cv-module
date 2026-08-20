@@ -78,7 +78,12 @@ def net_classes():
         "via_diameter": rules.VIA_DIAMETER_MM,
         "via_drill": rules.VIA_DRILL_MM, "wire_width": 6,
     }
-    power = dict(default, name="Power", track_width=rules.POWER_TRACK_MM,
+    # **The Power class is a colour now and not a width.** It carried
+    # rules.POWER_TRACK_MM until design.power_track_verdict() priced the
+    # widening at 7.96 dB on a figure with 94.8 dB of margin; what is left is
+    # rgba(200, 52, 52), which puts the rails and both grounds in red in the
+    # editor, and on a hand-laid board that is worth keeping.
+    power = dict(default, name="Power",
                  priority=1, pcb_color="rgba(200, 52, 52, 0.800)")
     return [default, power]
 
@@ -114,6 +119,14 @@ def design_rules():
         "min_track_width": rules.TRACK_MM,
         "min_via_diameter": rules.VIA_DIAMETER_MM,
         "min_copper_edge_clearance": rules.EDGE_CLEARANCE_MM,
+        # **The two hole rules, which were the fifth and sixth "left alone
+        # deliberately".** They were not named here, so DRC ran them at
+        # KiCad's 0.25 mm defaults -- which is not zero and so never showed up
+        # as the missing-rule fault the paragraph above records, but is still
+        # a number nobody in this repo had chosen. rules.hole_rules() is where
+        # the choice lives and it returns these key names so that neither file
+        # decides which rule is which.
+        **rules.hole_rules(),
     }
 
 

@@ -33,6 +33,7 @@ import contextlib
 import copy
 import json
 import pathlib
+import re
 import sys
 import tempfile
 import types
@@ -122,6 +123,17 @@ class _Watched(set):
                 f"{self._net}.discard({item!r}) removed nothing -- that pin is "
                 f"not on this net, so the fault is not planted")
         super().discard(item)
+
+
+def _widen_first_segment(text):
+    """Give the first routed segment a width nothing declares."""
+    match = re.search(r'\(segment\b(?:[^()]|\([^()]*\))*\)', text)
+    if match is None:
+        return text
+    block = match.group(0)
+    changed = block.replace(f"(width {rules.TRACK_MM})",
+                            f"(width {rules.TRACK_MM / 2})", 1)
+    return text[:match.start()] + changed + text[match.end():]
 
 
 def dead_mutations(clean_nets, clean_values, clean_open, clean_erc, clean_drc):
@@ -297,9 +309,9 @@ def _(nets, values, open_pins, violations, drc, board):
 @case("a flyback diode is fitted backwards", verify.check_fail_safe)
 def _(nets, values, open_pins, violations, drc, board):
     nets["FSD"].discard(("D823", "2"))
-    nets["V5"].discard(("D823", "1"))
+    nets["VMOD"].discard(("D823", "1"))
     nets["FSD"].add(("D823", "1"))
-    nets["V5"].add(("D823", "2"))
+    nets["VMOD"].add(("D823", "2"))
 
 
 @case("the pump's two diodes are swapped", verify.check_fail_safe)
@@ -511,6 +523,40 @@ def _(nets, values, open_pins, violations, drc, board):
     nets["IGND_J"].add(("C807", "2"))
 
 
+# **The fuse shorted out**, which is what fitting it "for later" looks like:
+# both its pads on the same net, the choke still fed, the board still working,
+# and no fuse in the circuit at all. It is the one fault of this part that
+# leaves every other instrument happy -- ERC counts two pins on a net, DRC
+# sees copper, and inlet_fuse() goes on computing a rating for a part whose
+# element nothing passes through.
+@case("the inlet fuse is bridged on the jack side", verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    ref = design.INLET_FUSE_REF
+    nets["VIN_F"].discard((ref, "2"))
+    nets["VIN_J"].add((ref, "2"))
+    nets["VIN_F"].add(("J8", "1"))
+
+
+# And the fuse in the return rather than the live conductor -- the same two
+# parts, the same two nets, drawn without looking at which. It is caught by
+# the per-net allow-list and by nothing else: the loop is electrically
+# identical and the module runs.
+@case("the inlet fuse is in the return leg", verify.check_supply)
+def _(nets, values, open_pins, violations, drc, board):
+    ref = design.INLET_FUSE_REF
+    choke = design.INLET_CHOKE_REF
+    l1_in = str(design.INLET_CHOKE_PINS["L1_IN"])
+    l2_in = str(design.INLET_CHOKE_PINS["L2_IN"])
+    nets["VIN_J"].discard((ref, "1"))
+    nets["VIN_F"].discard((ref, "2"))
+    nets["VIN_F"].discard((choke, l1_in))
+    nets["IGND_J"].discard((choke, l2_in))
+    nets["VIN_J"].add((choke, l1_in))
+    nets["IGND_J"].add((ref, "1"))
+    nets["VIN_F"].add((ref, "2"))
+    nets["VIN_F"].add((choke, l2_in))
+
+
 # **The module's own star, and the fault is the tidy way to wire a DGND pin.**
 @case("the ADC's DGND goes to MDGND", verify.check_module_star)
 def _(nets, values, open_pins, violations, drc, board):
@@ -611,21 +657,26 @@ def _(nets, values, open_pins, violations, drc, board):
 # stops being counted, and two values that are the number a datasheet or a
 # specification actually prints.
 
-@case("the RP2040's core rail is tied to its IO rail",
+@case("the module is fed on its 3V3 pin instead of its VSYS pin",
       verify.check_controller)
 def _(nets, values, open_pins, violations, drc, board):
-    # VREG_VOUT is an *output*. On VMCU it is a 1.1 V regulator driving into
-    # 3.3, which works until the part is warm.
-    nets["VCORE"].discard((design.CONTROLLER_REF,
-                           str(design.CONTROLLER_PINS["VREG_VOUT"])))
-    nets["VMCU"].add((design.CONTROLLER_REF,
-                      str(design.CONTROLLER_PINS["VREG_VOUT"])))
+    # **The topology design.pico_backdrive() refuses, arriving as a wire.**
+    # VSYS left open and this board's 3.3 V driven onto pin 36 -- which is the
+    # arrangement that fits the +Vout budget and needs the RT6150 to be high
+    # impedance with its input absent, a condition neither datasheet states.
+    # It would also work on the bench, which is the whole difficulty with it.
+    ref = design.CONTROLLER_REF
+    pin = str(design.CONTROLLER_MODULE_PINS["VSYS"])
+    nets["VSYS"].discard((ref, pin))
+    nets["VMCU"].add((ref, pin))
 
 
-@case("a supply pin loses its own decoupling capacitor",
+@case("a decoupling capacitor appears at the module's supply pins",
       verify.check_controller)
 def _(nets, values, open_pins, violations, drc, board):
-    nets["VMCU"].discard(("C823", "1"))
+    # A second opinion about somebody else's layout, 2.54 mm further from the
+    # die than theirs. C820 was one of the twelve the QFN needed.
+    nets["VMCU"].add(("C820", "1"))
 
 
 @case("MCLK moves to a pin with no clock output on it",
@@ -636,26 +687,33 @@ def _(nets, values, open_pins, violations, drc, board):
     nets["MCLK"].add((ref, str(design.CONTROLLER_GPIO_PINS[27])))
 
 
-@case("a pull-up creeps onto QSPI_SS", verify.check_controller_periphery)
+@case("3V3_EN is pulled down, and the module's 3.3 V goes with it",
+      verify.check_controller)
 def _(nets, values, open_pins, violations, drc, board):
-    # The reference design's own R2, which that document marks DNF for this
-    # exact flash. A part added for luck is still a stub on the fastest bus
-    # here.
-    nets["QSCS"].add(("R999", "1"))
+    # **The one wire on this part that turns the board off.** Pico datasheet
+    # section 2.1: "To disable the 3.3 V (which also de-powers the RP2040),
+    # short this pin low." It is a plausible thing for somebody to draw --
+    # every other enable pin on this board is tied to something -- and the
+    # symptom is a controller that never starts.
+    nets["MDGND"].add((design.CONTROLLER_REF,
+                       str(design.CONTROLLER_MODULE_PINS["3V3_EN"])))
 
 
-@case("the crystal's load capacitors stop being equal",
+@case("something else lands on VSYS, past the ORing diode",
       verify.check_controller_periphery)
 def _(nets, values, open_pins, violations, drc, board):
-    values["C833"] = "22p/50V C0G"
+    nets["VSYS"].add(("C899", "1"))
 
 
-@case("the crystal loses its drive resistor",
-      verify.check_controller_periphery)
+@case("D806 is fitted backwards", verify.check_controller_periphery)
 def _(nets, values, open_pins, violations, drc, board):
-    ref = design.CRYSTAL_REF
-    nets["XTAL"].discard((ref, str(design.CRYSTAL_PINS["XOUT"])))
-    nets["XOUT"].add((ref, str(design.CRYSTAL_PINS["XOUT"])))
+    # The fault DIODE_PINS records twice, on the part whose whole job is a
+    # direction: reversed, a USB host reaches VA_RAW through U22's high-side
+    # body diode whenever the board is unpowered.
+    nets["VMOD"].discard(("D806", str(design.DIODE_PINS["A"])))
+    nets["VSYS"].discard(("D806", str(design.DIODE_PINS["K"])))
+    nets["VMOD"].add(("D806", str(design.DIODE_PINS["K"])))
+    nets["VSYS"].add(("D806", str(design.DIODE_PINS["A"])))
 
 
 @case("the switcher is fed from behind the rail filter",
@@ -815,16 +873,6 @@ def main():
         design.MIDI_OPTO_LOCAL_MM = original_mm
     report("U21's bypass is further away than its datasheet allows", found)
 
-    # The router's own invariant, which is not a verify.py check and so cannot
-    # be planted through CASES: gen_pcb.py runs it before it saves and refuses
-    # to write a board that fails it. What is proved here is that it can fail.
-    import route
-    shorts = route.check_no_shorts(
-        [("A", route.FRONT, [(1.0, 1.0), (1.5, 1.0)]),
-         ("B", route.FRONT, [(1.5, 1.0), (2.0, 1.0)])], [], 0.5)
-    label = "the router puts two nets on one point"
-    report(label, shorts)
-
     # The pour overlap, which needs a *file* rather than a netlist: the whole
     # point of check_ground_split_on_the_board() is that it reads what was
     # written. So the board is copied to the scratch path with one zone moved
@@ -841,6 +889,56 @@ def main():
     label = "the two ground pours overlap on an inner layer"
     report(label, found)
     planted.unlink()
+
+    # **gen_pcb.py's own guard, which is not a verify.py check and so cannot be
+    # planted through CASES.** It is the slot route.check_no_shorts() used to
+    # occupy, and it is the same kind of thing: an invariant a generator
+    # enforces before it writes, proved here to be able to fail. What makes it
+    # worth a case is that the rule it enforces was documented in three files
+    # for one pass while both of them still listed `python3 gen_pcb.py` in the
+    # run order -- so the prose and the pipeline contradicted each other and
+    # only the pipeline was executable.
+    import gen_pcb_guard
+    for label, text, expect in (
+            ("gen_pcb refuses to discard hand-routed copper",
+             '(segment (start 1 1) (end 2 1) (width 0.09) (net "SIN1"))', True),
+            ("...and lets a placed-and-poured board through",
+             '(segment (start 1 1) (end 2 1) (width 0.09) (net "MDGND"))',
+             False)):
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(text)
+            probe = pathlib.Path(handle.name)
+        try:
+            gen_pcb_guard.refuse_to_discard_routing(probe, [])
+            fired = False
+        except SystemExit:
+            fired = True
+        report(label, fired if expect else not fired)
+        probe.unlink()
+
+    # **The board drifting away from the netlist, which is the failure the
+    # hand-laid workflow makes possible and the generated one could not.** The
+    # fault is a part on the board under a reference design.py does not know,
+    # which is what a board looks like after a netlist change that nobody
+    # synced. Planted in a copy, like the pour overlap above, because
+    # check_board_is_the_design() reads the file rather than a netlist.
+    #
+    # `U12` is chosen and not a passive: it appears once as a Reference
+    # property, so the replace cannot silently hit a value string or a
+    # comment, and the guard below is what proves the mutation ran.
+    stale = original.replace('(property "Reference" "U12"',
+                             '(property "Reference" "U99"')
+    if stale == original:
+        report("the board carries a part design.py does not have", [])
+    else:
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(stale)
+            planted = pathlib.Path(handle.name)
+        report("the board carries a part design.py does not have",
+               verify.check_board_is_the_design(planted))
+        planted.unlink()
 
     # check_rules() reads two files, so its faults are planted in copies of
     # them. **The first of these three is not hypothetical**: it is exactly the
@@ -867,9 +965,42 @@ def main():
             ("a net class clearance drifts off rules.py", verify.PROJECT,
              lambda text: text.replace(f'"clearance": {rules.CLEARANCE_MM}',
                                        f'"clearance": {rules.CLEARANCE_MM / 2}')),
+            # **The hole rule falls back to KiCad's default**, which is the
+            # exact move rules.hole_rules()' own comment refuses: 0.406 mm is
+            # PCBWay's published component-hole figure and 0.25 is what DRC
+            # used while nobody owned the rule, so this mutation is a board
+            # going quietly back to being checked against a number no
+            # fabricator published. It reads the value out of rules.py rather
+            # than naming 0.4064, for the reason the two above record.
+            ("the hole rule reverts to KiCad's default", verify.PROJECT,
+             lambda text: text.replace(
+                 f'"min_hole_to_hole": {rules.hole_rules()["min_hole_to_hole"]}',
+                 f'"min_hole_to_hole": {rules.KICAD_HOLE_TO_HOLE_MM}')),
+            # **This one normalises before it mutates, and it has to.** The
+            # board on disk is hand-laid, so its tracks are whatever width the
+            # person drawing them used -- and while it is at a stale class,
+            # every one of them is already undeclared and check_rules() is
+            # already failing. A mutation planted into that finds a check that
+            # was failing anyway, which is a pass for the wrong reason and is
+            # worse than the dead mutation the guard caught.
+            #
+            # So the copy is first made *consistent* -- every width set to
+            # rules.TRACK_MM, which is the state check_rules() is supposed to
+            # accept -- and then one track is given a width nothing declares.
+            # That tests the check rather than the board.
+            # **Inside a `(segment ...)` block, and it has to say so.** This
+            # normalised every `(width ...)` in the file and then changed the
+            # first one -- which was a track on the committed board and is a
+            # graphic on a generated one, because gen_pcb.py writes the
+            # outline and the silkscreen before any copper. check_rules()
+            # reads segment widths, so the mutation moved off its own target
+            # and reported MISSED: a live mutation aimed at the wrong object,
+            # which is one worse than a dead one. It now finds the first
+            # segment and rewrites the width in that.
             ("the board carries a track of an undeclared width", verify.PCB,
-             lambda text: text.replace(f'(width {rules.TRACK_MM})',
-                                       f'(width {rules.TRACK_MM / 2})', 1))):
+             lambda text: _widen_first_segment(
+                 re.sub(r'\(width [\d.]+\)', f'(width {rules.TRACK_MM})',
+                        text)))):
         # **A text mutation that changes nothing is a mutation with no target**,
         # which is dead_mutations()' discriminator one object along: you cannot
         # remove what is not there, and you cannot replace what does not match.
@@ -889,6 +1020,32 @@ def main():
         else:
             found = verify.check_rules(verify.PROJECT, copy_path)
         report(label, found)
+        copy_path.unlink()
+
+    # **The stackup, mutated on the board rather than in the netlist.** A
+    # stackup is not a net, so no netlist mutation can reach it -- and the
+    # failure it guards against is not a wrong value but an *absent* one, since
+    # KiCad supplies defaults for a board that declares no stackup and a
+    # default is invisible to every check that reads what is written. Both are
+    # planted: a dielectric a hair thinner than PCBWay's, and the block deleted
+    # outright.
+    for label, mutate in (
+            ("a stackup dielectric drifts off rules.py",
+             lambda text: text.replace("(thickness 0.1855)",
+                                       "(thickness 0.1800)", 1)),
+            ("the board declares no stackup at all",
+             lambda text: re.sub(r"\n\t\t\(stackup\n(?:.*?\n)*?\t\t\)\n",
+                                 "\n", text, count=1))):
+        original = verify.PCB.read_text()
+        planted = mutate(original)
+        if planted == original:
+            report(f"{label} [DEAD: the mutation matched nothing]", [])
+            continue
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(planted)
+            copy_path = pathlib.Path(handle.name)
+        report(label, verify.check_stackup(copy_path))
         copy_path.unlink()
 
     # The declaration-only checks cannot be mutated through the netlist, so
@@ -948,7 +1105,86 @@ def main():
         finally:
             socket._git = original
 
+    # **The two retirements, and the second provocation is the real mechanism
+    # rather than a poke at the threshold.** design.SETTLED says two
+    # assumptions are not worth a bench because no value in their range
+    # changes anything -- a claim about the design, not about the numbers, so
+    # it expires when the design moves. inlet_loop_uh's own note names exactly
+    # how: it was load-bearing until L801 was fitted. Taking the choke back
+    # off is that sentence run backwards, and check_settled() has to object.
+    def _settled_names_nothing():
+        design.SETTLED["not_an_assumption"] = "a retirement of nothing"
+        try:
+            design.check_settled()
+        finally:
+            del design.SETTLED["not_an_assumption"]
+
+    def _choke_comes_off():
+        original = design.INLET_CHOKE_UH
+        design.INLET_CHOKE_UH = 0.0
+        try:
+            design.check_settled()
+        finally:
+            design.INLET_CHOKE_UH = original
+
+    # **The order codes, and the three faults these plant all happened.** A
+    # capacitance a decimal exponent out, and a case code against the wrong
+    # land -- see design.Design.check_order_codes(), which also records the
+    # one it would *not* have caught.
+    def _capacitance_off_by_ten():
+        original = design.DESIGN.parts["C141"].mpn
+        design.DESIGN.parts["C141"].mpn = "GRM2195C1H562JA01D"
+        try:
+            design.DESIGN.check_order_codes()
+        finally:
+            design.DESIGN.parts["C141"].mpn = original
+
+    def _case_code_against_the_land():
+        original = design.DESIGN.parts["C101"].mpn
+        design.DESIGN.parts["C101"].mpn = "CGA4J2X7R1C106K125AE"
+        try:
+            design.DESIGN.check_order_codes()
+        finally:
+            design.DESIGN.parts["C101"].mpn = original
+
+    # **The bias check, and the first version of this fault was the mistake
+    # this file already records one case earlier.** It mutated a curve and
+    # asserted "some capacitor is now short" -- and C840 *is* short, today,
+    # for real, so the assertion held whether or not the mutation did
+    # anything. A mutation planted into a check that was already failing is a
+    # pass for the wrong reason, which is exactly what the track-width case
+    # above had to be rewritten for.
+    #
+    # So the discriminator is a **named** ref that is passing beforehand:
+    # C802 has 9.93 uF against a 0.1 uF minimum and is nowhere near the edge.
+    # Collapse its curve and C802 itself has to appear.
+    def _biased_ceramic_falls_short():
+        part = design.DESIGN.parts["C802"].mpn
+        original = design.CAP_DC_BIAS[part]
+        before = [p for p in design.check_capacitor_bias()[0]
+                  if p.startswith("C802")]
+        design.CAP_DC_BIAS[part] = tuple((v, c / 1000.0) for v, c in original)
+        try:
+            if before:
+                raise AssertionError("C802 was already short -- this fault "
+                                     "cannot discriminate")
+            after = [p for p in design.check_capacitor_bias()[0]
+                     if p.startswith("C802")]
+            if not after:
+                raise AssertionError("C802 is short and was not reported")
+            raise SystemExit("caught")
+        finally:
+            design.CAP_DC_BIAS[part] = original
+
     for label, provoke in (
+            ("a biased ceramic is short of its stated minimum",
+             _biased_ceramic_falls_short),
+            ("an order code is a decimal exponent out",
+             _capacitance_off_by_ten),
+            ("an order code's case is not its land",
+             _case_code_against_the_land),
+            ("a retired assumption names nothing", _settled_names_nothing),
+            ("the choke comes off and a retirement expires", _choke_comes_off),
             ("contract: the mixer's root is on sys.path", _sys_path_polluted),
             ("contract: a module was loaded from the mixer repo",
              _module_from_the_mixer),
@@ -958,7 +1194,7 @@ def main():
         try:
             provoke()
             found = []
-        except SystemExit:
+        except (SystemExit, AssertionError):
             found = ["raised"]
         report(label, found)
 

@@ -21,25 +21,24 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 
 | Ref | Value | MPN | Fitted | Order | Unit | Basis | Mouser UK |
 |---|---|---|---|---|---|---|---|
-| C101–C814 | 10u/16V X7R | `GRM21BR61C106KE15L` | 8 | 12 | GBP 0.08–0.25 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR61C106KE15L) |
+| C101–C814 | 10u/16V X7R | `CGA6M3X7R1C106K200AB` | 8 | 12 | GBP 0.08–0.25 | band | [search](https://www.mouser.co.uk/c/?q=CGA6M3X7R1C106K200AB) |
 | C102–C652 | 1200p/50V C0G | `GRM2165C1H122JA01D` | 12 | 16 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H122JA01D) |
 | C121–C621 | 100p/50V C0G | `GRM2165C1H101JA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H101JA01D) |
-| C131–C631 | 150n/50V X7R | `GRM216R71H154KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H154KA01D) |
-| C141–C641 | 56n/50V X7R | `GRM216R71H563KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H563KA01D) |
+| C131–C631 | 150n/50V X7R | `CGA4J2X7R1H154K125AA` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=CGA4J2X7R1H154K125AA) |
+| C141–C641 | 56n/50V X7R | `CC0805KRX7R9BB563` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=CC0805KRX7R9BB563) |
 | C142–C642 | 22n/50V X7R | `GRM216R71H223KA01D` | 6 | 10 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H223KA01D) |
 | C151–C810 | 470n/50V X7R | `GRM21BR71H474KA88L` | 7 | 11 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71H474KA88L) |
-| C701–C842 | 100n/50V X7R | `GRM216R71H104KA01D` | 46 | 50 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=GRM216R71H104KA01D) |
-| C801 | 100n/50V C0G | `GRM2195C1H104JA01D` | 1 | 5 | GBP 0.15–0.45 | band | [search](https://www.mouser.co.uk/c/?q=GRM2195C1H104JA01D) |
+| C701–C842 | 100n/50V X7R | `CGA4J2X7R1H104K125AE` | 36 | 40 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=CGA4J2X7R1H104K125AE) |
 | C805 | 2n2/50V C0G | `GRM2165C1H222JA01D` | 1 | 5 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H222JA01D) |
-| C806–C829 | 1u/16V X7R | `GRM21BR71C105KA01L` | 5 | 9 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71C105KA01L) |
-| C807–C813 | 10u/50V X7R | `GRM32ER71H106KA12L` | 5 | 9 | GBP 0.30–0.80 | band | [search](https://www.mouser.co.uk/c/?q=GRM32ER71H106KA12L) |
-| C832, C833 | 15p/50V C0G | `GRM2165C1H150JA01D` | 2 | 6 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM2165C1H150JA01D) |
-| C840 | 2u2/50V X7R | `GRM21BR71H225KA73L` | 1 | 5 | GBP 0.05–0.20 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71H225KA73L) |
-| C843 | 22u/16V X5R | `GRM21BR61C226ME44L` | 1 | 5 | GBP 0.08–0.30 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR61C226ME44L) |
+| C806–C816 | 1u/16V X7R | `GRM21BR71C105KA01L` | 3 | 7 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=GRM21BR71C105KA01L) |
+| C807–C813 | 10u/50V X7R | `CNA6P1X7R1H106K250AE` | 5 | 9 | GBP 0.30–0.80 | band | [search](https://www.mouser.co.uk/c/?q=CNA6P1X7R1H106K250AE) |
+| C840 | 4u7/50V X7R | `CGA6P3X7R1H475K250AB` | 1 | 5 | GBP 0.08–0.30 | band | [search](https://www.mouser.co.uk/c/?q=CGA6P3X7R1H475K250AB) |
+| C843 | 22u/16V X5R | `C3225X5R1C226M250AA` | 1 | 5 | GBP 0.08–0.30 | band | [search](https://www.mouser.co.uk/c/?q=C3225X5R1C226M250AA) |
 | D151–D805 | 1N4148W | `1N4148WS-7-F` | 13 | 14 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=1N4148WS-7-F) |
 | D801–D833 | BAT54 | `BAT54-7-F` | 5 | 6 | GBP 0.05–0.15 | band | [search](https://www.mouser.co.uk/c/?q=BAT54-7-F) |
-| D803 | PMEG2010AEH | `PMEG2010AEH,115` | 1 | 2 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=PMEG2010AEH,115) |
+| D803, D806 | PMEG2010AEH | `PMEG2010AEH,115` | 2 | 3 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=PMEG2010AEH,115) |
 | D804 | B340A | `B340A-13-F` | 1 | 5 | GBP 0.20–0.60 | band | [search](https://www.mouser.co.uk/c/?q=B340A-13-F) |
+| F801 | 1.6A T 250V | `3403.0168.11` | 1 | 5 | USD 1.80 | read | [search](https://www.mouser.co.uk/c/?q=3403.0168.11) |
 | J1 | CH1 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J2 | CH2 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J3 | CH3 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
@@ -47,33 +46,30 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | J5 | CH5 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J6 | CH6 | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J8 | PWR | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
-| J14 | USB_B_Micro | `105017-0001` | 1 | 5 | GBP 0.40–1.20 | band | [search](https://www.mouser.co.uk/c/?q=105017-0001) |
 | J15 | MIDIIN | `61300311121` | 1 | 5 | GBP 0.30–0.75 | band | [search](https://www.mouser.co.uk/c/?q=61300311121) |
 | J16 | MIDIOUT | `61300311121` | 1 | 5 | GBP 0.30–0.75 | band | [search](https://www.mouser.co.uk/c/?q=61300311121) |
 | J17 | TAP | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J18 | EXPR | `61300311121` | 1 | 5 | GBP 0.30–0.75 | band | [search](https://www.mouser.co.uk/c/?q=61300311121) |
-| J19 | BOOT | `61300311121` | 1 | 5 | GBP 0.30–0.75 | band | [search](https://www.mouser.co.uk/c/?q=61300311121) |
-| J20 | SWD | `61300311121` | 1 | 5 | GBP 0.30–0.75 | band | [search](https://www.mouser.co.uk/c/?q=61300311121) |
+| J19 | RESET | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | K801–K803 | G6S-2 DC5 | `G6S-2 DC5` | 3 | 7 | GBP 3.00–5.50 | band | [search](https://www.mouser.co.uk/c/?q=G6S-2 DC5) |
 | L801 | 744222 | `744222` | 1 | 5 | GBP 1.97 | read | [search](https://www.mouser.co.uk/c/?q=744222) |
-| L802 | 12u 20% | `SRN6045TA-120M` | 1 | 5 | GBP 0.30–0.90 | band | [search](https://www.mouser.co.uk/c/?q=SRN6045TA-120M) |
+| L802 | 15u 20% | `SRN6045TA-150M` | 1 | 5 | GBP 0.30–0.90 | band | [search](https://www.mouser.co.uk/c/?q=SRN6045TA-150M) |
 | Q801 | DMG1012T | `DMG1012T-7` | 1 | 2 | GBP 0.06–0.20 | band | [search](https://www.mouser.co.uk/c/?q=DMG1012T-7) |
 | R101–R802 | 10k 0.1% | `ERA6AEB103V` | 14 | 18 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB103V) |
 | R111–R621 | 12k1 0.1% | `ERA6AEB1212V` | 12 | 16 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=ERA6AEB1212V) |
 | R115–R615 | 220R 1% | `RC0805FR-07220RL` | 6 | 10 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-07220RL) |
 | R131–R632 | 1M 1% | `RC0805FR-071ML` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-071ML) |
-| R141–R823 | 22k 1% | `RC0805FR-0722KL` | 20 | 24 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0722KL) |
+| R141–R656 | 22k 1% | `RC0805FR-0722KL` | 18 | 22 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0722KL) |
 | R142–R643 | 17k8 1% | `RC0805FR-0717K8L` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0717K8L) |
-| R151–R830 | 10k 1% | `RC0805FR-0710KL` | 26 | 30 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0710KL) |
+| R151–R830 | 10k 1% | `RC0805FR-0710KL` | 25 | 29 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0710KL) |
 | R154–R657 | 4k99 1% | `RC0805FR-074K99L` | 12 | 16 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-074K99L) |
 | R803–R816 | 100k 1% | `RC0805FR-07100KL` | 7 | 11 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-07100KL) |
 | R804, R805 | 4R7 1% | `RC0805FR-074R7L` | 2 | 6 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-074R7L) |
-| R820, R821 | 27R 1% | `RC0805FR-0727RL` | 2 | 6 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0727RL) |
-| R824–R833 | 1k 1% | `RC0805FR-071KL` | 5 | 9 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-071KL) |
 | R827 | 390R 1% | `RC0805FR-07390RL` | 1 | 5 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-07390RL) |
 | R828 | 33R 5% | `RC0805JR-0733RL` | 1 | 5 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=RC0805JR-0733RL) |
 | R829 | 10R 5% | `RC0805JR-0710RL` | 1 | 5 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=RC0805JR-0710RL) |
-| R850 | 51k 1% | `RC0805FR-0751KL` | 1 | 5 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0751KL) |
+| R831–R833 | 1k 1% | `RC0805FR-071KL` | 3 | 7 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-071KL) |
+| R850 | 88k7 1% | `RC0805FR-0788K7L` | 1 | 5 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0788K7L) |
 | R851 | 22k1 1% | `RC0805FR-0722K1L` | 1 | 5 | GBP 0.01–0.05 | band | [search](https://www.mouser.co.uk/c/?q=RC0805FR-0722K1L) |
 | R901, R902 | 0R | `RC0805JR-070RL` | 2 | 6 | GBP 0.01–0.03 | band | [search](https://www.mouser.co.uk/c/?q=RC0805JR-070RL) |
 | U1–U8 | OPA1644 | `OPA1644AIDR` | 8 | 9 | USD 2.40–4.98 | snippet | [search](https://www.mouser.co.uk/c/?q=OPA1644AIDR) |
@@ -85,16 +81,14 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | U16 | NCP1117-5.0 | `NCP1117DT50G` | 1 | 2 | GBP 0.35–0.90 | band | [search](https://www.mouser.co.uk/c/?q=NCP1117DT50G) |
 | U17 | MCP3564 | `MCP3564-E/ST` | 1 | 2 | GBP 5.35 | read | [search](https://www.mouser.co.uk/c/?q=MCP3564-E/ST) |
 | U18 | MCP1700-3.3 | `MCP1700T-3302E/TT` | 1 | 2 | GBP 0.38 | read | [search](https://www.mouser.co.uk/c/?q=MCP1700T-3302E/TT) |
-| U19 | RP2040 | `SC0914(13)` | 1 | 5 | GBP 0.80–1.80 | band | [search](https://www.mouser.co.uk/c/?q=SC0914(13)) |
-| U20 | W25Q128JV | `W25Q128JVSIQ` | 1 | 2 | GBP 1.00–2.50 | band | [search](https://www.mouser.co.uk/c/?q=W25Q128JVSIQ) |
+| U19 | RaspberryPi_Pico | `SC0915` | 1 | 5 | GBP 3.60–5.00 | band | [search](https://www.mouser.co.uk/c/?q=SC0915) |
 | U21 | TLP2761 | `TLP2761(TP,E)` | 1 | 2 | GBP 1.00–2.20 | band | [search](https://www.mouser.co.uk/c/?q=TLP2761(TP,E)) |
 | U22 | TPS560430XF | `TPS560430XFDBVR` | 1 | 2 | GBP 0.70–1.60 | band | [search](https://www.mouser.co.uk/c/?q=TPS560430XFDBVR) |
-| Y801 | 12MHz 30ppm | `ABM8-272-T3` | 1 | 5 | GBP 0.40–1.20 | band | [search](https://www.mouser.co.uk/c/?q=ABM8-272-T3) |
 
 ## Totals, per currency, fitted quantities
 
-- **GBP 60.29 – 100.70**
-- **USD 27.96 – 49.80**
+- **GBP 60.67 – 96.94**
+- **USD 29.76 – 51.60**
 
 Kept per currency rather than converted: two lines were priced in dollars because that is the currency the figures were found in, and folding them into a sterling total at a rate nobody looked up would turn two honest figures into one invented one.
 
@@ -116,17 +110,13 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **C701–C842** — 0805 X7R
 
-**C801** — 0805 C0G at 100 nF is a large part for the class and priced accordingly. It is the reference's NR capacitor, which is worth C0G.
-
 **C805** — 0805 C0G
 
-**C806–C829** — 0805 X7R
+**C806–C816** — 0805 X7R
 
 **C807–C813** — 1210 X7R at 50 V, which is 4x derating on the +/-12 V rails and 2.5x on the 20 V primary. A 25 V part would be cheaper and would have lost most of its capacitance at the top of the inlet range -- the same argument the mixer makes at its own VIN_P.
 
-**C832, C833** — 0805 C0G
-
-**C840** — 1210 X7R at 50 V
+**C840** — 1210 X7R at 50 V, 2.5 mm body. It was a 2u2 and the DC bias curve is why -- see design.MCU_DCDC_CIN
 
 **C843** — 1210 X5R
 
@@ -134,9 +124,11 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **D801–D833** — BAT54-7-F, in SOD-123. Five of them do two jobs -- the two-diode pump and three coil flybacks -- and what the pump wants from it is *leakage*, 2 uA max at 25 V, because the same diode has to hold a 1 uF node up between 10 kHz cycles. Its forward drop at the pump's 18 uA is off the bottom of its own table; PUMP_DIODE_VF's 0.32 V sits above the datasheet maximum at ten times that current, deliberately.
 
-**D803** — PMEG2010AEH in SOD123F, and it is the one diode on this board chosen by a number rather than a class. It is a 1 A part carrying 36 mA, which is the whole trick: 259 mV max there against the BAT54's 545 mV, and design.clamp_vf_ceiling() says the mixer's headroom will take 320 mV. The BAT54 that used to be fitted here missed by 5.5 dB. Higher leakage is the price and it is free on a node inside an op-amp's feedback loop.
+**D803, D806** — PMEG2010AEH in SOD123F, and it is the one diode on this board chosen by a number rather than a class. It is a 1 A part carrying 36 mA, which is the whole trick: 259 mV max there against the BAT54's 545 mV, and design.clamp_vf_ceiling() says the mixer's headroom will take 320 mV. The BAT54 that used to be fitted here missed by 5.5 dB. Higher leakage is the price and it is free on a node inside an op-amp's feedback loop.
 
 **D804** — B340A-13-F, SMA. The mixer's own reverse-protection part, chosen there for a forward drop that falls as the diode is run below its rating -- see design.INLET_DIODE.
+
+**F801** — page fetched: $1.80 at 1, $1.38 at 10, $1.145 at 50, $1.056 at 100, $0.807 at 1000, 16,067 in stock. The listing's 1.6 A, 250 VAC, 125 VDC, Slow Blow and 10.10 x 3.00 x 3.00 mm all agree with the datasheet read for design.INLET_FUSE -- and the 3.00 mm height is what put it in GAP_MM's passive class rather than the tall one. **Its "Breaking Capacity: 200 A AC, 35 A DC" is the datasheet's worst row and not this application's**: note 2) on page 5 gives 35 A only at 250 VDC, against 200 A at 63 VAC/DC, and this inlet is 24 V. A distributor's summary field flattens a table, and the row it keeps is the one that sells the part conservatively.
 
 **J1** — Wurth WR-PHD 1x02 vertical, gold-plated: CONN_MPN[2]. Two ways because the loom is a shielded pair -- the shield lands at the mixer end only, so it has no pin here. See design.FRONT_R.
 
@@ -152,8 +144,6 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **J8** — Wurth WR-PHD 1x02 vertical, gold-plated: CONN_MPN[2]. Two ways because the loom is a shielded pair -- the shield lands at the mixer end only, so it has no pin here. See design.FRONT_R.
 
-**J14** — Molex 105017-0001, micro-B receptacle. **The one panel part on the board rather than on a header**, and placement.EDGE_PARTS is what keeps it at the edge where a plug can reach it.
-
 **J15** — Wurth WR-PHD 1x03 vertical, gold-plated: CONN_MPN[3]. Five on this board, all of them the controller's: MIDI in and out, the expression pedal, boot/reset and SWD. Three conductors is what a TRS jack and a DIN's two used pins both want.
 
 **J16** — Wurth WR-PHD 1x03 vertical, gold-plated: CONN_MPN[3]. Five on this board, all of them the controller's: MIDI in and out, the expression pedal, boot/reset and SWD. Three conductors is what a TRS jack and a DIN's two used pins both want.
@@ -162,15 +152,13 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **J18** — Wurth WR-PHD 1x03 vertical, gold-plated: CONN_MPN[3]. Five on this board, all of them the controller's: MIDI in and out, the expression pedal, boot/reset and SWD. Three conductors is what a TRS jack and a DIN's two used pins both want.
 
-**J19** — Wurth WR-PHD 1x03 vertical, gold-plated: CONN_MPN[3]. Five on this board, all of them the controller's: MIDI in and out, the expression pedal, boot/reset and SWD. Three conductors is what a TRS jack and a DIN's two used pins both want.
-
-**J20** — Wurth WR-PHD 1x03 vertical, gold-plated: CONN_MPN[3]. Five on this board, all of them the controller's: MIDI in and out, the expression pedal, boot/reset and SWD. Three conductors is what a TRS jack and a DIN's two used pins both want.
+**J19** — Wurth WR-PHD 1x02 vertical, gold-plated: CONN_MPN[2]. Two ways because the loom is a shielded pair -- the shield lands at the mixer end only, so it has no pin here. See design.FRONT_R.
 
 **K801–K803** — Omron G6S-2 DC5, surface-mount G6S-2F body. Single-side stable, which is Omron's name for non-latching and is the property the whole fail-safe turns on. The line worth reading twice is the contact material -- bifurcated crossbar, Ag(Au-Alloy) -- because a plain silver contact needs a wetting current a guitar string will never supply, and fails intermittently in a way that looks like a dry joint.
 
 **L801** — page fetched: £1.97 at 1, £1.94 at 10, £1.75 at 50, £1.69 at 100, £1.37 at 1000 T&R, net of VAT, 12,641 in stock. The listing's own "1 mH @ 100 kHz", 800 mA and 207 mOhm agree with the datasheet read for design.INLET_CHOKE, and its "6 kOhms @ 4 MHz" is the frequency the datasheet's Zmax row omits -- which is what puts 580 kHz on the inductive slope rather than over the peak. The datasheet is at https://www.we-online.com/components/products/datasheet/744222.pdf -- fetched and read.
 
-**L802** — Bourns SRN6045TA-120M, 12 uH, 6.0 x 6.0 mm shielded. Table 1 of the switcher's datasheet gives the inductance; what the part is chosen against is its own datasheet's Isat of 4.0 A against a 1.4 A peak current limit, which is section 9.2.2.4's rule and 2.9x of it.
+**L802** — Bourns SRN6045TA-150M, 15 uH, 6.0 x 6.0 mm shielded. Table 1 of the switcher's datasheet asks for 18 uH at 5 V and this series does not make one; 15 is inside the +/-20 % the table's own column heading gives and 22 is 0.4 uH outside it. What the part is chosen against is its Isat of 3.8 A against a 1.4 A peak current limit, which is section 9.2.2.4's rule and 2.7x of it.
 
 **Q801** — Diodes DMG1012T in SOT-523. Chosen for one row of its table: R_DS(on) 0.7 ohm max at V_GS = 1.8 V, which is the gate voltage pump_timing() computes and the only voltage this circuit can produce. Vgs(th) 1.0 V max is the stated filter; being characterised at 1.8 V is what made this part rather than another that meets it.
 
@@ -182,7 +170,7 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **R131–R632** — 0805 thick film
 
-**R141–R823** — 0805 thick film
+**R141–R656** — 0805 thick film
 
 **R142–R643** — 0805 thick film, E96
 
@@ -194,15 +182,13 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **R804, R805** — 0805 thick film. Two of them, and they are the rail filter: rail_filter() is why this is a resistor and not an inductor.
 
-**R820, R821** — 0805 1%
-
-**R824–R833** — 0805 1%
-
 **R827** — 0805 1%
 
 **R828** — 0805 5%
 
 **R829** — 0805 5%
+
+**R831–R833** — 0805 1%
 
 **R850** — 0805 1%
 
@@ -228,15 +214,11 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **U18** — page fetched: £0.38 at 1, £0.322 at 25, £0.298 at 100, net of VAT, 81,458 in stock, SOT-23-3. Its 4 uA of quiescent current is the whole reason a third linear rail was affordable: an NCP1117 in the same position is 10 mA maximum, which is a third of the converter's remaining headroom spent on a regulator's own biasing. Datasheet DS20001826F at https://ww1.microchip.com/downloads/aemDocuments/documents/APID/ProductDocuments/DataSheets/MCP1700-Data-Sheet-20001826F.pdf -- fetched; the 336 C/W this design uses is from DS21826B, which publishes the minimum-pad figure revision F drops.
 
-**U19** — RP2040, 7x7 QFN-56. Raspberry Pi sell it directly and it is the cheapest active on this board by an order of magnitude against the converter -- which is worth seeing, because the controller is the block that took the longest to close and it is not the expensive one. What it *did* cost is the fabrication class: 0.40 mm pitch is why the board is 0.09/0.09 on 1 oz. See docs/fabrication-class.md.
-
-**U20** — W25Q128JVSIQ, 8-pin SOIC 208-mil, 128 Mbit. The reference design's own part. **The size is not derived** -- nothing in this project sizes the firmware -- so the smaller siblings are the obvious saving and they are pin-compatible: W25Q16JV is a quarter of this and changes no value on the board. See design.FLASH.
+**U19** — Raspberry Pi Pico, SC0915. **The one line on this BOM whose price is published rather than banded**: the Pico datasheet's own Table 6 says US$4.00 at 1+, which is the only figure in this file that came from a vendor's ordering table instead of from a class. It is now the most expensive active on the board after the converter, and it replaced four lines that came to about GBP 3 between them -- the RP2040, the flash, the crystal and the USB receptacle -- plus twelve capacitors, four resistors and two headers. So the parts cost is roughly a wash and what it bought is elsewhere: 0.40 mm of pin pitch became 2.54, which re-opened docs/fabrication-class.md, and about 25 lines of assembly became one.
 
 **U21** — Toshiba TLP2761, SO6L. It is dearer than the 6N138 CA-033 names and the reason is the whole of design.MIDI_OPTO: 2.7 V of supply and 1.6 mA of threshold current, which is what makes a receiver possible on a board whose only logic rail is 3.3 V.
 
-**U22** — TPS560430XFDBVR, SOT-23-6. **The F suffix is the price of this line**: the PFM version is the same die and a few pence cheaper, and design.mcu_dcdc_light_load() shows its switching frequency would fall to 246 kHz at this board's idle load -- under the >= 300 kHz rule spec section 1.1 sets, on a rail the audio domain shares.
-
-**Y801** — Abracon ABM8-272-T3, 3.2 x 2.5 mm. Named twice by the vendor's own hardware-design document -- 'For original designs using RP2040 we recommend using the Abracon ABM8-272-T3' -- and its Table 1 is where CL, ESR and the drive level in design.CRYSTAL come from.
+**U22** — TPS560430XFDBVR, SOT-23-6. **The F suffix is the price of this line**: the PFM version is the same die and a few pence cheaper, and design.mcu_dcdc_light_load() shows the PFM sibling would fall to 194 kHz in bypass at idle -- under the >= 300 kHz rule spec section 1.1 sets, on a rail the audio domain shares. The state matters: in circuit the relay coils hold this rail continuous, and bypass is where they let go.
 
 ## Not on this BOM
 
