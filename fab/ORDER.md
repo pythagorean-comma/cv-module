@@ -78,11 +78,11 @@ read it.
 
 One combined file, plated and unplated together, each tool carrying its own
 `TA.AperFunction` attribute. `gen_fab.check_holes()` counts these against the
-board: 1030 hits against 992 vias, 34 plated and 4 unplated through-hole pads.
+board: 1032 hits against 994 vias, 34 plated and 4 unplated through-hole pads.
 
 | tool | diameter mm | plating | hits |
 |---|---|---|---|
-| T1 | 0.300 | plated | 992 |
+| T1 | 0.300 | plated | 994 |
 | T2 | 1.000 | plated | 34 |
 | T3 | 1.850 | **unplated** | 2 |
 | T4 | 2.200 | **unplated** | 2 |
@@ -106,7 +106,7 @@ filled in. They are order-form fields and they are a person's to choose:
 * **surface finish** — the job file says `Finish: None`, which is KiCad
   reporting that nobody set one, not a specification of bare copper;
 * **solder mask colour** and **silkscreen colour**;
-* **electrical test** — worth pricing at 1030 holes
+* **electrical test** — worth pricing at 1032 holes
   and 185 nets;
 * **panelisation or single boards**, and whether the fabricator may add rails;
 * **IPC class**, and any impedance control — there is none on this board:

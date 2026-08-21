@@ -31,9 +31,11 @@ the one place that nearly happened is recorded below.
 
 import math
 import pathlib
+import re
 
 import design
 import delta
+import placement
 import contract.socket as socket
 from contract.socket import source
 from toolchain import sexp
@@ -449,6 +451,90 @@ def parallel_runs(board):
     return worst
 
 
+# **How much audio copper sits off its own ground plane, and it is a ratchet.**
+#
+# "Off MAGND" and not "over MDGND", because the boundary that matters is where
+# the analogue pour *stops*: gen_pcb.build() insets both pours by half of
+# placement.GROUND_GAP, so between 156.44 and 158.44 there is no reference
+# plane at all, which is worse than being over the wrong one. Measuring from
+# the far edge instead would score 23 mm of bare-gap copper as compliant --
+# the difference between the two readings on this board, and the reason the
+# name says MAGND. floorplan.CROSSING_RULE says in terms that "nothing
+# audio-carrying crosses at all", and floorplan.check_crossings() cannot hold
+# it: that check reads the **netlist** -- a net touching parts in both domains
+# -- and where a track *goes* is a different question from where its endpoints
+# are. A copper review found the gap: eleven audio nets had copper south of
+# the MAGND pour, and two of them, PIN5 and SIN3, had every pad in the
+# analogue half and were taken 38 mm and 19 mm into the digital one anyway.
+# The router had no way to know; nothing here was asking.
+#
+# **What the number means.** An audio track over MDGND has its return current
+# in a plane its own ground does not meet except at the star, so the loop
+# closes the long way round -- which is the mechanism CROSSING_RULE exists to
+# prevent, arriving through the copper rather than through the netlist.
+#
+# **Why it is a figure and not zero.** Nine of the eleven reach a bypass
+# relay's contact, and the three relays straddle the split *by design*: their
+# southern pads are at y = 161.4 and the copper has to get there. Those are
+# not violations, they are the cost of a part that is deliberately on the
+# line. So this is UNROUTED_ITEMS' rule applied to millimetres -- **down as
+# copper is moved, up only with the nets named** -- and not an assertion of
+# zero, which would be unachievable and would therefore be switched off.
+AUDIO_OFF_MAGND_MM = 144.5
+
+
+def audio_off_its_own_plane(board=BOARD):
+    """Audio copper south of the MAGND pour, per net and in total.
+
+    The boundary is the pour's own southern edge rather than SPLIT_Y, because
+    what decides a return path is which copper is underneath: gen_pcb.build()
+    insets each pour by half of placement.GROUND_GAP, so MAGND stops there and
+    everything below is bare or MDGND.
+    """
+    edge = placement.SPLIT_Y - placement.GROUND_GAP / 2
+    per_net = {}
+    text = board.read_text() if hasattr(board, "read_text") else board
+    pattern = re.compile(r"^(%s)\d+$" % "|".join(AUDIO_FAMILIES))
+    for x0, y0, x1, y1, _w, _layer, net in _raw_segments(text):
+        if not pattern.match(net):
+            continue
+        length = math.hypot(x1 - x0, y1 - y0)
+        if not length:
+            continue
+        # Sampled rather than clipped: a segment may cross the edge, and the
+        # part that matters is the part that is over the wrong plane.
+        steps = max(2, int(length / 0.05))
+        for i in range(steps):
+            if y0 + (i + 0.5) / steps * (y1 - y0) > edge:
+                per_net[net] = per_net.get(net, 0.0) + length / steps
+    return {"edge_mm": edge, "per_net": per_net,
+            "total_mm": sum(per_net.values()),
+            "declared_mm": AUDIO_OFF_MAGND_MM}
+
+
+def _raw_segments(text):
+    """Every track segment as (x0, y0, x1, y1, width, layer, net)."""
+    for a, b, c, d, w, layer, net in re.findall(
+            r'\t\(segment\n\t\t\(start ([-\d.]+) ([-\d.]+)\)\n'
+            r'\t\t\(end ([-\d.]+) ([-\d.]+)\)\n\t\t\(width ([\d.]+)\)\n'
+            r'\t\t\(layer "([^"]+)"\)\n\t\t\(net "([^"]*)"\)', text):
+        yield float(a), float(b), float(c), float(d), float(w), layer, net
+
+
+def check_audio_off_its_own_plane(board=BOARD):
+    """The ratchet. Raises if the figure has grown."""
+    measured = audio_off_its_own_plane(board)
+    if measured["total_mm"] > AUDIO_OFF_MAGND_MM + 0.05:
+        worst = sorted(measured["per_net"].items(), key=lambda kv: -kv[1])
+        raise AssertionError(
+            f"audio copper off MAGND is {measured['total_mm']:.1f} mm and "
+            f"constraints.AUDIO_OFF_MAGND_MM declares "
+            f"{AUDIO_OFF_MAGND_MM:.1f} -- "
+            + ", ".join(f"{net} {mm:.1f} mm" for net, mm in worst[:6])
+            + ". Down as copper is moved, up only with the nets named.")
+    return measured
+
+
 def board_coupling(board=BOARD, hz=20_000.0):
     """Channel-to-channel coupling through the copper, at every declared height.
 
@@ -611,6 +697,21 @@ def _report():
         print(f"   the same across the sweep   {b['worst_swept_db']:>7.1f} dB   "
               f"the height is worth {b['height_costs_db']:.1f} dB, and "
               f"rules.FAB_STACKUP is what settled it")
+        off = check_audio_off_its_own_plane()
+        print()
+        print("5c. audio copper that is not over its own ground plane")
+        print("    CROSSING_RULE says nothing audio-carrying crosses; "
+              "check_crossings() reads the netlist and cannot see a track's "
+              "path")
+        for net, mm in sorted(off["per_net"].items(), key=lambda kv: -kv[1]):
+            print(f"   {net:<16} {mm:6.1f} mm past y = {off['edge_mm']:.2f}")
+        print(f"   total {off['total_mm']:>6.1f} mm against "
+              f"{off['declared_mm']:.1f} declared -- a ratchet, and every "
+              f"millimetre of it reaches a relay contact at y = 161.4")
+        print(f"   was  {211.9:>6.1f} mm before the copper review: PIN5 and "
+              f"SIN3 had every pad in the analogue half and were routed "
+              f"through the digital one anyway")
+        print()
         induced = max(r["inductive_db"] for r in b["rows"])
         print(f"   inductive, the same        {induced:>7.1f} dB   "
               f"computed, not dismissed: a stiff node still takes a series emf")

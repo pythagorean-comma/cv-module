@@ -75,7 +75,9 @@ has with KiCad's bundled Python, and for the same reason.
 """
 
 import argparse
+import fnmatch
 import json
+import math
 import os
 import pathlib
 import re
@@ -274,6 +276,70 @@ def routing_layers(board_text):
             f"every copper layer on this board carries a pour ({sorted(planes)})"
             f" -- there is nothing left to route on")
     return usable
+
+
+def analogue_half():
+    """The rectangle south of the MAGND pour: where audio copper must not go.
+
+    **The copper review's finding, as a region.** `floorplan.CROSSING_RULE`
+    says in terms that *"nothing audio-carrying crosses at all"*, and
+    `check_crossings()` cannot hold it: that check reads the **netlist** -- a
+    net touching parts in both domains -- and a track's *path* is a different
+    question from where its endpoints are. Measured on the routed board, two
+    audio nets whose every pad is in the analogue half had been taken south of
+    the plane edge anyway, `PIN5` for 38 mm and `SIN3` for 19 mm, running over
+    MDGND with their return current unable to follow them.
+
+    The boundary is the **pour's** southern edge and not `placement.SPLIT_Y`,
+    because what matters to a return current is which copper is underneath it:
+    MAGND stops at SPLIT_Y minus half the ground gap, and everything below
+    that is either bare or MDGND.
+
+    Deliberately not added to keepout_rects(): most of this board lives down
+    there, and a region that is forbidden to the digital half's own nets is
+    not a keep-out, it is a wall. It is passed only by --keepout-digital, and
+    only for a scope that can honour it.
+    """
+    west, _north, east, south = placement.outline()
+    return ("digital-half", west, placement.SPLIT_Y - placement.GROUND_GAP / 2,
+            east, south)
+
+
+def pads_in_region(board_text, patterns, region):
+    """Pads of the scoped nets that fall inside a keep-out. The refusal's basis.
+
+    **A keep-out is absolute across every net in the run** -- krt.plan()
+    already records what that costs, because a single pass with the primary's
+    region blocked fails the six nets that live inside it and the improvement
+    gate reverts the whole thing. This asks the question before the run rather
+    than after: if a net in scope has a pad in the region, the router is being
+    asked to reach somewhere it may not go, and it will spend five minutes
+    finding that out.
+    """
+    _name, left, top, right, bottom = region
+    trapped = []
+    for _fp, body in re.findall(r'\t\(footprint "([^"]+)"\n(.*?)\n\t\)\n',
+                                board_text, re.S):
+        at = re.search(r'^\t\t\(at ([-\d.]+) ([-\d.]+)(?: ([-\d.]+))?\)',
+                       body, re.M)
+        ox, oy = float(at.group(1)), float(at.group(2))
+        angle = math.radians(float(at.group(3) or 0))
+        ref = re.search(r'\(property "Reference" "([^"]+)"', body).group(1)
+        for pin, lx, ly, rest in re.findall(
+                r'\(pad "([^"]+)"[^\n]*\n\s*\(at ([-\d.]+) ([-\d.]+)'
+                r'[^\)]*\)(.*?)\n\t\t\)', body, re.S):
+            found = re.search(r'\(net \d*\s*"?([^")]*)"?\)', rest)
+            if not found:
+                continue
+            net = found.group(1)
+            if not any(fnmatch.fnmatch(net, pattern) for pattern in patterns):
+                continue
+            lx, ly = float(lx), float(ly)
+            x = ox + lx * math.cos(angle) + ly * math.sin(angle)
+            y = oy - lx * math.sin(angle) + ly * math.cos(angle)
+            if left <= x <= right and top <= y <= bottom:
+                trapped.append((ref, pin, net))
+    return trapped
 
 
 def keepout_rects():
@@ -675,6 +741,11 @@ def main(argv=None):
     parser.add_argument("--nets", nargs="+", default=None, metavar="PATTERN",
                         help="net patterns to route. Default: every net, in "
                              "two passes with the primary's region kept out")
+    parser.add_argument("--keepout-digital", action="store_true",
+                        help="keep this run out of everything south of the "
+                             "MAGND pour. For audio nets whose pads are all "
+                             "in the analogue half; refuses if any net in "
+                             "scope has a pad in the region")
     parser.add_argument("--commit", action="store_true",
                         help="move the routed candidate onto out/"
                              "cv-module.kicad_pcb and re-run gen_project.py")
@@ -710,6 +781,22 @@ def main(argv=None):
     whole_board = args.nets is None
     scope = args.nets or ["*"]
     rects = keepout_rects()
+    if args.keepout_digital:
+        region = analogue_half()
+        trapped = pads_in_region(text, scope, region)
+        if trapped:
+            raise SystemExit(
+                f"--keepout-digital would strand "
+                f"{len(trapped)} pad(s) it cannot reach: "
+                + ", ".join(f"{ref}.{pin} [{net}]"
+                            for ref, pin, net in trapped[:8])
+                + ("..." if len(trapped) > 8 else "")
+                + "\n\nThe tool's keep-out is absolute across every net in a "
+                  "run, so a net with a pad inside the region cannot be "
+                  "routed with it on. Nine of this board's audio nets reach a "
+                  "relay contact at y = 161.4 and are in exactly that "
+                  "position; PIN5 and SIN3 are not. Narrow the scope.")
+        rects = rects + [region]
 
     WORK.mkdir(parents=True, exist_ok=True)
     source = WORK / "cv-module.kicad_pcb"

@@ -53,6 +53,21 @@ what verify.py prints and what every 'constraint N' in design.py means
    BUF5/CVX1          20.6 mm at 0.93 mm pitch, into 142 ohm
    capacitive, at h = 0.1855 mm  -114.4 dB   (60 dB inside the requirement)
    the same across the sweep    -110.9 dB   the height is worth 3.5 dB, and rules.FAB_STACKUP is what settled it
+
+5c. audio copper that is not over its own ground plane
+    CROSSING_RULE says nothing audio-carrying crosses; check_crossings() reads the netlist and cannot see a track's path
+   SIN2               33.5 mm past y = 156.44
+   PIN6               32.2 mm past y = 156.44
+   IVOUT4             22.2 mm past y = 156.44
+   SIN4               20.3 mm past y = 156.44
+   PIN2               11.6 mm past y = 156.44
+   PIN4                7.1 mm past y = 156.44
+   IVOUT2              6.3 mm past y = 156.44
+   SIN6                6.1 mm past y = 156.44
+   IVOUT6              5.0 mm past y = 156.44
+   total  144.1 mm against 144.5 declared -- a ratchet, and every millimetre of it reaches a relay contact at y = 161.4
+   was   211.9 mm before the copper review: PIN5 and SIN3 had every pad in the analogue half and were routed through the digital one anyway
+
    inductive, the same         -127.6 dB   computed, not dismissed: a stiff node still takes a series emf
    would fail at                 8361 ohm  <- the impedance decides it; the loom node is 8
    verdict     good practice, not load-bearing
