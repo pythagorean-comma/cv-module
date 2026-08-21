@@ -1391,6 +1391,223 @@ def main():
         finally:
             design.CAP_DC_BIAS[part] = original
 
+    # **The three new instruments, and each is planted the way its own subject
+    # allows.** All three exist because a finding had no check: nothing in
+    # this repository measured a digital aggressor against audio, nothing
+    # measured where a crossing signal's return current goes, and nothing
+    # asked whether the board can be bolted to anything.
+    def _a_crossing_signal_moves_closer():
+        import constraints
+        import re as _re
+        text = verify.PCB.read_text()
+        # MCLK's own copper, translated 0.2 mm east -- which is toward SIN6,
+        # the pair that dominates the figure. An artefact plant rather than a
+        # declaration one, because the thing being claimed is that the check
+        # reads the copper: move the aggressor and the number has to move.
+        pattern = _re.compile(
+            r'(\t\(segment\n\t\t\(start )([-\d.]+)( )([-\d.]+)'
+            r'(\)\n\t\t\(end )([-\d.]+)( )([-\d.]+)'
+            r'(\)\n\t\t\(width [\d.]+\)\n\t\t\(layer "[^"]+"\)\n\t\t\(net ")'
+            r'MCLK(")')
+
+        def _east(match):
+            return (match.group(1) + f"{float(match.group(2)) + 0.2:.6f}"
+                    + match.group(3) + match.group(4) + match.group(5)
+                    + f"{float(match.group(6)) + 0.2:.6f}" + match.group(7)
+                    + match.group(8) + match.group(9) + "MCLK"
+                    + match.group(10))
+
+        moved, count = pattern.subn(_east, text)
+        if not count:
+            raise RuntimeError(
+                "no MCLK segment matched -- the mutation plants nothing, and "
+                "constraints._raw_segments()' pattern has moved")
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(moved)
+            planted = pathlib.Path(handle.name)
+        try:
+            constraints.check_digital_audio_runs(planted)
+        finally:
+            planted.unlink()
+
+    def _the_only_plane_bridge_goes_missing():
+        # crossing_returns() measures to the nearest domain_bridges() part,
+        # and domain_bridges() is derived from the netlist rather than named
+        # -- which is the whole reason a stitching capacitor would show up in
+        # it. Take R902 off MAGND and there is no conductor between the planes
+        # at all, so every crossing's return becomes unbounded.
+        import constraints
+        original = list(design.NETS["MAGND"])
+        design.NETS["MAGND"] = [pin for pin in original if pin[0] != "R902"]
+        if len(design.NETS["MAGND"]) == len(original):
+            design.NETS["MAGND"] = original
+            raise RuntimeError(
+                "R902 is not on MAGND -- the mutation plants nothing, and "
+                "design.DOMAIN_STAR has moved")
+        try:
+            constraints.check_crossing_returns()
+        finally:
+            design.NETS["MAGND"] = original
+
+    def _a_fixing_appears_undeclared():
+        # The board grows one mounting hole and nobody moves the declaration.
+        # Planted in the artefact rather than in MOUNTING_HOLES, because what
+        # has to be provable is that the count comes off the board: a check
+        # that compared the constant to itself would pass on any board at all,
+        # which is the failure this whole file exists for.
+        #
+        # The footprint is all-NPTH on purpose. That is the discriminator
+        # between a fixing and a through-hole part, and it is why the
+        # controller module's own four unplated holes do not count.
+        text = verify.PCB.read_text()
+        marker = "\t(segment\n"
+        if marker not in text:
+            raise RuntimeError(
+                "no segment to insert before -- the mutation plants nothing")
+        hole = (
+            '\t(footprint "MountingHole:MountingHole_3.2mm"\n'
+            '\t\t(layer "F.Cu")\n'
+            '\t\t(at 50 50)\n'
+            '\t\t(property "Reference" "H901")\n'
+            '\t\t(pad "" np_thru_hole circle\n'
+            '\t\t\t(at 0 0)\n'
+            '\t\t\t(size 3.2 3.2)\n'
+            '\t\t\t(drill 3.2)\n'
+            '\t\t\t(layers "F&B.Cu" "F&B.Mask")\n'
+            '\t\t)\n'
+            '\t)\n')
+        at = text.index(marker)
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(text[:at] + hole + text[at:])
+            planted = pathlib.Path(handle.name)
+        try:
+            if verify.check_mounting_holes(verify.PCB):
+                raise RuntimeError(
+                    "the tracked board already disagrees with "
+                    "verify.MOUNTING_HOLES -- this fault cannot discriminate")
+            found = verify.check_mounting_holes(planted)
+        finally:
+            planted.unlink()
+        if not found:
+            raise RuntimeError(
+                "a fixing was added and check_mounting_holes did not see it")
+        raise AssertionError(found[0])
+
+    def _a_fixing_has_nowhere_to_go():
+        # placement.mounting_holes() walks each fixing along its own edge
+        # until the keep-out clears every courtyard, and returns the position
+        # whether or not it succeeded -- so check_mounting_gap() is what
+        # catches a walk that gave up. Widen the keep-out past what the edges
+        # can offer and it has to say which pair beat it, the way
+        # check_courtyard_gap() does.
+        import placement as _placement
+        original = _placement.MOUNTING_KEEPOUT_MM
+        _placement.MOUNTING_KEEPOUT_MM = 20.0
+        try:
+            _placement.check_mounting_gap()
+        finally:
+            _placement.MOUNTING_KEEPOUT_MM = original
+
+    def _a_connector_loses_its_name():
+        # SILK_NAME is what design.silk_legend() reads, and the legend is what
+        # silk.py draws -- so taking an entry out has to be caught by
+        # check_silk() before it can reach the board as a blank line. A legend
+        # with a gap in it is worse than no legend: the reader trusts the ones
+        # either side.
+        original = design.SILK_NAME.pop("J8", None)
+        if original is None:
+            design.SILK_NAME["J8"] = original
+            raise RuntimeError("J8 has no SILK_NAME already -- the mutation "
+                               "plants nothing")
+        try:
+            found = design.check_silk()
+        finally:
+            design.SILK_NAME["J8"] = original
+        if not found:
+            raise RuntimeError("the DC inlet lost its name and check_silk() "
+                               "did not say so")
+        raise AssertionError(found[0])
+
+    def _the_board_loses_its_silkscreen():
+        # The other half, and the half that reads the artefact: the data can
+        # be perfect while the board carries nothing. Planted in a copy with
+        # every board-level silk text stripped, which is the state this board
+        # was in for the whole of its life until silk.py ran.
+        import re as _re
+        text = verify.PCB.read_text()
+        stripped, count = _re.subn(
+            r"\t\(gr_text[^\0]*?\n\t\)\n", "", text)
+        if not count:
+            raise RuntimeError("no gr_text matched -- the mutation plants "
+                               "nothing, and silk.py has not been run")
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(stripped)
+            planted = pathlib.Path(handle.name)
+        try:
+            found = verify.check_silkscreen(planted)
+        finally:
+            planted.unlink()
+        if not found:
+            raise RuntimeError("every silk text was stripped and "
+                               "check_silkscreen() did not notice")
+        raise AssertionError(found[0])
+
+    def _a_designator_hides_under_its_part():
+        # U9 and U10 shipped like this: placement.REFERENCE_MOVES nudged the
+        # VCAs' designators 8 mm east off a neighbour and landed them in the
+        # middle of a package 10.4 mm long, where they are invisible the
+        # moment the chip is fitted. DRC does not object -- silk on your own
+        # package body collides with nothing.
+        import re as _re
+        text = verify.PCB.read_text()
+        pattern = _re.compile(
+            r'(\(property "Reference" "U1"\n\t\t\t\(at )[-\d.]+ [-\d.]+( [-\d.]+\))')
+        planted_text, count = pattern.subn(r"\g<1>0 0\g<2>", text)
+        if count != 1:
+            raise RuntimeError(f"U1's reference position did not match once "
+                               f"({count}) -- the mutation plants nothing")
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(planted_text)
+            planted = pathlib.Path(handle.name)
+        try:
+            faults = verify.silk_reference_faults(planted)
+        finally:
+            planted.unlink()
+        if "U1" not in faults["inside_own_part"]:
+            raise RuntimeError("U1's designator was moved onto its own body "
+                               "and silk_reference_faults() did not see it")
+        raise AssertionError("U1 is printed inside the part it names")
+
+    def _a_part_loses_its_designator():
+        # The ratchet's direction: down as room is found, up only with the
+        # parts named. Demote one designator to F.Fab and the count has to
+        # move off verify.SILK_UNLABELLED.
+        import re as _re
+        text = verify.PCB.read_text()
+        pattern = _re.compile(
+            r'(\(property "Reference" "R101"\n(?:\t+\([^\n]*\)\n)*?'
+            r'\t+\(layer ")F\.SilkS(")')
+        planted_text, count = pattern.subn(r"\g<1>F.Fab\g<2>", text)
+        if count != 1:
+            raise RuntimeError(f"R101's reference layer did not match once "
+                               f"({count}) -- the mutation plants nothing")
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(planted_text)
+            planted = pathlib.Path(handle.name)
+        try:
+            found = verify.check_silkscreen(planted)
+        finally:
+            planted.unlink()
+        if not found:
+            raise RuntimeError("a designator went to F.Fab and "
+                               "check_silkscreen() did not count it")
+        raise AssertionError(found[0])
+
     for label, provoke in (
             ("a biased ceramic is short of its stated minimum",
              _biased_ceramic_falls_short),
@@ -1416,7 +1633,23 @@ def main():
             ("audio copper falls south of the ground split",
              _split_moves_north),
             ("the board is built to KiCad's default thickness",
-             _thickness_is_kicads_default)):
+             _thickness_is_kicads_default),
+            ("a crossing signal is re-routed closer to audio",
+             _a_crossing_signal_moves_closer),
+            ("the only conductor between the planes goes missing",
+             _the_only_plane_bridge_goes_missing),
+            ("the board grows a fixing nobody declared",
+             _a_fixing_appears_undeclared),
+            ("a fixing has nowhere on its edge to go",
+             _a_fixing_has_nowhere_to_go),
+            ("a connector loses its name on the silk",
+             _a_connector_loses_its_name),
+            ("the board's silkscreen is stripped",
+             _the_board_loses_its_silkscreen),
+            ("a designator is printed under the part it names",
+             _a_designator_hides_under_its_part),
+            ("a part loses its silk designator",
+             _a_part_loses_its_designator)):
         try:
             provoke()
             found = []

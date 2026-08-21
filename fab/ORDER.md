@@ -72,18 +72,19 @@ back in a fresh checkout. Uploading the loose files instead is the same set.
 
 One combined file, plated and unplated together, each tool carrying its own
 `TA.AperFunction` attribute. `gen_fab.check_holes()` counts these against the
-board: 1173 hits against 1135 vias, 34 plated and 4 unplated through-hole pads.
+board: 1186 hits against 1142 vias, 34 plated and 10 unplated through-hole pads.
 
 | tool | diameter mm | plating | hits |
 |---|---|---|---|
-| T1 | 0.300 | plated | 1135 |
+| T1 | 0.300 | plated | 1142 |
 | T2 | 1.000 | plated | 34 |
 | T3 | 1.850 | **unplated** | 2 |
 | T4 | 2.200 | **unplated** | 2 |
+| T5 | 3.200 | **unplated** | 6 |
 
 ## Assembly, if it is ordered
 
-**290 of 290 parts on the top**, and 34 plated through-hole pads are hand work whoever does
+**296 of 296 parts on the top**, and 34 plated through-hole pads are hand work whoever does
 them.
 
 * bill of materials: `out/cv-module-bom.csv` — `gen_bom.py`, with MPNs
@@ -100,7 +101,7 @@ filled in. They are order-form fields and they are a person's to choose:
 * **surface finish** — the job file says `Finish: None`, which is KiCad
   reporting that nobody set one, not a specification of bare copper;
 * **solder mask colour** and **silkscreen colour**;
-* **electrical test** — worth pricing at 1173 holes
+* **electrical test** — worth pricing at 1186 holes
   and 185 nets;
 * **panelisation or single boards**, and whether the fabricator may add rails;
 * **IPC class**, and any impedance control — there is none on this board:

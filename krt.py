@@ -358,15 +358,31 @@ def keepout_rects():
     `gen_pcb.build()` insets its pours by half a ground gap, so a keep-out on
     the pour would let copper into the strip between the two and
     `check_isolation_gap()` would fail on it.
+
+    **And the six fixings are the second entry, which is why the list was the
+    point.** `placement.mounting_holes()` derives where the board is bolted
+    down, and until this existed nothing told the router the margin was
+    reserved -- so it used it. Measured on the board as laid: `PIN5` runs
+    **76 mm** through one fixing's keep-out and **107 mm** through another,
+    and it is the only net that does. A fixing's keep-out is square rather
+    than round because that is what `inject_keepouts()` writes and because a
+    square is the conservative shape here; the radius is
+    `placement.MOUNTING_KEEPOUT_MM / 2`, the same half-diameter
+    `placement.check_mounting_gap()` holds courtyards to.
     """
     west, _north, _east, _south = placement.outline()
-    return [(
+    rects = [(
         "primary-isolation",
         west,
         placement.ISOLATION_Y,
         placement.ISOLATION_X,
         placement.isolation_south(),
     )]
+    reach = placement.MOUNTING_KEEPOUT_MM / 2.0
+    for ref, (x, y, _moved) in placement.mounting_holes().items():
+        rects.append((f"fixing-{ref}", x - reach, y - reach,
+                      x + reach, y + reach))
+    return rects
 
 
 # **`uniform_project()` was here and it is gone with the constant it existed

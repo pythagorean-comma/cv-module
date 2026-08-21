@@ -126,6 +126,12 @@ def design_rules():
         # a number nobody in this repo had chosen. rules.hole_rules() is where
         # the choice lives and it returns these key names so that neither file
         # decides which rule is which.
+        # **And the silkscreen minimums, which were the seventh.** KiCad has
+        # been enforcing 0.8 mm of character height and 0.15 of line width by
+        # default, so a designator placed at 0.7 failed a rule this repo had
+        # never chosen. rules.py owns both now; DRC does exactly what it did.
+        "min_text_height": rules.SILK_TEXT_MIN_MM,
+        "min_text_thickness": rules.SILK_TEXT_THICKNESS_MM,
         **rules.hole_rules(),
     }
 

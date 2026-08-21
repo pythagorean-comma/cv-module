@@ -37,6 +37,7 @@ import re
 
 import design
 import floorplan
+import rules
 
 # The grid. 7.62 mm is three times the 2.54 the connectors use and twice the
 # 3.81 an 0805 needs with clearance -- and it is the pitch at which a SOIC-14
@@ -1237,6 +1238,245 @@ def courtyard(ref):
 # Parts that must sit on the board's edge rather than inside it, with the
 # side each faces. A part in here is one whose whole purpose is to be reached
 # from outside the enclosure.
+# ---------------------------------------------------------------------------
+# Board fixings, and the dependency runs the other way round
+# ---------------------------------------------------------------------------
+#
+# **The enclosure is bespoke and is drawn after this board, so the fixing
+# pattern is an *input* to it and not an output of it.** That is worth stating
+# because the opposite was assumed once, and the assumption made the holes
+# look underivable: if the enclosure decides where they go, nothing here can
+# choose them, and hardware-spec-v0.md section 6 forbids guessing. Inverted,
+# section 6 says the opposite -- a value that *can* be derived should be, and
+# this one can, from the board's own geometry and nothing else.
+#
+# The mixer targeted a 1590J because it was a standard size and its own board
+# fits one. This board does not fit any standard enclosure, which is why the
+# enclosure became bespoke -- and a bespoke enclosure is drawn to whatever
+# pattern is decided here.
+
+# M3 clearance, and the washer/boss diameter that has to be clear of copper
+# and courtyard. Both are the ordinary metric hardware sizes rather than a
+# derivation; what is derived below is how many and where.
+MOUNTING_DRILL_MM = 3.2
+# **KiCad's own courtyard for the fitted land, and it is not the number this
+# file first derived.** An M3 washer wants about 6.5 mm of clearance, which is
+# what this said -- and `MountingHole_3.2mm_M3` draws its F.CrtYd circle at
+# `(end 3.45 0)`, a **6.9 mm** diameter, read first-hand from the library file.
+# DRC grades against the courtyard, so the land pattern's number binds and
+# ours does not: at 6.5 the board came back with two courtyard overlaps,
+# H901 against R102 and H906 against U19, on positions this file had just
+# certified as clear.
+#
+# That is `check_courtyards()`'s own finding arriving at a part this repo
+# placed rather than one it routed -- a number derived here against a claim
+# about a footprint that arrives from a library. The rule it leaves: when a
+# clearance is going to be judged by DRC, take it from the land pattern and
+# not from the hardware.
+MOUNTING_KEEPOUT_MM = 6.9
+# How far the hole centre sits in from the board edge. Set so the keep-out
+# lands inside the outline with room rather than on it: 4.0 - 6.5/2 leaves
+# 0.75 mm of board outside the washer.
+MOUNTING_INSET_MM = 4.0
+
+# Borrowed, and flagged as borrowed in the style rules.track_current() uses
+# for its IPC-2221 constants: neither is measured here and neither is the
+# fabricator's. E for woven-glass FR-4 in the plane of the laminate, and its
+# density. **The decision they feed survives a wide error in both**, because
+# deflection goes as the fourth power of the span -- three times out in either
+# constant moves the acceleration figure by three and does not reorder the
+# patterns at all, which is this repository's own test for whether a borrowed
+# number may be used.
+FR4_MODULUS_PA = 20e9
+FR4_DENSITY_KG_M3 = 1900.0
+
+
+def mounting_reach_mm():
+    """How far a fixing's centre has to be from anything, in millimetres.
+
+    Half the keep-out, **plus COURTYARD_TOLERANCE_MM** -- and the tolerance is
+    not decoration. KiCad's DRC compares courtyard *outlines*, and an outline
+    is a stroked polygon: the mounting hole's is 0.05 mm wide and so is the
+    part's, so two courtyards whose nominal edges are 46 um apart overlap by
+    4 um once both strokes are counted. That is exactly what happened -- H906
+    cleared U19 by 0.046 mm on this file's own arithmetic and DRC reported
+    them overlapping.
+
+    The same 0.06 mm check_courtyards() already uses, for the same reason.
+    """
+    return MOUNTING_KEEPOUT_MM / 2.0 + COURTYARD_TOLERANCE_MM
+
+
+def mounting_deflection(supports):
+    """Mid-span sag per g, for a board carried on `supports` fixings.
+
+    The board as a uniformly loaded beam along its **long** axis, which is the
+    one that bends: width and thickness set the second moment, and the span
+    between fixings sets everything else. Thickness is rules.FAB_FINISHED_MM,
+    so this moves if the stackup does.
+
+    **It reports sag per g and the acceleration that reaches a millimetre; it
+    claims nothing about what acceleration a pedal on a stage floor sees.**
+    That is return_sensitivity()'s discipline reused -- state the field at
+    which the thing matters and refuse to invent the field.
+
+    The result that decides the pattern: two fixings and four give the *same*
+    answer, because four means one at each corner and the corners on the long
+    axis are still the full length apart. On a 233 mm board, corner-only
+    fixing buys nothing over fixing the two ends.
+    """
+    x0, y0, x1, y1 = outline()
+    width = (x1 - x0) / 1000.0
+    length = (y1 - y0) / 1000.0
+    thickness = rules.FAB_FINISHED_MM / 1000.0
+    second_moment = width * thickness ** 3 / 12.0
+    mass = width * length * thickness * FR4_DENSITY_KG_M3
+    # Fixings pair up along the long edges, so n of them give n/2 - 1 spans --
+    # and never fewer than one, which is the two-and-four case above.
+    spans = max((supports // 2) - 1, 1)
+    span = length / spans
+    load = mass * 9.81 / length                     # N/m at 1 g
+    sag = 5 * load * span ** 4 / (384 * FR4_MODULUS_PA * second_moment)
+    return {"supports": supports, "spans": spans, "span_mm": span * 1000.0,
+            "bare_mass_g": mass * 1000.0,
+            "sag_per_g_mm": sag * 1000.0,
+            "g_at_1mm": 1e-3 / sag if sag else math.inf}
+
+
+def mounting_pattern():
+    """How many fixings, decided by mounting_deflection() rather than by habit.
+
+    Six. The step from four to six is a factor of 16 in stiffness for two
+    holes, because it halves a span that enters to the fourth power; the step
+    from six to eight is a factor of five for two more, on a board that is
+    already at ninety-odd g before it sags a millimetre. Four is not a
+    candidate at all -- see mounting_deflection()'s own note.
+    """
+    rows = {n: mounting_deflection(n) for n in (2, 4, 6, 8)}
+    return {"chosen": 6, "rows": rows,
+            "gain_4_to_6": rows[4]["sag_per_g_mm"] / rows[6]["sag_per_g_mm"],
+            "gain_6_to_8": rows[6]["sag_per_g_mm"] / rows[8]["sag_per_g_mm"]}
+
+
+def mounting_holes():
+    """Where the six fixings go, walked along the edge rather than declared.
+
+    Each starts at its nominal position -- the four corners and the middle of
+    each long edge, inset by MOUNTING_INSET_MM -- and slides along its own
+    edge until the keep-out clears every courtyard on the board. The position
+    is therefore a *result*, in the shape pack_east() and clear_south() are:
+    a literal coordinate cannot say why it is where it is, and a walk can.
+
+    Returns {ref: (x, y, moved_mm)}. `moved_mm` is what the nominal position
+    cost, and two of them are not zero:
+
+      * **H901, at the north-west corner, is blocked by J1** -- the first of
+        the six loom connectors, whose column runs down the west edge from
+        y = 12. It slides east along the north edge.
+      * **H904 has no south-east corner to be in.** U19 is EDGE_PARTS' one
+        entry, deliberately at the east edge for its USB, and it is the
+        southernmost thing on the board as well -- the same two-sided fact
+        that grew the primary's isolation region a tail. So the south edge's
+        eastern fixing sits west of the module, and the corner itself is
+        unsupported. Whether to grow the board rather than accept that is a
+        decision and not a derivation, so this reports the distance instead of
+        taking it.
+    """
+    x0, y0, x1, y1 = outline()
+    need = mounting_reach_mm()
+    boxes = []
+    for ref in sorted(design.PARTS):
+        box = courtyard(ref)
+        if box:
+            boxes.append(box)
+
+    def clear_of_parts(px, py):
+        worst = math.inf
+        for a, b, c, d in boxes:
+            dx = max(a - px, 0.0, px - c)
+            dy = max(b - py, 0.0, py - d)
+            worst = min(worst, math.hypot(dx, dy))
+        return worst
+
+    inset = MOUNTING_INSET_MM
+    nominal = (
+        ("H901", x0 + inset, y0 + inset, (1.0, 0.0)),      # NW, slides east
+        ("H902", x1 - inset, y0 + inset, (-1.0, 0.0)),     # NE, slides west
+        ("H903", x0 + inset, (y0 + y1) / 2, (0.0, 1.0)),   # W mid
+        ("H904", x1 - inset, (y0 + y1) / 2, (0.0, 1.0)),   # E mid
+        ("H905", x0 + inset, y1 - inset, (1.0, 0.0)),      # SW, slides east
+        ("H906", x1 - inset, y1 - inset, (-1.0, 0.0)),     # SE, slides west
+    )
+    out = {}
+    for ref, nx, ny, (dx, dy) in nominal:
+        px, py, moved = nx, ny, 0.0
+        while clear_of_parts(px, py) < need and moved < 60.0:
+            moved += 0.1
+            px, py = nx + dx * moved, ny + dy * moved
+        out[ref] = (round(px, 2), round(py, 2), round(moved, 2))
+    return out
+
+
+def mounting_reach():
+    """How far each board corner is from the nearest fixing.
+
+    The half of the pattern the span arithmetic does not cover. mounting_
+    deflection() models the board as a beam between supports; a corner that
+    has slid its fixing away is a *cantilever*, and the reach is what decides
+    whether that matters.
+
+    **The south-east corner is the one to look at, and it carries the USB
+    connector.** U19 is EDGE_PARTS' one entry, at the east edge so its socket
+    is reachable, and it is the southernmost thing on the board as well -- so
+    H906 slides west past it and the east edge has no southern fixing at all.
+    A plug pushed into that socket is a force applied at the free end of a
+    cantilever, and the reach is how long the cantilever is.
+
+    Reported rather than resolved: the answers are to grow the board, to move
+    the module, or to accept it, and all three are decisions.
+    """
+    x0, y0, x1, y1 = outline()
+    holes = mounting_holes()
+    out = {}
+    for name, (cx, cy) in (("NW", (x0, y0)), ("NE", (x1, y0)),
+                           ("SW", (x0, y1)), ("SE", (x1, y1))):
+        best, where = math.inf, None
+        for ref, (px, py, _moved) in holes.items():
+            gap = math.hypot(cx - px, cy - py)
+            if gap < best:
+                best, where = gap, ref
+        out[name] = {"corner": (round(cx, 2), round(cy, 2)),
+                     "nearest": where, "reach_mm": round(best, 1)}
+    return out
+
+
+def check_mounting_gap():
+    """Every fixing's keep-out clears every courtyard. Raises with the pair.
+
+    check_courtyard_gap()'s sibling, and separate because a fixing is not a
+    part: it has no pins, it is not in the netlist, and it is placed by a walk
+    rather than by a band. What it shares is the property that matters -- the
+    position is a claim, and the claim is checked against all 290 parts rather
+    than against the neighbour it was derived from.
+    """
+    need = mounting_reach_mm()
+    problems = []
+    for ref, (px, py, _moved) in mounting_holes().items():
+        for other in sorted(design.PARTS):
+            box = courtyard(other)
+            if not box:
+                continue
+            a, b, c, d = box
+            gap = math.hypot(max(a - px, 0.0, px - c), max(b - py, 0.0, py - d))
+            if gap < need - 1e-6:
+                problems.append(
+                    f"{ref} at ({px:.2f}, {py:.2f}) is {gap:.2f} mm from "
+                    f"{other} and its keep-out needs {need:.2f}")
+    if problems:
+        raise AssertionError("; ".join(problems[:6]))
+    return mounting_holes()
+
+
 EDGE_PARTS = {"U19": "east"}
 
 
@@ -1464,6 +1704,23 @@ def main():
           f"{ROW_PITCH} mm pitch, shared block at y = {SHARED_Y:.1f}")
     print(f"  outline {right - left:.1f} x {bottom - top:.1f} mm = "
           f"{area():.0f} mm2")
+    check_mounting_gap()
+    pattern = mounting_pattern()
+    print(f"  fixing keep-outs clear every courtyard ok")
+    print(f"  fixings {pattern['chosen']}: 4 is worth nothing over 2 on a "
+          f"{bottom - top:.0f} mm board, 6 is {pattern['gain_4_to_6']:.0f}x "
+          f"stiffer than 4, and 8 only {pattern['gain_6_to_8']:.1f}x more")
+    for supports, row in sorted(pattern["rows"].items()):
+        print(f"     {supports}  span {row['span_mm']:6.1f} mm  "
+              f"{row['sag_per_g_mm']:6.3f} mm/g  1 mm of sag at "
+              f"{row['g_at_1mm']:6.1f} g")
+    for ref, (x, y, moved) in mounting_holes().items():
+        print(f"     {ref}  ({x:6.2f}, {y:6.2f})"
+              + (f"  slid {moved:.1f} mm along its edge" if moved else ""))
+    for name, row in mounting_reach().items():
+        print(f"     {name} corner {row['reach_mm']:5.1f} mm from "
+              f"{row['nearest']}"
+              + ("   <- and it carries the USB socket" if name == "SE" else ""))
     if problems:
         raise SystemExit(f"{len(problems)} problems")
 

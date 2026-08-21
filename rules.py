@@ -1112,6 +1112,21 @@ def class_table():
 # ounce -- and is qualified *"or parts 3.5/3.5mil"*. So check_fab_class()
 # raises, and it is right to: the 55,854 segments on this board are at a class
 # the target fabricator does not offer.
+# **The silkscreen minimums, and they were the seventh "left alone
+# deliberately".** DRC has been enforcing a 0.8 mm minimum character height
+# all along -- KiCad's own default, absent from the project's rules dict, so
+# it never showed up as a missing rule. It surfaced the way the hole rules
+# did: silk.py placed a cramped designator at 0.7 mm and DRC refused it, on a
+# number nobody in this repository had chosen.
+#
+# Adopted rather than argued with, because both sources agree: KiCad defaults
+# to 0.8 mm and PCBWay publishes 0.8 mm as its minimum silkscreen character
+# height with 0.15 mm of line width. Writing it down changes nothing DRC does
+# and makes the number this repo's, which is the whole of the point -- a value
+# that exists only as somebody else's default cannot be wrong.
+SILK_TEXT_MIN_MM = 0.8
+SILK_TEXT_THICKNESS_MM = 0.15
+
 FABRICATOR = "PCBWay"
 # name -> {oz: (min track mm, min clearance mm)}, from the pages above.
 FAB_LIMITS = {

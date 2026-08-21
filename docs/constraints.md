@@ -49,10 +49,10 @@ what verify.py prints and what every 'constraint N' in design.py means
 
 5b. the same coupling, between two traces on the board
     constraint 5 asks this of the loom; nothing asked it of the copper
-   IVOUT4/SIN5       181.2 mm at 0.40 mm pitch, into 8 ohm
+   IVOUT3/PIN5       226.0 mm at 0.40 mm pitch, into 8 ohm
    BUF5/CVX1          20.6 mm at 0.93 mm pitch, into 142 ohm
-   capacitive, at h = 0.1855 mm  -114.4 dB   (60 dB inside the requirement)
-   the same across the sweep    -110.9 dB   the height is worth 3.5 dB, and rules.FAB_STACKUP is what settled it
+   capacitive, at h = 0.1855 mm  -112.5 dB   (58 dB inside the requirement)
+   the same across the sweep    -109.0 dB   the height is worth 3.5 dB, and rules.FAB_STACKUP is what settled it
 
 5c. audio copper that is not over its own ground plane
     CROSSING_RULE says nothing audio-carrying crosses; check_crossings() reads the netlist and cannot see a track's path
@@ -65,22 +65,37 @@ what verify.py prints and what every 'constraint N' in design.py means
    IVOUT2              6.3 mm past y = 156.44
    SIN6                6.1 mm past y = 156.44
    IVOUT6              5.0 mm past y = 156.44
-   total  118.1 mm against 118.2 declared -- a ratchet, and every millimetre of it reaches a relay contact at y = 161.4
+   total  118.1 mm against 118.1 declared -- a ratchet, and every millimetre of it reaches a relay contact at y = 161.4
    was   211.9 mm before the copper review and 144.1 after it: PIN5 and SIN3 had every pad in the analogue half and were routed through the digital one anyway
    then SIN2 came back as a detour rather than a necessity -- 33.5 mm to reach a relay pad 5 mm past the pour edge, re-laid by krt.py --nets at 7.6
 
 5d. where an audio signal changes reference plane
     In1 and In2 carry the same nets in the same places, so every via changes plane as well as layer and the return current has to transfer
-   audio vias         219   against 290 ground vias
-   worst gap         4.90 mm  median 1.50, 190 of 219 within 2 mm
-   loop area        367.8 mm2 against 367.8 declared -- a ratchet, at 1.03 mm of plane separation
+   audio vias         222   against 294 ground vias
+   worst gap         4.90 mm  median 1.50, 194 of 222 within 2 mm
+   loop area        370.7 mm2 against 370.7 declared -- a ratchet, at 1.03 mm of plane separation
    was            1990.6 mm2 before returns.py, at a median of 7.39 mm and a worst of 22.76
    not an impedance: 4.90 mm of In1/In2 pair is tens of nH, and tens of nV at 20 kHz
-   as a pickup loop it reaches the mixer's 144 uV floor at 107.4 nT of 580 kHz field
+   as a pickup loop it reaches the mixer's 144 uV floor at 106.6 nT of 580 kHz field
    the field is the term nothing here derives -- board_coupling() solves trace against trace, and an aggressor inside a potted brick has no drawing
 
-   inductive, the same         -127.6 dB   computed, not dismissed: a stiff node still takes a series emf
-   would fail at                 8361 ohm  <- the impedance decides it; the loom node is 8
+5e. the domain crossings, as aggressors and as return paths
+    every measurement above this line filters to the audio nets; check_crossings() reads the netlist and knows which signals cross and nothing about where
+   MCLK/SIN6          30.2 mm at 0.428 mm pitch on F.Cu
+   SCLK/SIN6          24.4 mm at 0.850 mm pitch on F.Cu
+   IRQ/IVOUT6         22.3 mm at 0.800 mm pitch on F.Cu
+   MISO/SIN5          16.2 mm at 1.018 mm pitch on F.Cu
+   total  244.2 mm against 244.2 declared -- a ratchet, and MCLK/SIN6 is the one aggressor that runs continuously
+   priced as board_coupling() prices the others it is ~50 dB inside the requirement; what that model does not carry is the return path below
+   bridges between the planes: R902 at x=6.0
+   CS               crosses at x =   81.6,  75.6 mm from R902
+   SCLK             crosses at x =   81.0,  75.0 mm from R902
+   MCLK             crosses at x =   80.4,  74.4 mm from R902
+   IRQ              crosses at x =   80.2,  74.2 mm from R902
+   worst   75.6 mm against 75.6 declared -- so the return loop is about twice it, and PWM1-6 are absent because U11 straddles the split by design
+
+   inductive, the same         -125.7 dB   computed, not dismissed: a stiff node still takes a series emf
+   would fail at                 6700 ohm  <- the impedance decides it; the loom node is 8
    verdict     good practice, not load-bearing
 ```
 
