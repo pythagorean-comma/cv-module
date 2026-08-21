@@ -1240,6 +1240,36 @@ def main():
         finally:
             design.DESIGN.parts["C101"].mpn = original
 
+    # **And the package codes, whose three faults all happened last week.**
+    # Each mutation is one of them put back: the switching diode's SOD-323
+    # suffix on a SOD-123 land, a SOT-23 part on a two-pad land, and Omron's
+    # through-hole relay on the surface-mount model's footprint. None was
+    # catchable by anything in this repository at the time, because a netlist
+    # comparison reads pad numbers and every one of these has the right ones.
+    def _switching_diode_suffix():
+        original = design.DESIGN.parts["D151"].mpn
+        design.DESIGN.parts["D151"].mpn = "1N4148WS-7-F"
+        try:
+            design.DESIGN.check_package_codes()
+        finally:
+            design.DESIGN.parts["D151"].mpn = original
+
+    def _three_lead_part_on_two_pads():
+        original = design.DESIGN.parts["D801"].footprint
+        design.DESIGN.parts["D801"].footprint = "Diode_SMD:D_SOD-123"
+        try:
+            design.DESIGN.check_package_codes()
+        finally:
+            design.DESIGN.parts["D801"].footprint = original
+
+    def _through_hole_relay_on_an_smd_land():
+        original = design.DESIGN.parts["K801"].mpn
+        design.DESIGN.parts["K801"].mpn = "G6S-2 DC5"
+        try:
+            design.DESIGN.check_package_codes()
+        finally:
+            design.DESIGN.parts["K801"].mpn = original
+
     # **The bias check, and the first version of this fault was the mistake
     # this file already records one case earlier.** It mutated a curve and
     # asserted "some capacitor is now short" -- and C840 *is* short, today,
@@ -1276,6 +1306,11 @@ def main():
              _capacitance_off_by_ten),
             ("an order code's case is not its land",
              _case_code_against_the_land),
+            ("a part number names the wrong package", _switching_diode_suffix),
+            ("a three-lead part is on a two-pad land",
+             _three_lead_part_on_two_pads),
+            ("the through-hole relay is on the surface-mount land",
+             _through_hole_relay_on_an_smd_land),
             ("a retired assumption names nothing", _settled_names_nothing),
             ("the choke comes off and a retirement expires", _choke_comes_off),
             ("contract: the mixer's root is on sys.path", _sys_path_polluted),

@@ -7603,6 +7603,7 @@ class Design:
         self.check_pin_numbers()
         self.check_orderable()
         self.check_order_codes()
+        self.check_package_codes()
         self.check_controller_functions()
         check_settled()
 
@@ -7841,6 +7842,67 @@ class Design:
                 + "\n  ".join(sorted(set(problems))))
         return unparsed
 
+    def check_package_codes(self):
+        """A part number names a package, and the land is for one too.
+
+        **The check the footprint audit asked for, and the three faults it
+        would have caught are the reason it exists.** On one afternoon this
+        board turned out to carry `1N4148WS-7-F` -- Diodes' SOD-323 part --
+        on a SOD-123 land; five `BAT54-7-F`, which is SOT-23 and has three
+        terminals, on a two-pad SOD-123 land that nothing could assemble them
+        to; and `G6S-2F DC5`'s predecessor `G6S-2 DC5`, which is Omron's
+        *through-hole* relay, on the surface-mount model's footprint. Every
+        one was found by a person opening a datasheet, and every check in this
+        repository was green throughout: verify.py compares pad number to pin
+        number, and a pad numbered 1 on the wrong package is still pad 1.
+
+        **It is check_order_codes() one class out** -- that one decodes a
+        ceramic's case, dielectric, voltage and capacitance and stops at
+        ceramics, because a capacitor's code is the only scheme it was taught.
+        This decodes the *package* and compares it to the package the land is
+        for, which is the field those three got wrong.
+
+        **Its limits are the same two, and both are stated rather than
+        discovered.** It parses the vendor schemes in PACKAGE_CODES, each read
+        first-hand and each anchored on that vendor's own part numbers -- a
+        bare suffix rule is a coincidence detector, and `D$` alone reads a
+        Murata capacitor as a TI SOIC. An MPN or a footprint it cannot parse
+        is *reported and counted*, never passed. And it still cannot say
+        whether a code names a part that **exists**, which is a distributor's
+        question and always was.
+        """
+        problems, unparsed = [], []
+        for ref, part in sorted(self.parts.items()):
+            if not part.mpn or not part.footprint:
+                continue
+            # Ceramics are check_order_codes()' business and it compares the
+            # same field -- case against land -- from a decoder that knows
+            # four vendors' capacitor schemes. Counting them unparsed here
+            # would bury this check's own gaps under a hundred lines that are
+            # in fact checked, which is how an unparsed count stops being read.
+            if "Capacitor_SMD" in part.footprint:
+                continue
+            decoded = decode_package_code(part.mpn)
+            land = land_package(part.footprint)
+            if decoded is None or land is None:
+                unparsed.append((ref, part.mpn, part.footprint))
+                continue
+            want = decoded["package"]
+            # An exact code names one package; a family code names a shape and
+            # not a pin count -- TI's D says SOIC and never says SOIC-14 --
+            # so a family matches any member of itself.
+            fits = (land == want if decoded["exact"]
+                    else land == want or land.startswith(want + "-"))
+            if not fits:
+                problems.append(
+                    f"{ref}: {part.mpn} names a {want} and the land is "
+                    f"{land} ({part.footprint})")
+        if problems:
+            raise AssertionError(
+                "part numbers name packages their lands are not for:\n  "
+                + "\n  ".join(sorted(set(problems))))
+        return unparsed
+
     def check_orderable(self):
         """Every part on the BOM names a buyable part, or is declared unbuyable.
 
@@ -7895,6 +7957,134 @@ def _eia_farads(code):
     if len(code) != 3 or not code.isdigit():
         return None
     return int(code[:2]) * 10 ** int(code[2]) * 1e-12
+
+
+# ---------------------------------------------------------------------------
+# A part number names a package, and nothing was reading that either
+# ---------------------------------------------------------------------------
+# **This is check_order_codes() one class out, and it exists because three
+# part numbers named the wrong package on one afternoon.** The ceramic decoder
+# compares a capacitor's code against its land; every other part on this board
+# had its package checked by a person reading a datasheet, which is how
+# `1N4148WS-7-F` sat on a SOD-123 land for the life of the design, how five
+# SOT-23 BAT54s sat on a two-pad land nothing could assemble them to, and how
+# `G6S-2 DC5` -- Omron's *through-hole* relay -- sat on the surface-mount
+# model's footprint. docs/footprint-audit.md is the record.
+#
+# **Every rule here was read first-hand and carries where from.** A vendor
+# scheme nobody has opened is not a rule, it is a guess with a regex around
+# it; an MPN this table cannot parse is *reported and counted*, never passed.
+# That is decode_capacitor_code()'s discipline and the reason it is worth
+# copying: a checker that silently accepts what it does not understand is the
+# failure this file catalogues.
+#
+# **What it cannot do is unchanged from the ceramic check**: whether a code
+# names a part that *exists* is a distributor's question. What it answers is
+# narrower and is the one that was going wrong -- does this code name the
+# package this land is for.
+#
+# (pattern, package, exact?) where exact=False means the code names a family
+# and the land may be any member of it: TI's "D" says SOIC and not how many
+# pins, so it matches SOIC-8 and SOIC-14 alike and would still catch a SOIC
+# part on a TSSOP land.
+PACKAGE_CODES = (
+    # Diodes Incorporated. The family suffix is the package and one letter
+    # moves it: DS30086 titles the W as SOD-123 and DS30097 the WS as
+    # SOD-323, which is the pair that was wrong here.
+    (r"^1N4148W-", "SOD-123", True),
+    (r"^1N4148WS-", "SOD-323", True),
+    # DS11005 Rev. 21-2, Mechanical Data: "Case: SOT-23", and its Ordering
+    # Information gives SOT-23 for every member of the BAT54 family.
+    (r"^BAT54(-|A-|C-|S-)", "SOT-23", True),
+    # Texas Instruments, the letters between the base number and an optional
+    # R for tape-and-reel. Read off the parts fitted here: SLVSE22B section 6
+    # heads its pinout "DBV Package, 6-Pin SOT-23", and TI's own ordering
+    # tables give D as SOIC for the OPA1644 and the TL074.
+    #
+    # **Anchored on TI's own part-number prefixes, and the anchor is the
+    # whole rule rather than tidiness.** Written as a bare suffix, `D$` reads
+    # Murata's GRM2165C1H122JA01D as a TI SOIC -- it ends in D -- and the
+    # check then reports a capacitor for being on an 0805 land. A suffix rule
+    # with no vendor in it is not a vendor scheme, it is a coincidence
+    # detector, and it was one for about a minute.
+    (r"^(OPA|TL0|SN74|TPS|LM|INA|REF)\w*DBVR?$", "SOT-23-6", True),
+    (r"^(OPA|TL0|SN74|TPS|LM|INA|REF)\w*DWR?$", "SOIC", False),
+    (r"^(OPA|TL0|SN74|TPS|LM|INA|REF)\w*DR?$", "SOIC", False),
+    # Microchip, the letters after the final slash. MCP3564-E/ST against the
+    # family datasheet's "Package Type for All Devices: 20-Lead TSSOP", and
+    # MCP1700T-3302E/TT against DS20001826F page 1's "3-Pin SOT-23".
+    (r"^MCP[\w-]+/TT$", "SOT-23", True),
+    (r"^MCP[\w-]+/S?T$", "TSSOP", False),
+    # onsemi. NCP1117DT50RKG: DT is the DPAK, which JEDEC calls TO-252 and
+    # onsemi's own ordering information gives as DPAK-3.
+    (r"^NCP\d+DT", "TO-252", False),
+    # Omron, and this is the rule that would have caught the relay. Page 5 of
+    # the G6S datasheet lists G6S-2F and G6S-2G under "Mounting Dimensions"
+    # and the bare G6S-2 under "PCB Mounting Holes -- Eight, 1-dia. holes":
+    # the suffix is the difference between a land pattern and eight drills.
+    (r"^G6S-2F ", "G6S-2F", True),
+    (r"^G6S-2 ", "G6S-2-THT", True),
+    # Yageo's RC series carries its case size literally, which makes this a
+    # reading rather than a scheme: RC0805 is an 0805.
+    (r"^RC(\d{4})", None, True),        # None: the case comes from the match
+    # Panasonic ERA, both the A type and the V/K types: positions 4 and 5 of
+    # the part number are Panasonic's own "Size, Power rating" code, and the
+    # numeral is the size in both tables -- AOA0000C307 for the A type,
+    # RDM0000C331 for the V and K. ERA6A is 0805, which is what this board
+    # fits 26 of, and it is worth having read: a search summary asked about
+    # the same question answered "ERA-6A ... case size 1206", and a check
+    # taught by a search result is a check taught by nobody.
+    (r"^ERA(\d)[AVK]", None, True),
+)
+
+# Panasonic's numeral, from the two tables named above.
+ERA_SIZES = {"1": "0201", "2": "0402", "3": "0603", "6": "0805", "8": "1206"}
+
+# What a KiCad footprint name says the land is. The mirror of the decoder
+# above, and deliberately a small table rather than a clever parse: a
+# footprint library name is a human convention, and the day one changes, an
+# unrecognised land should report rather than quietly compare against None.
+LAND_PACKAGES = (
+    (r"D_SOD-123F\b", "SOD-123F"),
+    (r"D_SOD-123\b", "SOD-123"),
+    (r"D_SOD-323\b", "SOD-323"),
+    (r"D_SMA\b", "SMA"),
+    (r"SOT-23-6\b", "SOT-23-6"),
+    (r"SOT-23\b", "SOT-23"),
+    (r"SOT-523\b", "SOT-523"),
+    (r"TO-252", "TO-252"),
+    (r"SOIC-(\d+)W?", "SOIC"),
+    (r"TSSOP-(\d+)", "TSSOP"),
+    (r"SO-6L", "SO-6L"),
+    (r"Omron_G6S-2F", "G6S-2F"),
+    (r"R_(\d{4})_", None),              # None: the case comes from the match
+    (r"C_(\d{4})_", None),
+)
+
+
+def decode_package_code(mpn):
+    """The package a part number names, or None if the scheme is untaught."""
+    for pattern, package, exact in PACKAGE_CODES:
+        found = re.search(pattern, mpn)
+        if found:
+            if package is None:
+                # The case comes out of the code itself -- literally for
+                # Yageo, through Panasonic's own numeral for ERA.
+                package = (ERA_SIZES.get(found.group(1))
+                           if mpn.startswith("ERA") else found.group(1))
+                if package is None:
+                    return None
+            return {"package": package, "exact": exact}
+    return None
+
+
+def land_package(footprint):
+    """The package a KiCad footprint name says its land is for, or None."""
+    for pattern, package in LAND_PACKAGES:
+        found = re.search(pattern, footprint)
+        if found:
+            return package or found.group(1)
+    return None
 
 
 def decode_capacitor_code(mpn):
@@ -10209,6 +10399,24 @@ def _report():
         print(f"      {problem}")
     if bias_unchecked:
         print(f"  {len(bias_unchecked)} biased ceramics have no curve here")
+
+    # **The package check's own coverage, printed because an unparsed count
+    # that nobody sees is a coverage gap that grows.** Same argument as the
+    # bias check's unchecked list one paragraph up, and the same argument
+    # check_order_codes() makes about the schemes it was taught.
+    unparsed = DESIGN.check_package_codes()
+    checked = sum(1 for part in PARTS.values()
+                  if part.mpn and part.footprint
+                  and "Capacitor_SMD" not in part.footprint) - len(unparsed)
+    print()
+    print("part numbers against the packages their lands are for")
+    print(f"  {checked} placements checked, {len(unparsed)} unparsed "
+          f"(ceramics are check_order_codes()' business and are not counted)")
+    for mpn in sorted({m for _, m, _ in unparsed}):
+        refs = [r for r, m, _ in unparsed if m == mpn]
+        why = "no package in the part number" if decode_package_code(mpn) is None \
+            else "no rule for this land"
+        print(f"      {mpn:26s} x{len(refs):<3d} {why}")
     print()
     print("assumptions still open here")
     for name, assumption in sorted(MEASURED.items()):

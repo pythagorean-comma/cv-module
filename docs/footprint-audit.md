@@ -471,18 +471,48 @@ a closed magnetic path, so it leaks more flux — and it is a 1.1 MHz switcher's
 inductor on a board whose noise argument is in microvolts. Corrected where it
 was written.
 
-## What this suggests as an instrument
+## The instrument, built: `check_package_codes()`
 
-`Design.check_order_codes()` already decodes one vendor family's part numbers
-and compares four fields to the value string and the land. **All three
-findings here are the same shape one class out**: a package named in a part
-number, against the package named in a footprint.
+`Design.check_order_codes()` decodes a ceramic's case, dielectric, voltage and
+capacitance and stops at ceramics. **All three findings here were the same
+shape one class out** — a package named in a part number, against the package
+named in a footprint — so that is what the new check decodes.
 
-That is mechanisable for exactly the reason ceramics were — a suffix table per
-vendor, reported-and-counted when unparsed, never passed silently. It would
-have caught the `WS`, the missing `W`, and the missing `F`. What it still
-could not do is tell whether a part *exists*, which the existing check already
-says is a distributor's question.
+`PACKAGE_CODES` is a table of (pattern, package, exact?) rules, each read
+first-hand and each **anchored on its vendor's own part numbers**. That anchor
+is the rule rather than tidiness: written as a bare suffix, `D$` reads Murata's
+`GRM2165C1H122JA01D` as a TI SOIC, and the check then reports a capacitor for
+being on an 0805 land. A suffix rule with no vendor in it is not a scheme, it
+is a coincidence detector, and it was one for about a minute.
+
+Taught so far: Diodes Incorporated's `1N4148W`/`WS` and the `BAT54` family; TI's
+`D`, `DW` and `DBV`; Microchip's `/ST` and `/TT`; onsemi's `DT`; Omron's
+`G6S-2F` against the bare `G6S-2`; Yageo's literal `RC0805`; and Panasonic's
+ERA numeral. **166 placements checked, 25 unparsed**, and the unparsed list is
+printed on every run with a count, because a coverage gap nobody sees is one
+that grows.
+
+**All three faults are planted in `test_verify.py` and all three are caught** —
+`1N4148WS-7-F` on a SOD-123 land, a SOT-23 part on a two-pad land, and Omron's
+through-hole relay on the surface-mount model's footprint. The harness is at
+101.
+
+**What it still cannot do is unchanged**: whether a code names a part that
+*exists* is a distributor's question, exactly as the ceramic check already
+says. And the 25 it cannot parse are not failures of the table — they are
+vendors whose part numbers carry no package field at all: Nexperia's `,115` is
+a packing code, Toshiba's `(TE85L,Q,M)` a taping code, and Würth, Bourns,
+SCHURTER, Traco and Raspberry Pi simply number parts without saying what shape
+they are.
+
+### One rule was nearly taught by a search result
+
+Panasonic's ERA numeral covers 26 parts on this board, and the first attempt to
+add it leaned on a web search, which answered that *"ERA-6A ... case size
+1206"*. Panasonic's own part-number table says **6A is 0805** — AOA0000C307 for
+the A type, RDM0000C331 for the V and K — which is what this board fits. A
+check taught by a search result is a check taught by nobody, and it would have
+reported 26 correct parts as wrong.
 
 ## Not yet audited
 
