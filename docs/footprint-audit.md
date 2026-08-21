@@ -382,6 +382,50 @@ holds the parts where even one spare is not bought, each with its reason.
 `SPARE_ALERT_GBP`, on every run, so that list cannot go stale in silence.
 Spares are **GBP 25.32–47.22** now.
 
+## The pin maps, worst first — six checked, six correct
+
+**This is the audit that matters most and the one nothing here can perform.**
+`verify.py` compares `design.py`'s netlist to KiCad's own export by name *and*
+pin — but both descend from the same pin map, so a wrong map passes every
+check in the repository. KiCad's library stops being an independent opinion
+exactly where a symbol was borrowed from a *different part* and its pins
+renamed, which is twelve of the symbols on this board.
+
+Checked against the manufacturer's own pin table, 2026-08-21:
+
+| part | symbol borrowed from | verdict |
+|---|---|---|
+| **MCP3564** | `Analog_ADC:ADS131M04xPW` — a different manufacturer's ADC, sixteen pins renamed | ✅ **20/20**. DS20006181C page 3, diagram C: AVDD 1, AGND 2, REFIN− 3, REFIN+ 4, CH0–CH7 on 5–12, CS 13, SCK 14, SDI 15, SDO 16, IRQ/MDAT 17, MCLKIN 18, DGND 19, DVDD 20 |
+| **MAX6126** | `Reference_Voltage:ADR4525` | ✅ **8/8**, 19-2647 page 16. And pins 5 and 8 are *"Internally Connected. **Do not connect anything to these pins**"* — this design leaves both open. The Kelvin wiring matches the datasheet's own instruction: OUTF shorted to OUTS at the load, GNDS brought to the load's ground point |
+| **TPS560430XF** | `Regulator_Switching:LMR50410` | ✅ **6/6**, SLVSE22B §6: CB 1, GND 2, FB 3, EN 4, VIN 5, SW 6. §5's Device Comparison Table independently confirms the suffix: `XF` is the 1.1 MHz, FPWM, adjustable part, which is the whole argument for it |
+| **NCP1117-5.0** | `Regulator_Linear:AP1117-50` | ✅ **3/3 including the tab.** onsemi: *"1. Adjust/Ground, 2. Output, 3. Input. Heatsink tab is connected to Pin 2."* KiCad's `TO-252-2` numbers the 6.4 × 5.8 mm tab as pad 2, and the design puts V5 there — a tab on the wrong net is a short through the heatsink copper |
+| **MCP1700-3.3** | `Regulator_Linear:MCP1700x-330xxTT` | ✅ **3/3**, DS20001826F page 1: 3-Pin SOT-23 is 1 GND, 2 VOUT, 3 VIN. **Package-specific**: the same page numbers SOT-89 and TO-92 differently, so `V5_PINS` serving both regulators is correct only because the fitted suffix is `TT` |
+| **Raspberry Pi Pico** | stock symbol, retyped not renumbered | ✅ **40/40** against Figure 2 of the Pico datasheet. All eight grounds on MDGND; VSYS 39, 3V3(OUT) 36, RUN 30; VBUS 40 and 3V3_EN 37 left open, the second correctly, since it has an internal pull-up to VSYS |
+
+**Three things in the Pico's map had to be right and are.** `MISO`, `CS`,
+`SCLK` and `MOSI` land on GP16/17/18/19, which is one complete **SPI0** group
+rather than a mixture of SPI0 and SPI1 pins that would look identical on a
+netlist. `MIDI_TX` and `MIDI_RX` are GP12/GP13, both **UART0**. And the six
+PWM carriers are on GP0, GP2, GP4, GP6, GP8, GP10 — **six distinct slices**,
+which is exactly what `controller_slices()` requires and what §4.2's phase
+stagger is impossible without.
+
+**Nothing was found wrong.** That is worth stating plainly rather than
+buried: six maps, ninety-two pins, and every one of them is what its
+manufacturer's table says. The three verified earlier the same day — the
+TMR 6WI's dual-output column, the G6S's top-view arrangement and the BAT54's
+SOT-23 numbering — bring it to nine symbols and one hundred and fifteen pins.
+
+**What is left in this category, and why it is lower risk.** `cv:744222`'s
+winding pairing (1-4 and 2-3, the difference between a common-mode choke and
+1 mH in series with the supply) is already asserted by
+`verify.check_supply()` against the WE-SL2 datasheet's own Schematic block.
+`cv:OPA1644` borrows the TL074's symbol, and a quad op-amp's numbering is the
+same in both datasheets — `design.LIBS` records it as checked pin by pin
+against SBOS484D. `cv:SSI2164` is KiCad's own symbol with output *types*
+repinned rather than numbers, so its numbering is still KiCad's and it agrees
+with `VCA_PINS`.
+
 ## What this suggests as an instrument
 
 `Design.check_order_codes()` already decodes one vendor family's part numbers
