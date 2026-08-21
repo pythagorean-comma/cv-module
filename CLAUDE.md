@@ -839,6 +839,159 @@ construction rather than by both being maintained.
 than a defect: `mounting_reach()` puts it **57 mm** from `H906`, and it carries
 the USB socket. Grow the board, move the module, or accept it.
 
+## The board said nothing, and a layer that is not blank is not a layer that says anything
+
+**It had no board-level silkscreen at all.** Four `Edge.Cuts` lines, **zero**
+`gr_text` of any kind, and 29 of 296 footprint references on `F.Silkscreen` --
+which did not include `J1`-`J6`, `J8`, `J17` or `J19`. Every connector on the
+west edge was anonymous, so the only way to know which pin of `J1` went back to
+the mixer was to read `design.py`. No title, no attribution, no revision.
+
+**Why nothing here noticed, and it is a new corner of the same shape.** A
+silkscreen is not in a netlist, so `check_geometry()` cannot miss it. DRC sees
+it only when it collides with something, and there was nothing to collide with.
+And `gen_fab.package_layers()` **exports each candidate layer and drops the ones
+that draw nothing** — which is the one instrument that nearly caught it, and did
+not, because 29 footprint references were enough to keep `F.SilkS` non-empty. A
+layer that is not blank is not a layer that says anything, and `package_layers()`
+can only ask the first question.
+
+### The text is generated from the netlist
+
+`design.SILK_NAME` gives each connector the name a person uses for it — `CH1`,
+`DC IN`, `EXP PEDAL` — and `design.SILK_ROLE` says what a *net* means where it
+lands on a connector pin. `silk_legend()` then walks that connector's pins **in
+order out of the netlist** and pairs them up, so the legend's pin order is the
+netlist's pin order by construction and the two cannot drift. `SILK_ROLE` is
+keyed on the per-channel *family* where six nets say the same thing, for
+`AUDIO_FAMILIES`' reason: `PIN3` is not a different kind of thing from `PIN1`.
+
+That is `gen_plots.orderable()` reading `DEFERRED` rather than restating it,
+applied to prose. **A silkscreen is prose printed on copper-clad, and prose
+that restates a fact is prose that will one day contradict it.**
+
+`design.check_silk()` is the data half — every connector in the netlist has a
+name, and every one of its pins has words — and it raises rather than printing
+a blank line, because *a legend with a gap in it is worse than no legend: the
+reader trusts the ones either side of it.*
+
+`verify.check_silkscreen()` is the artefact half, and it is the one that could
+not be asked before: it reads the board and holds it to the names the design
+declares. Both are planted in `test_verify.py`, which is at **110**.
+
+### `silk.py`, and the positions are results
+
+Same idiom as `mounts.py` and `returns.py`: reads the board, adds only,
+`--commit` writes, measures back, and asserts the track count unchanged. It
+**owns every board-level text on `F.SilkS`**, which is what makes it
+idempotent — a commit clears them and redraws.
+
+Each label is tried in a preference order and the first placement that clears
+every courtyard, every fixing keep-out **and every label already placed** is the
+one taken. A placer that checked only the parts would let two legends overlap
+and report success. The west margin is tried first and **rotated**, because a
+90° label is bounded by the row pitch in the direction that is tight and by
+open margin in the direction that is not — which is what lets a name sit in
+4 mm of width.
+
+Three coordinates in the whole file are seeds rather than results — the title
+band and the legend block — and both are checked by the same `fits()` rather
+than trusted. The title band is 91 × 11.25 mm of clear board across the middle
+of the design; the legend sits in 35.5 × 30 mm in the south-west.
+
+**It caught its own overflow on the first run**: `EXP PEDAL 1 tip/wiper 2
+ring/supply 3 0V` came out 41.2 mm wide in a 35.5 mm block and the placer
+refused it, which is why the roles are written tight.
+
+**Measured after committing: 25 texts, closest approach to any pad 1.00 mm,
+DRC 0.**
+
+### The capacitors were deliberate, and the reason had expired
+
+**250 of 296 references sat on `F.Fab`** because `gen_pcb.py` demotes any part
+the design connects two terminals to, with the reason written beside it: *"a
+0805's designator is wider than the part: KiCad's DRC reported thirteen
+silkscreen collisions on the first clean placement and every one was a
+designator."* Every word of that was true — **of a designator placed at the
+footprint's own fixed offset**, which is where KiCad puts it and takes no view
+on what is there.
+
+Measured against a *probe* instead, **all 250 fit**. `silk.py` places 245 at
+1.0 mm and 25 more shrunk to `rules.SILK_TEXT_MIN_MM`; six sit in copper too
+tight to take one at any legal size and are left on `F.Fab` and named —
+`R556`, `R656`, `R457`, `R814`, `C724`, `C221`. `verify.SILK_UNLABELLED` is the
+ratchet, in `UNROUTED_ITEMS`' shape: down as room is found, up only with the
+parts named. **274 designators are on the silkscreen and DRC reports 0.**
+
+That is *"hand-laid and verified"* and `floorplan.CROSSING_RULE` a fourth time:
+**a rule written in terms of how it was being satisfied, outliving the
+method.** What silk is for is the board somebody is holding with an iron, and
+on a hand-built prototype an unlabelled 0805 is the thing that costs the hour.
+
+### U9 and U10's designators were printed under the chips
+
+**The two SSI2164s — the parts this board exists to drive — had their
+references inside their own footprints**, invisible the moment the packages go
+on. `placement.REFERENCE_MOVES` put them there: KiCad places a SOIC's reference
+above the body, a 90° rotation turns that to the west onto a neighbour, and the
+fix was an 8 mm nudge east that landed the text in the middle of a package
+10.4 mm long.
+
+The comment beside that dict is exactly right and exactly one part short — *"a
+silkscreen offset is a number about two parts' positions, and it goes stale
+when either of them moves."* **Two** parts: the label's owner and the neighbour
+it was moved off. It never asked about the third thing in the picture, which is
+the part the label is *naming*. DRC does not object, because silk on your own
+package body collides with nothing.
+
+`verify.silk_reference_faults()` is the instrument and it holds both halves —
+no designator inside the part it names, and the unlabelled count against its
+declaration.
+
+### What the placer had to learn, in the order DRC taught it
+
+Each step is the previous answer being not quite the thing that gets drawn,
+which is this repository's oldest shape arriving on a new layer.
+
+* **28 overlaps.** The placer knew about courtyards and about labels it had
+  placed itself — two of the three things on `F.SilkS`. The third is the silk
+  footprints bring with them: part outlines, polarity marks, pin-1 dots, and
+  the references already there. `claim_existing_silk()` starts from all of it.
+* **8 overlaps.** `text_extent()` multiplies a character count by an average
+  advance, and a stroke font's advance is per glyph: `R827` is not `C704` wide.
+  `Placer.place_item()` *tries* a candidate — moves the item, asks KiCad for
+  its bounding box, and tests **that**. The estimate is gone from the answer
+  rather than tightened.
+* **Every other legend line refused.** The line step was derived from the text
+  size alone, so at 0.8 mm consecutive lines sat 1.36 mm apart with 1.7 mm
+  boxes and each one was refused by the line above it — which the placer had
+  just taken.
+* **4 text-height violations.** `rules.py` did not own the silkscreen
+  minimum, so DRC was enforcing KiCad's 0.8 mm default on a number nobody here
+  had chosen — the hole rules a third time. `rules.SILK_TEXT_MIN_MM` and
+  `SILK_TEXT_THICKNESS_MM` own it now, `gen_project.py` writes both, and DRC
+  does exactly what it did before.
+* **And the check itself invented a fault.** The first version of
+  `silk_reference_faults()` reported `U19`'s designator as printed inside the
+  Pico when it sits 0.6 mm clear, because the local-to-board rotation had the
+  wrong sign. **`returns._rotate()` had already written that down** — the
+  board's y axis points down, so a footprint's angle turns its children the
+  other way. A check that invents a fault is worse than no check, because
+  somebody moves a part to satisfy it.
+
+### Two things about it that are decisions rather than omissions
+
+* **`REV A` is a declaration and not a discovery.** Nothing in this repository
+  records a fabricated revision of *this* board, because there has never been
+  one — `contract/PINNED.md` pins the mixer's. A board that goes to a
+  fabricator without a revision on it is a board nobody can refer to
+  afterwards, and the first one is A.
+* **The connectors' references stay on `F.Fab`** while every other part's
+  moved to silk. For a connector the designator is the wrong word: `J1`
+  identifies a BOM line and a CPL row, both of which are files, while `CH1` is
+  what somebody holding a loom needs, and there is room in 4 mm of west margin
+  for one of them.
+
 ## The fabrication package exists, and what it will not decide is the point
 
 **`gen_fab.py` writes `fab/`, and the gate it reads is the one that was
@@ -1606,6 +1759,11 @@ cv-module/
   krt.py                 drives KiCadRoutingTools from rules.py, placement.py
                          and design.py. Generates every argument; never writes
                          the board without --commit. docs/routing-tool.md
+  silk.py                the silkscreen: the title block, the connector
+                         legend and a name beside every connector, all
+                         generated from design.SILK_NAME/SILK_ROLE and the
+                         netlist. Owns every board-level F.SilkS text;
+                         positions are probed, --commit writes
   mounts.py              the board's six fixings. Derives nothing itself --
                          placement.mounting_holes() does -- and puts them on
                          the board through pcbnew, with a rule area each so

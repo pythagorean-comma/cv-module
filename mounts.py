@@ -278,4 +278,5 @@ def main():
     print(f"  set verify.MOUNTING_HOLES to {len(fitted)}")
 
 
-main()
+if __name__ == "__main__":
+    main()

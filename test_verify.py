@@ -1510,6 +1510,104 @@ def main():
         finally:
             _placement.MOUNTING_KEEPOUT_MM = original
 
+    def _a_connector_loses_its_name():
+        # SILK_NAME is what design.silk_legend() reads, and the legend is what
+        # silk.py draws -- so taking an entry out has to be caught by
+        # check_silk() before it can reach the board as a blank line. A legend
+        # with a gap in it is worse than no legend: the reader trusts the ones
+        # either side.
+        original = design.SILK_NAME.pop("J8", None)
+        if original is None:
+            design.SILK_NAME["J8"] = original
+            raise RuntimeError("J8 has no SILK_NAME already -- the mutation "
+                               "plants nothing")
+        try:
+            found = design.check_silk()
+        finally:
+            design.SILK_NAME["J8"] = original
+        if not found:
+            raise RuntimeError("the DC inlet lost its name and check_silk() "
+                               "did not say so")
+        raise AssertionError(found[0])
+
+    def _the_board_loses_its_silkscreen():
+        # The other half, and the half that reads the artefact: the data can
+        # be perfect while the board carries nothing. Planted in a copy with
+        # every board-level silk text stripped, which is the state this board
+        # was in for the whole of its life until silk.py ran.
+        import re as _re
+        text = verify.PCB.read_text()
+        stripped, count = _re.subn(
+            r"\t\(gr_text[^\0]*?\n\t\)\n", "", text)
+        if not count:
+            raise RuntimeError("no gr_text matched -- the mutation plants "
+                               "nothing, and silk.py has not been run")
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(stripped)
+            planted = pathlib.Path(handle.name)
+        try:
+            found = verify.check_silkscreen(planted)
+        finally:
+            planted.unlink()
+        if not found:
+            raise RuntimeError("every silk text was stripped and "
+                               "check_silkscreen() did not notice")
+        raise AssertionError(found[0])
+
+    def _a_designator_hides_under_its_part():
+        # U9 and U10 shipped like this: placement.REFERENCE_MOVES nudged the
+        # VCAs' designators 8 mm east off a neighbour and landed them in the
+        # middle of a package 10.4 mm long, where they are invisible the
+        # moment the chip is fitted. DRC does not object -- silk on your own
+        # package body collides with nothing.
+        import re as _re
+        text = verify.PCB.read_text()
+        pattern = _re.compile(
+            r'(\(property "Reference" "U1"\n\t\t\t\(at )[-\d.]+ [-\d.]+( [-\d.]+\))')
+        planted_text, count = pattern.subn(r"\g<1>0 0\g<2>", text)
+        if count != 1:
+            raise RuntimeError(f"U1's reference position did not match once "
+                               f"({count}) -- the mutation plants nothing")
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(planted_text)
+            planted = pathlib.Path(handle.name)
+        try:
+            faults = verify.silk_reference_faults(planted)
+        finally:
+            planted.unlink()
+        if "U1" not in faults["inside_own_part"]:
+            raise RuntimeError("U1's designator was moved onto its own body "
+                               "and silk_reference_faults() did not see it")
+        raise AssertionError("U1 is printed inside the part it names")
+
+    def _a_part_loses_its_designator():
+        # The ratchet's direction: down as room is found, up only with the
+        # parts named. Demote one designator to F.Fab and the count has to
+        # move off verify.SILK_UNLABELLED.
+        import re as _re
+        text = verify.PCB.read_text()
+        pattern = _re.compile(
+            r'(\(property "Reference" "R101"\n(?:\t+\([^\n]*\)\n)*?'
+            r'\t+\(layer ")F\.SilkS(")')
+        planted_text, count = pattern.subn(r"\g<1>F.Fab\g<2>", text)
+        if count != 1:
+            raise RuntimeError(f"R101's reference layer did not match once "
+                               f"({count}) -- the mutation plants nothing")
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(planted_text)
+            planted = pathlib.Path(handle.name)
+        try:
+            found = verify.check_silkscreen(planted)
+        finally:
+            planted.unlink()
+        if not found:
+            raise RuntimeError("a designator went to F.Fab and "
+                               "check_silkscreen() did not count it")
+        raise AssertionError(found[0])
+
     for label, provoke in (
             ("a biased ceramic is short of its stated minimum",
              _biased_ceramic_falls_short),
@@ -1543,7 +1641,15 @@ def main():
             ("the board grows a fixing nobody declared",
              _a_fixing_appears_undeclared),
             ("a fixing has nowhere on its edge to go",
-             _a_fixing_has_nowhere_to_go)):
+             _a_fixing_has_nowhere_to_go),
+            ("a connector loses its name on the silk",
+             _a_connector_loses_its_name),
+            ("the board's silkscreen is stripped",
+             _the_board_loses_its_silkscreen),
+            ("a designator is printed under the part it names",
+             _a_designator_hides_under_its_part),
+            ("a part loses its silk designator",
+             _a_part_loses_its_designator)):
         try:
             provoke()
             found = []

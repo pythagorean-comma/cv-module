@@ -2388,6 +2388,140 @@ def check_mounting_holes(board):
     return []
 
 
+# How many parts have no designator on the silkscreen. A ratchet, in
+# UNROUTED_ITEMS' shape: down as room is found, up only with the parts named.
+#
+# **It is 6 and they are named.** silk.py places 245 designators at 1.0 mm and
+# 25 more shrunk to rules.SILK_TEXT_MIN_MM; six sit in copper too tight to
+# take one at any legal size, and R656 is among them -- the ADC's input
+# column, which this repo already records as the narrowest place on the board,
+# where a ground stitch once missed that same resistor by 0.03 mm.
+#
+# The alternative was to fail the run, and 250 parts labelled with six named
+# is a better board than none labelled. What this stops is the six quietly
+# becoming sixty the next time somebody packs a row.
+SILK_UNLABELLED = 6
+
+
+def silk_reference_faults(board):
+    """Silk designators printed under the part they name, and the unlabelled.
+
+    **Two things nothing here could see, and the first one shipped.** U9 and
+    U10 -- the two SSI2164s, the parts this whole board exists to drive -- had
+    their designators printed *inside their own footprints*, so they would
+    have been invisible the moment the chips went on. placement.REFERENCE_MOVES
+    put them there: KiCad places a SOIC's reference above the body, a 90-degree
+    rotation turns that to the west onto a neighbour, and the fix was an 8 mm
+    nudge east that landed the text in the middle of a package 10.4 mm long.
+
+    The comment beside that dict is exactly right and exactly one part short:
+    *"a silkscreen offset is a number about two parts' positions, and it goes
+    stale when either of them moves."* Two parts -- the label's owner and the
+    neighbour it was moved off. It never asked about the third thing in the
+    picture, which is the part the label is naming. DRC does not object,
+    because silk on your own package body collides with nothing.
+    """
+    tree = sexp.parse(board.read_text())
+    inside, unlabelled = [], []
+    for footprint in sexp.find_all(tree, "footprint"):
+        origin = sexp.find(footprint, "at")
+        ox, oy = float(origin[1]), float(origin[2])
+        # **Negated, and this is the fault returns.py already wrote down.**
+        # The board's y axis points down, so a footprint's angle turns its
+        # children the *other* way -- returns._rotate() takes the same minus
+        # sign for the same reason, after KiCad's DRC found every rotated
+        # footprint's pads mirrored. Written with the sign the wrong way here
+        # first, and it reported U19's designator as printed inside the Pico
+        # when it sits 0.6 mm clear of it: a check that invents a fault is
+        # worse than no check, because somebody moves a part to satisfy it.
+        angle = math.radians(-(float(origin[3]) if len(origin) > 3 else 0.0))
+        ref = layer = None
+        local = (0.0, 0.0)
+        for prop in sexp.find_all(footprint, "property"):
+            if len(prop) > 2 and str(prop[1]) == "Reference":
+                ref = str(prop[2])
+                found = sexp.find(prop, "layer")
+                layer = str(found[1]) if found is not None else ""
+                spot = sexp.find(prop, "at")
+                if spot is not None:
+                    local = (float(spot[1]), float(spot[2]))
+        if ref is None or ref not in design.PARTS:
+            continue
+        box = placement.courtyard(ref)
+        if not box:
+            continue
+        if "SilkS" not in layer:
+            if ref not in design.SILK_NAME:
+                unlabelled.append(ref)
+            continue
+        x = ox + local[0] * math.cos(angle) - local[1] * math.sin(angle)
+        y = oy + local[0] * math.sin(angle) + local[1] * math.cos(angle)
+        if box[0] < x < box[2] and box[1] < y < box[3]:
+            inside.append(ref)
+    return {"inside_own_part": sorted(inside),
+            "unlabelled": sorted(unlabelled)}
+
+
+def check_silkscreen(board):
+    """The board says what it is, and every connector on it is named.
+
+    Two halves, and the second is the one that could not have been asked
+    before. `design.check_silk()` holds the *data*: every connector in the
+    netlist has a SILK_NAME and every one of its pins has words in SILK_ROLE,
+    so a legend cannot be drawn with a gap in it. This then reads the **board**
+    and asserts the text is actually on `F.SilkS`.
+
+    **The board had none of it and nothing here noticed for the life of the
+    design.** A silkscreen is not in a netlist, so check_geometry() cannot miss
+    it. DRC only sees it when it collides with something, and there was nothing
+    to collide. gen_fab.package_layers() exports a layer and drops it if it
+    draws nothing -- which is the one place the absence nearly surfaced, and it
+    did not, because 29 footprint references were enough to keep F.SilkS
+    non-empty. A layer that is not blank is not a layer that says anything.
+
+    Names rather than positions, for check_board_is_the_design()'s reason: a
+    check that fires when somebody nudges a legend is a check that gets
+    switched off. What must not drift is *which* words are on the board.
+    """
+    problems = list(design.check_silk())
+    if not board.exists():
+        raise SystemExit(f"{board} does not exist -- run gen_pcb.py")
+    tree = sexp.parse(board.read_text())
+    on_silk = set()
+    for text in sexp.find_all(tree, "gr_text"):
+        layer = sexp.find(text, "layer")
+        if layer is not None and "Silk" in str(layer[1]):
+            on_silk.add(str(text[1]))
+
+    wanted = {design.BOARD_OWNER, design.BOARD_NAME + "   " + design.BOARD_REV}
+    wanted |= set(design.SILK_NAME.values())
+    missing = sorted(wanted - on_silk)
+    if missing:
+        problems.append(
+            f"{len(missing)} silk texts the design declares are not on the "
+            f"board ({', '.join(missing[:6])}"
+            f"{', ...' if len(missing) > 6 else ''}) -- run silk.py --commit")
+    if not on_silk:
+        problems.append(
+            "the board carries no board-level silkscreen text at all: no "
+            "title, no attribution, no connector legend")
+
+    faults = silk_reference_faults(board)
+    if faults["inside_own_part"]:
+        problems.append(
+            f"{len(faults['inside_own_part'])} silk designators are printed "
+            f"inside the part they name and will be invisible once it is "
+            f"fitted ({', '.join(faults['inside_own_part'][:8])}) -- see "
+            f"silk_reference_faults()")
+    if len(faults["unlabelled"]) != SILK_UNLABELLED:
+        problems.append(
+            f"{len(faults['unlabelled'])} parts have no silk designator and "
+            f"verify.SILK_UNLABELLED declares {SILK_UNLABELLED} "
+            f"({', '.join(faults['unlabelled'][:8])}) -- down as room is "
+            f"found, up only with the parts named")
+    return problems
+
+
 CHECKS = (
     ("1  no load on the mixer's rails", check_no_mixer_rail_load, ("nets",)),
     ("2a exactly one ground bond", check_one_ground_bond, ("nets",)),
@@ -2429,6 +2563,7 @@ CHECKS = (
      ("nets", "values")),
     ("   U21's bypass is inside its 10 mm", check_midi_bypass, ("board",)),
     ("   the board's fixings are declared", check_mounting_holes, ("board",)),
+    ("   the silk names every connector", check_silkscreen, ("board",)),
 )
 
 

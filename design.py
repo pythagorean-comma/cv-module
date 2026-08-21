@@ -8690,6 +8690,146 @@ GROUND_STAR = "R901"          # MAGND <-> AGND, the one bridge
 DOMAIN_STAR = "R902"          # MAGND <-> MDGND, inside the module
 
 
+# ---------------------------------------------------------------------------
+# The silkscreen legend, and it is generated from the netlist
+# ---------------------------------------------------------------------------
+#
+# **A board nobody can read is a board somebody wires up wrongly**, and this
+# one had no board-level silkscreen at all: four Edge.Cuts lines, no text, and
+# 29 of 296 references visible -- of which J1-J6, J8, J17 and J19 were not.
+# Every connector on the west edge was anonymous, including the six audio
+# channels and the DC inlet.
+#
+# **The legend is not written here.** SILK_NAME gives each connector the name
+# a person uses for it, and SILK_ROLE says what a *net* means when it lands on
+# a connector pin. `silk_legend()` then walks that connector's pins in order
+# out of the netlist and builds the line. So the pin order on the board's
+# legend is the pin order in the netlist by construction, and the two cannot
+# drift: change which pin carries which net and the silkscreen follows.
+#
+# That is the same argument as `gen_plots.orderable()` reading DEFERRED rather
+# than restating it. A silkscreen is prose printed on copper-clad, and prose
+# that restates a fact is prose that will one day contradict it.
+
+# What the board says it is, and who made it. The three fields a person reads
+# off a bare PCB before anything else, and this board had none of them: no
+# board-level silkscreen text at all.
+#
+# **REV A is a declaration and not a discovery.** Nothing in this repository
+# records a fabricated revision of *this* board, because there has never been
+# one -- contract/PINNED.md pins the mixer's. A board that goes to a fabricator
+# without a revision on it is a board nobody can refer to afterwards, and the
+# first one is A.
+BOARD_OWNER = "PYTHAGOREAN COMMA DESIGNS"
+BOARD_NAME = "6-CHANNEL CV MODULE"
+BOARD_REV = "REV A"
+
+# What a person calls each connector. Deliberately not the reference
+# designator: "J1" identifies a part and "CH1" identifies a cable.
+SILK_NAME = {
+    "J1": "CH1", "J2": "CH2", "J3": "CH3",
+    "J4": "CH4", "J5": "CH5", "J6": "CH6",
+    "J7": "GND BOND",
+    "J8": "DC IN",
+    "J15": "MIDI IN", "J16": "MIDI OUT",
+    "J17": "TAP", "J18": "EXP PEDAL", "J19": "RESET",
+}
+
+# What a net means where it meets a connector pin. Keyed on the net name, and
+# on the per-channel *family* where six nets say the same thing -- PIN{n} is
+# the module's input on all six channels and there is no sixth version of that
+# sentence.
+SILK_ROLE = {
+    "PIN": "IN <- mixer",
+    "SIN": "OUT -> mixer",
+    "AGND": "mixer TP6 + shields",
+    "VIN_J": "+12-18V",
+    "IGND_J": "0V",
+    "MINJ": "DIN4",
+    "MINSH": "DIN2+shield",
+    "MINK": "DIN5",
+    "MOUTV": "DIN4",
+    "MOUTD": "DIN5",
+    "TAPJ": "tip",
+    "EXPRW": "tip/wiper",
+    "EXPRV": "ring/supply",
+    "RUN": "RUN",
+    "MDGND": "0V",
+}
+
+
+def silk_role(net):
+    """What a net means at a connector pin, family first then the net itself.
+
+    The family lookup is what stops SILK_ROLE carrying six copies of one
+    sentence, and it is the same split AUDIO_FAMILIES makes for the same
+    reason: PIN3 is not a different kind of thing from PIN1.
+    """
+    stem = net.rstrip("0123456789")
+    if stem != net and stem in SILK_ROLE:
+        return SILK_ROLE[stem]
+    return SILK_ROLE.get(net)
+
+
+def silk_legend(ref):
+    """One connector's legend, pin by pin, straight out of the netlist.
+
+    Returns (name, [(pin, net, role), ...]) with the pins in numeric order.
+    Raises if a pin's net has no role rather than printing a blank line: a
+    legend with a gap in it is worse than no legend, because a reader trusts
+    the ones either side of it.
+    """
+    name = SILK_NAME.get(ref)
+    if name is None:
+        raise KeyError(f"{ref} has no SILK_NAME -- a connector nobody named "
+                       f"is a connector somebody guesses at")
+    pins = sorted(((pin, net) for net, conns in NETS.items()
+                   for part, pin in conns if part == ref),
+                  key=lambda row: int(row[0]))
+    rows = []
+    for pin, net in pins:
+        role = silk_role(net)
+        if role is None:
+            raise KeyError(f"{ref} pin {pin} carries {net} and SILK_ROLE has "
+                           f"no words for it")
+        rows.append((pin, net, role))
+    return name, rows
+
+
+def silk_connectors():
+    """Every connector in the netlist, which is what SILK_NAME is checked
+    against. A part is a connector if its footprint is a pin header or the
+    solder pad -- read off the footprint rather than off the reference, so a
+    connector that is not called J-something still counts."""
+    out = []
+    for ref, part in PARTS.items():
+        land = part.footprint or ""
+        if "PinHeader" in land or "TestPoint" in land:
+            out.append(ref)
+    return sorted(out, key=lambda r: (len(r), r))
+
+
+def check_silk():
+    """Every connector has a name, and every one of its pins has words.
+
+    The instrument the silkscreen needs and the netlist cannot provide: a net
+    can be connected, checked, routed and shipped while the thing a human
+    plugs into it is unlabelled. Nothing else here would notice -- a
+    silkscreen is not in a netlist, does not appear in DRC unless it collides
+    with something, and gen_fab.py will happily export a blank legend layer.
+    """
+    problems = []
+    for ref in silk_connectors():
+        try:
+            name, rows = silk_legend(ref)
+        except KeyError as complaint:
+            problems.append(str(complaint))
+            continue
+        if not rows:
+            problems.append(f"{ref} ({name}) has no pins in the netlist")
+    return problems
+
+
 def channel(design, n):
     """One channel, end to end. Six of these and the shared blocks are the board.
 
