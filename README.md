@@ -27,6 +27,9 @@ handed to KiCad. `gen_pcb.py` places, pours and stitches and lays no signal
 copper at all. **Every millimetre of signal copper on the board today was laid
 by KiCadRoutingTools**, through `krt.py`, in three passes — it replaced
 `route.py`'s seed, and [`routing-tool.md`](docs/routing-tool.md) is the record.
+**`route.py` is now deleted**, on a measurement rather than an argument: a bare
+board routed by `krt.py` closes at 185/185 in one command, and the seed had
+gone structurally blind to the six fixings nothing could tell it about.
 The rule that follows is the one to read before anything else here:
 
 > **The netlist is generated and authoritative. The board is not regenerated —
@@ -161,17 +164,14 @@ edited in KiCad:
 ```bash
 python3 gen_pcb.py                 # refuses if the board carries signal copper
 python3 gen_pcb.py --discard-routing   # and this is how you mean it
-python3 gen_pcb.py --discard-routing --seed-routing   # ...with one router pass
+python3 krt.py                     # ...then route it; --commit keeps the result
 ```
 
-The third form is how the *seed* was made: place, pour, stitch, and then
-**one** run of `route.py` so that what somebody opens is a legal route to
-adjust rather than a ratsnest. **The board on disk is no longer that seed** —
-`krt.py` re-routed every net on it and `--commit` promoted the result — so the
-third form is now the way to start again from nothing rather than the way this
-board was built. It is a starting point and not an output: nothing downstream
-reads it, and the guard refuses the next run whether the copper came from a
-router or from a person.
+That is how a board is started from nothing. `route.py`'s seed used to be the
+middle step and **is deleted** — measured, a bare board routed by `krt.py`
+closes at **185/185 in one command**, and the seed had gone structurally blind
+to the six fixings it could not be told about. The guard refuses the next
+`gen_pcb.py` run whether the copper came from a router or from a person.
 
 `krt.py` is a third way copper gets laid and it is not in either pipeline
 either: it routes a scope with KiCadRoutingTools and writes
@@ -275,8 +275,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | `gen_plots.py` | the schematic, the layout and a render — the outputs you can look at without KiCad |
 | `gen_fab.py` | the fabrication package: gerbers, drill, job file, CPL and `ORDER.md`. Gated on `gen_plots.orderable()` and a DRC run of its own; `--verify` compares the tracked package against a fresh export of the tracked board |
 | `placement.py` | the floorplan as coordinates. It does not import KiCad |
-| `gen_pcb.py` | the board, through the deprecated `pcbnew` bindings — **place and pour**, and `--seed-routing` for one pass of the router |
-| `route.py` | the maze router. **It runs once, as a seed, and no copper it laid is on the board any more** — `krt.py` re-routed every net. Kept because a board started from nothing still wants a legal route rather than a ratsnest |
+| `gen_pcb.py` | the board, through the deprecated `pcbnew` bindings — **place and pour**, and no signal copper at all |
 | `krt.py` | drives KiCadRoutingTools under this repo's own constraints — layers, fab floor, keep-outs and net scope all generated. Writes a candidate; `--commit` promotes it |
 | `silk.py` | the silkscreen, through `pcbnew`. The title block, the connector legend and a name beside every connector — all generated from `design.SILK_NAME` / `SILK_ROLE` and the netlist, with every position probed against the courtyards rather than typed. Owns every board-level `F.SilkS` text, so it is idempotent; `--commit` writes |
 | `mounts.py` | the board's six fixings, through `pcbnew`. `placement.mounting_holes()` decides where; this puts them there and draws the rule area each one needs, because an M3 screw through an unvoided hole bridges `In1.Cu` to `In2.Cu` — MAGND to MDGND — at every fixing. Idempotent, adds and disturbs nothing, `--commit` writes |

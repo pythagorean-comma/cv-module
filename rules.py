@@ -382,9 +382,9 @@ def pad_reach(pin_pitch=TSSOP_PIN_PITCH_MM, pad_width=TSSOP_PAD_WIDTH_MM,
     channels. **That is no longer load-bearing and the note is kept for the
     arithmetic**: the fan-out closes the pads that lose, so which two rows they
     are is free again. See track_offset_limit(), and route.Grid.escape() in
-    the history -- route.py was deleted for a pass and this arithmetic
-    outlived it; the router is back as a one-shot seed and the board is
-    hand-laid either way.
+    the history -- route.py has been deleted twice now and this arithmetic has
+    outlived it both times, because it is what a *package* is chosen against
+    and that question outlives whichever router is drawing.
     """
     grid = route_pitch() if grid is None else grid
     widest = pin_pitch - clearance
@@ -761,8 +761,8 @@ def track_offset_limit(edge_mm, track=TRACK_MM, clearance=CLEARANCE_MM):
     be made wider.
 
     **The number this replaces was 0.075 mm and it was a true statement about
-    a different question.** The deleted route.Grid.block_pad_copper() inset a pad by half
-    a track before claiming its cells, so that a track drawn on one of them
+    a different question.** route.Grid.block_pad_copper(), in the history,
+    inset a pad by half a track before claiming its cells, so a track on one
     stays *inside the pad's own copper* -- 0.075 mm here. That is the right
     rule for the exemption it guards (a segment inside the pad cannot be too
     close to anything, because the pad already is not), and it is stricter
@@ -1264,11 +1264,10 @@ def write():
         "**So the corridor opens only at JLCPCB's finest multilayer class, "
         "which is available at 1 oz outer copper and not at 2 oz.** That is "
         "not a routing decision, it is a decision to give up 2 oz as an "
-        "option -- and both are history: route.py runs once as a seed and the "
-        "board is "
-        "hand-laid. `route_all()` finished it without a finer grid, by ripping "
-        "up and re-routing the nets that are in the way, so this board is "
-        "ordered at the fitted class.\n")
+        "option -- and both are history. route.py is deleted; "
+        "KiCadRoutingTools closed this board at the fitted class without a "
+        "finer grid, by ripping up and re-routing the nets in the way, so it "
+        "is ordered at that class.\n")
     return path
 
 

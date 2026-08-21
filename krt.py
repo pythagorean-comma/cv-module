@@ -575,9 +575,32 @@ def verdicts(output):
     printed beside it was wrong, and a number that is wrong in the direction of
     "nothing worked" is one somebody acts on.
 
-    So: the counts come from the run-scoped summary and `failed_single` comes
+    So: the counts come from the run-scoped summary and the open list comes
     from the last, which are two different questions -- *what did this pass
     do* and *what is still open* -- that happened to share a field.
+
+    **And "the open list" was `failed_single` alone, which killed the rescue
+    for exactly the nets it exists for.** The tool reports a two-pad net that
+    failed in `failed_single` and a net with more than two pads in
+    `failed_multipoint`, as objects rather than names. Measured on a board
+    routed from nothing: pass 1 ended `failed_single: []`,
+    `failed_multipoint: ["VA+"]`, so `still_open` came back empty, `deferred`
+    was falsy, and the `if deferred and keepout` rescue never ran -- on the one
+    net that needed it. The board came out 184 of 185 and `plan_gate()`
+    refused it.
+
+    The sentence above used to say the rescue reads `failed_single` and that
+    the final subset's list is the final state. Every word true of every case
+    anybody had seen, and the reading is a fact about *two-pad nets*: what
+    congests on this board is rails and buses, and **every one of those is
+    multi-point**, so the field being read is the one that cannot hold the
+    answer. This repo's own shape -- a claim that is a fact about its only
+    observed caller -- inside the file written about instruments agreeing with
+    each other.
+
+    The symptom was on screen for the whole run and there was no case to make
+    anybody look: the pass printed `routed 175, failed 2` and returned nothing
+    to defer, two numbers disagreeing in one line.
 
     `JSON_IMPROVEMENT_GATE` is a separate line and there is one of it.
     """
@@ -591,9 +614,20 @@ def verdicts(output):
     if not summaries:
         return {"summary": {}, "gate": gate, "still_open": []}
     scoped = [row for row in summaries if row.get("scope") == "run"]
-    return {"summary": scoped[-1] if scoped else summaries[-1],
+    last = summaries[-1]
+    # Both fields, in order, without duplicates. A multi-point entry is an
+    # object -- {"net_name": ..., "failed_pads": [...]} -- and a single-ended
+    # one is a bare name, so the shapes differ and only the name is wanted.
+    # Anything without a name is dropped rather than guessed at: a net this
+    # cannot name is one the rescue could not be pointed at anyway.
+    open_nets = list(last.get("failed_single", ()))
+    for entry in last.get("failed_multipoint", ()):
+        name = entry.get("net_name") if isinstance(entry, dict) else entry
+        if name:
+            open_nets.append(name)
+    return {"summary": scoped[-1] if scoped else last,
             "gate": gate,
-            "still_open": list(summaries[-1].get("failed_single", ()))}
+            "still_open": list(dict.fromkeys(open_nets))}
 
 
 def refill_zones(board):

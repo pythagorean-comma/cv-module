@@ -382,20 +382,35 @@ never the copper. It was that the **board had to be a function of `design.py`**,
 so no question about geometry could be asked of a layout until it had been
 answered in Python first.
 
-**`route.py` was deleted for one pass and is restored, and the restoration is
-a narrower claim than the deletion was.** It runs **once**, as
-`gen_pcb.py --seed-routing`, and what it produces is a starting point somebody
-edits in KiCad -- not an output the build reproduces. Running it once does not
-put the board back under `design.py`; re-running it on every build would, and
-`gen_pcb_guard.refuse_to_discard_routing()` already stops that by accident. The
-reason to have it is the person: a board handed over with 486 airwires and a
-board handed over with a legal route to adjust are two different jobs, and only
-the second one is editing.
+**`route.py` was deleted, restored, and deleted again -- and the second
+deletion is the one that measured its own premise.** The restoration rested on
+one claim: *a board handed over with 486 airwires and a board handed over with
+a legal route to adjust are two different jobs.* Two things had made that
+false and neither was that `krt.py` is faster.
 
-**And none of the seed's copper is on the board any more.** KiCadRoutingTools,
-through `krt.py`, re-routed every net and `--commit` promoted the result -- so
-`route.py` is now how a board is started from nothing, and not how this board
-was built. Measured on the tracked board: **5081 segments and 1135 vias**, of
+* **The seed had gone structurally blind to the fixings.** `krt.keepout_rects()`
+  reserves seven regions because `PIN5` ran 183 mm through two of the six
+  mounting holes. `route.py` was handed exactly one, and `route.Grid` holds a
+  single `reserved_for` frozenset that each `reserve()` call overwrites -- one
+  region, by construction. Its other obstacle channel, `gen_pcb.keepouts()`,
+  walked *footprint* zones, and the fixings are *board-level* zones written by
+  `mounts.py`, which runs after `gen_pcb.py`. **A seed run laid copper through
+  all six fixings and nothing in `gen_pcb.py` could say so.**
+* **A tool no pipeline runs drifts out of agreement with the design, and
+  nothing fails, because nothing runs it.** `route.py` had not executed since
+  the board gained fixings, a silkscreen, a corrected fabrication class and
+  three new land patterns.
+
+**What replaced it, measured rather than assumed** -- see the from-nothing
+experiment recorded below: a bare `gen_pcb.py --discard-routing` board routed
+by `krt.py` reaches **185/185 nets in one command**, at 5607 segments and 1010
+vias against the tracked board's 5114 and 1142. It is not a free swap: see the
+`OE` entry in the same section.
+
+**And none of the seed's copper was on the board even before that.**
+KiCadRoutingTools, through `krt.py`, re-routed every net and `--commit`
+promoted the result, so nothing `route.py` drew survives anywhere.
+Measured on the tracked board: **5081 segments and 1135 vias**, of
 which **290 are ground stitches** -- 151 `gen_pcb.py`'s, beside ground pads,
 and 139 `returns.py`'s, beside signal vias -- and 845 are on signal nets; one
 track width (0.2 mm), one via size (0.7/0.3), 13073 mm of track, and no signal
@@ -518,6 +533,63 @@ is right on this board is a person's call and no check here can make it --
 anything about the copper as laid, and it says the worst channel-to-channel
 adjacency is **-114.4 dB against -54 dB**. So the recommendation for *future*
 runs is unchanged and is about scope: re-route a region, not the board.
+
+### Routing from nothing: measured, and three things came out of it
+
+**The experiment `route.py`'s deletion turned on.** A bare
+`gen_pcb.py --discard-routing` board -- 290 footprints, 185 nets, 151 stitches,
+no signal copper -- handed to `krt.py`. Run in a disposable copy of the repo,
+because the tracked board is not something to find this out on.
+
+* **It closes, in one command: 185/185, planes intact, primary's region
+  clear.** 5607 segments and 1010 vias against the tracked board's 5114 and
+  1142. So a from-nothing route is a real starting point and not a degenerate
+  one.
+* **`krt.py`'s own rescue pass was dead, and for the nets it exists for.**
+  `verdicts()` built `still_open` from `failed_single` alone; a net with more
+  than two pads fails into `failed_multipoint`. The first run ended
+  `failed_single: []`, `failed_multipoint: ["VA+"]`, so `deferred` was falsy,
+  the `if deferred and keepout` rescue never ran, and the board came out
+  184/185. **What congests is rails and buses and every one of those is
+  multi-point**, so the field being read was the one that could not hold the
+  answer. The symptom was on screen throughout -- the pass printed
+  `routed 175, failed 2` and returned nothing to defer. Fixed; both fields are
+  read now.
+* **`OE` goes through the primary's isolation region, every time, and this is
+  open.** The rescue drops the keep-out by design, on the argument that *"a net
+  the keep-out broke is not, in general, a net that wants the region -- BUF2 is
+  a board-length from it."* `OE` is the counterexample: it runs from the Pico's
+  pin 19 in the south-east to `U11`'s two output-enables at (20, 157) and the
+  primary's corner is on that path. Three runs, 12 pieces of copper, same
+  place. Nothing is broken -- `check_isolation_gap()` names it and refuses
+  promotion, exactly as designed -- but it means **the one-command from-nothing
+  route deterministically produces a board that cannot be promoted**, and the
+  remedy is a scoped re-route of `OE` with the keep-out on. The "in general" is
+  now tested and has a known exception.
+
+**And the router is deterministic while `gen_pcb.py` is not, which is the
+finding with the longest reach.** Two runs on a *byte-identical* board gave
+byte-identical candidates -- same failing net, same blocker list in the same
+order, same 610,000 iterations. Two runs on *different serialisations of the
+same design* failed on different nets with different blockers. So every bit of
+run-to-run variation is upstream of the router.
+
+`gen_pcb.py` is not byte-deterministic: two runs of an unchanged design differ
+in 45,350 lines, 36,636 of them with every UUID blanked -- and **zero** once
+the lines are sorted. The content is identical; only UUID values and the order
+that follows them move. Two things about fixing it, both measured:
+
+* **KiCad's writer sorts by UUID** -- file order equals UUID sort order in
+  both files. So "deterministic UUIDs *plus* emission in a sorted order" is one
+  job, not two: fix the UUIDs and the ordering falls out.
+* **`m_Uuid` is read-only through SWIG** -- there is no `SetUuid` and
+  assignment raises. So this cannot be a `pcbnew` change. It is a text pass
+  over the saved board, then a reload-and-save so KiCad re-sorts, in the idiom
+  `returns.py` and `rules.apply_stackup()` already use. The generator exists
+  (`kisch._uuid`, a `uuid5`, already imported here as `symbol_uuid`), and the
+  one UUID that must stay stable -- the schematic-to-board link -- already goes
+  through `footprint.SetPath()` and is already derived. The other 5,318 are
+  free.
 
 ## Every via changes reference plane, and nothing had ever measured that
 
@@ -1276,9 +1348,9 @@ what has to survive compaction is this.
 **It deletes about 25 parts and one whole class of problem.** U20, Y801 with
 R824/C832/C833, J14 with R820-R823, twelve supply capacitors and the BOOT and
 SWD headers. 314 parts became 289 and 201 nets became 184. 0.40 mm of pin pitch
-became 2.54, which is why `route.py` stopped being load-bearing -- it is
-restored and runs once as a seed, and the QFN is the reason it no longer
-has to close a board nobody could close by hand.
+became 2.54, which is why `route.py` stopped being load-bearing -- the QFN was
+the reason anything here had to close a board nobody could close by hand, and
+it is why `route.py` could eventually be deleted.
 
 **`docs/fabrication-class.md` was re-opened, re-decided at 0.15/0.15 on 2 oz,
 and put back to 0.09/0.09 on 1 oz -- and the round trip is the finding.** The
@@ -1754,8 +1826,6 @@ cv-module/
   placement.py           the floorplan as coordinates. No KiCad import.
                          pack_east() lays a row, clear_south() stacks the
                          bands, and check_courtyard_gap() is at zero
-  route.py               the maze router. RESTORED, and it runs once: it is
-                         gen_pcb.py --seed-routing and nothing else calls it
   krt.py                 drives KiCadRoutingTools from rules.py, placement.py
                          and design.py. Generates every argument; never writes
                          the board without --commit. docs/routing-tool.md
@@ -1781,10 +1851,9 @@ cv-module/
                          itself under KiCad's Python, then re-runs gen_project.
                          PLACE AND POUR by default: re-running it discards
                          hand-routed copper, and gen_pcb_guard refuses unless
-                         --discard-routing. --seed-routing adds one pass of
-                         route.py, which is how the handover board was made.
-                         Sync a netlist change with KiCad's own Update PCB
-                         from Schematic instead
+                         --discard-routing. It lays no signal copper at all --
+                         route the bare board with krt.py. Sync a netlist
+                         change with KiCad's own Update PCB from Schematic
   gen_netlist.py         -> out/cv-module.net
   gen_sch.py             -> out/cv-module.kicad_sch
   gen_project.py         -> out/cv-module.kicad_pro, the lib tables,
@@ -1846,16 +1915,14 @@ edited in KiCad:
 ```bash
 python3 gen_pcb.py                 # refuses if the board carries signal copper
 python3 gen_pcb.py --discard-routing   # and this is how you mean it
-python3 gen_pcb.py --discard-routing --seed-routing   # ...with one router pass
+python3 krt.py                     # ...then route the bare board, --commit to keep it
 ```
 
-The third form is how the handover board was made: place, pour, stitch, and
-then **one** run of `route.py` so that what somebody opens is a legal route to
-adjust rather than a ratsnest. It is a starting point and not an output --
-nothing downstream reads it, and the guard refuses the next run whether the
-copper came from the router or from a person.
+That is how a board is started from nothing now: place, pour, stitch, then
+KiCadRoutingTools. The guard refuses the next `gen_pcb.py` run whether the
+copper came from a router or from a person.
 
-`returns.py` is a fourth way copper gets laid and it is not in either pipeline
+`returns.py` is a third way copper gets laid and it is not in either pipeline
 either. It adds ground stitches and nothing else, so unlike the other three it
 cannot destroy anything; `--commit` is still what writes.
 

@@ -54,4 +54,4 @@ The question the routing pass was left with, and the reason the answer turned ou
 | 2 oz minimum | 0.15 / 0.15 | 2 oz outer | +0.220 mm | 0.30 mm | **no**, at any pitch |
 | 1 oz minimum | 0.09 / 0.09 | 1 oz outer only | +0.400 mm | 0.18 mm | yes |
 
-**So the corridor opens only at JLCPCB's finest multilayer class, which is available at 1 oz outer copper and not at 2 oz.** That is not a routing decision, it is a decision to give up 2 oz as an option -- and both are history: route.py runs once as a seed and the board is hand-laid. `route_all()` finished it without a finer grid, by ripping up and re-routing the nets that are in the way, so this board is ordered at the fitted class.
+**So the corridor opens only at JLCPCB's finest multilayer class, which is available at 1 oz outer copper and not at 2 oz.** That is not a routing decision, it is a decision to give up 2 oz as an option -- and both are history. route.py is deleted; KiCadRoutingTools closed this board at the fitted class without a finer grid, by ripping up and re-routing the nets in the way, so it is ordered at that class.

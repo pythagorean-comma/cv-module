@@ -41,15 +41,16 @@ def refuse_to_discard_routing(board, argv=None, out_name=None):
     count would have been the obvious thing and it would have had to be
     re-tuned every time the stitch count moved.
 
-    **`--seed-routing` puts signal copper on the board and this still refuses
-    it afterwards, which is the behaviour that is wanted and not an
-    oversight.** The seed is laid once and is a starting point somebody edits;
-    from the moment it lands, the board carries copper that re-running would
-    destroy, and whether the first pass of it came from route.py or from a
-    person is not a distinction this guard should be able to draw. It is
-    deliberately not told which -- "the board has copper on it" is the whole
-    question, and a guard that exempted the router's own output would exempt
-    exactly the board most likely to have been edited since.
+    **It is deliberately not told where the copper came from, and that
+    outlived the thing that made the point.** The argument used to be about
+    `--seed-routing`: the seed was laid once by route.py and refused
+    afterwards like anything else, because whether the first pass came from a
+    router or a person is not a distinction this guard should draw. route.py
+    is deleted and the flag with it; the rule is unchanged, because krt.py
+    lays copper now and the question was never who drew it. "The board has
+    copper on it" is the whole of it, and a guard that exempted a router's own
+    output would exempt exactly the board most likely to have been edited
+    since.
 
     `--discard-routing` is the way past it, spelled so that nobody types it by
     accident and so that it appears in a shell history as what it was.
@@ -80,6 +81,5 @@ def refuse_to_discard_routing(board, argv=None, out_name=None):
         f"out/cv-module.kicad_sch;\n"
         f"  * to start the layout again from placement.py, deliberately:\n"
         f"        python3 gen_pcb.py --discard-routing\n"
-        f"    adding --seed-routing runs route.py once for a first pass of\n"
-        f"    copper to adjust, which is what the handover board was made\n"
-        f"    with. Either way the tracks above are gone.\n")
+        f"    then route the bare board with krt.py. The tracks above are\n"
+        f"    gone either way.\n")

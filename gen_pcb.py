@@ -39,9 +39,10 @@ design.py, so no question about geometry could be asked of a layout until it
 had been answered in Python first.
 
 **So the board is edited from here -- by a person in KiCad, or by a scoped
-krt.py run -- and this file will destroy that copper if it is run again.** It writes a fresh board with the footprints placed and
-the planes poured and nothing else on it; pcbnew has no notion of "the parts
-moved, keep the tracks". The sync path for a netlist change is KiCad's own
+krt.py run -- and this file will destroy that copper if it is run again.** It
+writes a fresh board with the footprints placed and the planes poured and
+nothing else on it; pcbnew has no notion of "the parts moved, keep the
+tracks". The sync path for a netlist change is KiCad's own
 **Update PCB from Schematic**, against the generated out/cv-module.kicad_sch.
 The rule, stated the same way here and in CLAUDE.md and README.md because one
 copy is the wrong number for this one:
@@ -97,7 +98,6 @@ CLEARANCE_MM = rules.CLEARANCE_MM
 VIA_DIAMETER_MM = rules.VIA_DIAMETER_MM
 VIA_DRILL_MM = rules.VIA_DRILL_MM
 EDGE_CLEARANCE_MM = rules.EDGE_CLEARANCE_MM
-ROUTE_PITCH_MM = rules.route_pitch()
 
 # **Empty, and the reserve() machinery below is kept.** This carried a 14 x 9 mm
 # envelope for each bypass relay while design.BYPASS_RELAY was None. Both
@@ -154,13 +154,6 @@ import pcbnew                                                    # noqa: E402
 sys.path.insert(0, str(HERE))
 import design as circuit                                         # noqa: E402
 import placement                                                 # noqa: E402
-# **Imported again, and it runs only when asked.** route.py is back as a
-# *seed* -- gen_pcb.py --seed-routing lays a first pass of copper so that the
-# board handed over is one to adjust rather than 485 airwires. Nothing else in
-# the build consults it, and the default path through this file still lays no
-# signal copper at all. See route.py's own docstring for why the restoration
-# is a narrower claim than the deletion was.
-import route                                                     # noqa: E402
 from toolchain import kicad                                      # noqa: E402
 from toolchain.kisch import _uuid as symbol_uuid                 # noqa: E402
 
@@ -173,17 +166,20 @@ FOOTPRINT_DIR = kicad.FOOTPRINT_DIR
 PROJECT_LIBS = {"cv": HERE / "out" / "cv.pretty"}
 
 
-# **Which side a piece of copper is on.** These were local strings for the
-# pass where route.py did not exist, and they are the router's own constants
-# again -- because pad_boxes() hands its boxes straight to route_all() and two
-# notions of "front" between the two files is exactly the class of fault this
-# repo keeps finding. pad_boxes() and stitch_grounds() still have to say which
-# layers a pad and a via occupy whether or not anything routes: the first
-# because verify.py's geometric checks read the boxes, the second because a
-# stitch via is copper on both signal layers and whoever finishes this board
-# by hand needs to see it as such.
-FRONT, BACK = route.FRONT, route.BACK
-LAYERS = route.LAYERS
+# **Which side a piece of copper is on.** Local again, which is where they
+# were during the pass route.py did not exist. They were the router's own
+# constants while it was here, on the argument that pad_boxes() handed its
+# boxes straight to route_all() and two notions of "front" between two files
+# is the class of fault this repo keeps finding -- true, and it needed a
+# second file to be true of.
+#
+# **The reason they stay at all is stitch_grounds().** The claim beside them
+# used to be that "verify.py's geometric checks read the boxes"; verify.py
+# imports nothing from this file and reads the *board*, so pad_boxes() has
+# exactly one consumer left and it is one file away. A via stitching a ground
+# pad is copper on both signal layers and has to say so.
+FRONT, BACK = 0, 1
+LAYERS = (FRONT, BACK)
 
 
 def point(x, y):
@@ -397,20 +393,18 @@ class Board:
     def _merge_collinear(points):
         """Drop the interior points of every straight run.
 
-        **The router thinks in cells and KiCad thinks in segments, and the two
-        met here.** route.segments() returns a run as one point per grid cell,
-        because that is what route.check_no_shorts() walks -- it asserts the
-        router's own bookkeeping by looking at every cell a track occupies, and
-        a merged polyline would hide the cells between the corners. So the
-        merge belongs *after* that check and before the board is written, which
-        is this line and not that function.
+        **It does nothing today and that is worth saying rather than
+        discovering.** It existed because route.py thought in cells and KiCad
+        thinks in segments: the router returned a run as one point per grid
+        cell, so a straight 9 mm run arrived as twenty 0.45 mm segments and
+        dragging it in KiCad moved one cell. The first seed wrote 31,218
+        segments of which 31,218 were one grid pitch long.
 
-        Left alone it costs the person the board is for: a straight 9 mm run
-        arrives as twenty 0.45 mm segments, so dragging a track moves one cell
-        of it and re-routing a net by hand means selecting twenty objects. The
-        first seed wrote **31,218 segments of which 31,218 were one grid pitch
-        long**. Merged, the copper is identical to the nanometre and there is
-        one object per straight.
+        With the router deleted, the one caller left is stitch_grounds(), and
+        it hands over a two-point stub from a ground pad to its via -- so the
+        guard below returns on every call this file makes. It is kept because
+        it is correct and general and track() is the place a polyline would
+        arrive if anything ever laid one, not because anything needs it now.
         """
         if len(points) < 3:
             return points
@@ -628,77 +622,6 @@ class Board:
                     abs(spot[1] - y) / 2 + TRACK_MM / 2))
         return placed, obstacles
 
-    def keepouts(self):
-        """Rule areas the footprints bring with them, as router obstacles.
-
-        **KiCad footprints can carry keep-out zones and this build had never
-        met one.** `Module:RaspberryPi_Pico_SMD_HandSolder` has twelve, named
-        "Pad Keep Out TP1" to "TP6", each declaring `tracks not_allowed`,
-        `vias not_allowed`, `pads not_allowed` and `copperpour not_allowed` --
-        the clearance the module's own underside test pads need from anything
-        this board puts under it.
-
-        Nothing here knew. The zone filler honours them by itself, so the
-        pours came out right; the router does not read the board, only the pad
-        boxes it is handed, so it laid **five VMCU tracks straight through
-        one** and DRC reported them as `items_not_allowed`. That is the same
-        shape as the QFN's exposed pad two passes ago -- a property of a
-        footprint that the generator inferred instead of asking for -- and the
-        answer is the same: ask the footprint.
-
-        Returned as obstacles rather than modelled per rule. A keep-out that
-        forbids tracks and vias is, to a maze router, board that is not there.
-        """
-        boxes = []
-        for footprint in self.footprints.values():
-            for zone in footprint.Zones():
-                if not zone.GetIsRuleArea():
-                    continue
-                if not (zone.GetDoNotAllowTracks()
-                        or zone.GetDoNotAllowVias()):
-                    continue
-                box = zone.GetBoundingBox()
-                left, top = pcbnew.ToMM(box.GetLeft()), pcbnew.ToMM(box.GetTop())
-                right = pcbnew.ToMM(box.GetRight())
-                bottom = pcbnew.ToMM(box.GetBottom())
-                boxes.append((LAYERS, (left + right) / 2, (top + bottom) / 2,
-                              (right - left) / 2 + CLEARANCE_MM,
-                              (bottom - top) / 2 + CLEARANCE_MM))
-        return boxes
-
-    def drill_halos(self):
-        """Where a via may not go because a plated hole is already there.
-
-        **A hole rule is not a copper rule and the router only models copper.**
-        Its pads are boxes with a net on them, and its via keep-out is
-        `rules.via_exclusion()["to_pad_mm"]` measured to that box -- which is
-        right about etching and says nothing about drilling. DRC found a
-        VA_RAW via 0.41 mm from U15's own VA_RAW pin: same net, so no
-        clearance rule of any kind objects, and two overlapping 0.3 and 1.0 mm
-        holes.
-
-        **Same net is exactly why it needs its own mechanism.** Every other
-        distance the router keeps is a question about whose copper is nearby,
-        and this one is not a question about copper at all. So the halo is
-        blocked for *all* nets including the pad's own, which is what
-        route.Grid.block_no_via() is for.
-
-        The distance is centre to centre: half the pad's drill, the hole-to-
-        hole rule, and half the via's drill.
-        """
-        holes = rules.hole_rules()["min_hole_to_hole"]
-        boxes = []
-        for footprint in self.footprints.values():
-            for pad in footprint.Pads():
-                drill = pcbnew.ToMM(pad.GetDrillSize().x)
-                if drill <= 0:
-                    continue
-                spot = pad.GetPosition()
-                reach = drill / 2 + holes + VIA_DRILL_MM / 2
-                x, y = pcbnew.ToMM(spot.x), pcbnew.ToMM(spot.y)
-                boxes.append((x - reach, y - reach, x + reach, y + reach))
-        return boxes
-
     @staticmethod
     def _stitch_blocker(spot, net, boxes, keep, laid, same_keep, cross_keep):
         """What stops a via here, as a sentence, or None if nothing does."""
@@ -808,67 +731,8 @@ def check_courtyards(board):
     return problems
 
 
-def escape_plan(board):
-    """Where every pad's fan-out escape would go, if the router needs one.
 
-    **A plan for every pad, and the router decides which plans get used.** The
-    condition is rules.track_offset_limit() and it is arithmetic, but the place
-    it is evaluated is route.access(), which already returns None for exactly
-    the pads that have no legal entry -- see the pre-pass in
-    route._one_pass(). Computing the same condition a second time here was the
-    first attempt and it disagreed with the router on U16's DPAK tab: the
-    limit is about the distance from the *track* to the neighbouring copper,
-    and evaluating it at the pad's centre line asks about one candidate cell
-    when a 6 mm tab offers a hundred and a TSSOP pin offers one.
-
-    So this file answers only the question it is the only file able to answer:
-    **which way is out.** A pad sticks out of its body along its own length,
-    so the escape runs along the pad's long axis, away from the footprint
-    centre -- which is stitch_grounds()' rule, for the same reason, one class
-    of copper along. rules.escape_reach() says how far before it may turn.
-
-    A square pad gets no plan. There is no long axis to run along, and a pad
-    whose two axes are equal is either large enough to hold a cell or too
-    small for any escape to help.
-
-    Returns {(net, pad_x, pad_y): (out_x, out_y)}.
-    """
-    plan = {}
-    for ref, footprint in sorted(board.footprints.items()):
-        body = footprint.GetPosition()
-        bx, by = pcbnew.ToMM(body.x), pcbnew.ToMM(body.y)
-        for pad in footprint.Pads():
-            net = pad.GetNetname()
-            if not net:
-                continue
-            # **The bounding box, and its centre, and both for the same
-            # reason pad_boxes() uses it.** GetSize() is in the footprint's
-            # frame and comes back transposed on a rotated part; GetPosition()
-            # is the pad's anchor, which is the box centre to within KiCad's
-            # nanometre and *not* to within a float comparison. Keying this on
-            # the anchor while route.py keys on the box centre cost two nets:
-            # ENVA1 and MISO matched, ENVA2 and MOSI missed by a nanometre, and
-            # the router reported "no escape axis" for a pad 1.475 by 0.400 mm.
-            # One notion of where a pad is, and it is the one the router has.
-            box = pad.GetBoundingBox()
-            x0, y0 = pcbnew.ToMM(box.GetLeft()), pcbnew.ToMM(box.GetTop())
-            x1, y1 = pcbnew.ToMM(box.GetRight()), pcbnew.ToMM(box.GetBottom())
-            width, height = x1 - x0, y1 - y0
-            if width == height:
-                continue
-            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-            along_x = width > height
-            reach = rules.escape_reach((width if along_x else height) / 2)
-            if along_x:
-                sign = 1.0 if cx >= bx else -1.0
-                plan[(net, cx, cy)] = (cx + sign * reach, cy)
-            else:
-                sign = 1.0 if cy >= by else -1.0
-                plan[(net, cx, cy)] = (cx, cy + sign * reach)
-    return plan
-
-
-def build(seed_routing=False):
+def build():
     # Before anything is placed: does the board on disk have copper on it that
     # a person drew? gen_pcb_guard.refuse_to_discard_routing() is the rule and
     # it lives in its own file so test_verify.py can exercise it without
@@ -969,102 +833,16 @@ def build(seed_routing=False):
                    (left + inset, iso_south + half, right - inset,
                     bottom - inset), priority=2)
 
-    stitched, stitch_copper = board.stitch_grounds()
-
-    # -- and this is where the generator stops, unless it is asked to seed ---
-    #
-    # **The board is placed and poured and it is not routed, and that is a
-    # decision rather than a limit.** route.py is a maze router with rip-up
-    # and retry, a fan-out for fine pitch, and a via-exclusion model derived
-    # three ways; it closed this board -- 0 unrouted, 0 DRC. What it was
-    # solving stopped existing when the RP2040's QFN-56 became a 2.54 mm
-    # module, and what it cost was never the copper: it was that the *board*
-    # had to be a function of design.py, so every question about geometry had
-    # to be answerable in Python before it could be asked of the layout.
-    #
-    # **--seed-routing runs it once and that is a different claim.** A person
-    # opening a board with 485 airwires on it and a person opening one with a
-    # legal route to adjust are doing two different jobs, and only the second
-    # one is editing. The seed is a starting point: it is not reproduced by
-    # the build, nothing downstream reads it, and the moment it lands the
-    # board is the person's. gen_pcb_guard.refuse_to_discard_routing() is what
-    # keeps a second run from happening by accident, and it was written a pass
-    # before the router came back.
-    #
-    # **The consequence is the one thing on this page nobody can be allowed to
-    # discover by accident: the board is no longer generated.** Running this
-    # file writes a fresh out/cv-module.kicad_pcb with the footprints placed
-    # and the planes poured and *no tracks on it at all* -- so running it over
-    # a hand-routed board destroys the routing. There is no undo and no
-    # warning, because pcbnew has no notion of "the parts changed, keep the
-    # copper".
-    #
-    # The way to move a netlist change onto a routed board is KiCad's own
-    # **Update PCB from Schematic**, against out/cv-module.kicad_sch, which is
-    # still generated and still the authority. The rule the whole repo now
-    # runs on, and it is in CLAUDE.md and README.md as well because one copy
-    # in one place is the wrong number of copies for this one:
-    #
-    #     **the netlist is generated and authoritative; the board is not
-    #     regenerated -- it is edited, and verified by reading it back.**
-    #
-    # verify.py is unchanged in what it asks -- DRC, the netlist against
-    # KiCad's own export, the ground split, the isolation region, both
-    # barriers -- and every one of those questions is asked *of the board* by
-    # reading it back. None of them ever needed the board to have been
-    # written from here.
-    laid = None
-    if seed_routing:
-        # The two grounds are skipped because stitch_grounds() has already
-        # given them the only connection they want.
-        #
-        # **The primary's corner is reserved, and it is a keep-out with an
-        # exception list.** It has no ground pour under it by construction,
-        # which to a maze router reads as the widest free channel on the board
-        # -- and on the build that added the ADC the router duly ran VA+
-        # through it, twenty tracks of secondary rail across the isolation
-        # barrier. verify.check_isolation_gap() caught every one, which is the
-        # check doing exactly its job and is still the wrong place to catch
-        # it: a rule the router cannot break is worth more than a rule it is
-        # caught breaking. So the region goes in as a reservation, and
-        # design.PRIMARY_NETS -- the same list check_isolation_gap() measures
-        # against -- is the only thing admitted.
-        tracks, vias, missed, refused, escaped = route.route_all(
-            rectangle, board.pad_boxes(),
-            obstacles=stitch_copper + board.keepouts(),
-            rules={"pitch": ROUTE_PITCH_MM, "track": TRACK_MM,
-                   "clearance": CLEARANCE_MM, "via": VIA_DIAMETER_MM,
-                   "edge": EDGE_CLEARANCE_MM,
-                   # Derived, not assumed. rules.via_exclusion() is three
-                   # distances -- to a track, to another via, to a pad's
-                   # copper -- each the stricter of a copper rule that shrinks
-                   # with the fabrication class and a hole rule that does not.
-                   "via_reach": rules.via_exclusion()},
-            skip=("MAGND", "MDGND"),
-            reserve=((left, iso_y, iso_x, iso_south),
-                     tuple(sorted(circuit.PRIMARY_NETS))),
-            escapes=escape_plan(board), no_via=board.drill_halos())
-        shorts = route.check_no_shorts(tracks, vias, ROUTE_PITCH_MM)
-        if shorts:
-            raise SystemExit("the router shorted nets, which it cannot do if "
-                             "its own bookkeeping is right:\n  "
-                             + "\n  ".join(shorts[:8]))
-        layers = {route.FRONT: pcbnew.F_Cu, route.BACK: pcbnew.B_Cu}
-        for net, layer, points in tracks:
-            board.track(net, layers[layer], points)
-        for net, spot in vias:
-            board.via(net, *spot)
-        laid = (len(tracks), len(vias), missed, refused, escaped)
+    stitched, _stitch_copper = board.stitch_grounds()
 
     board.fill()
     OUT.mkdir(exist_ok=True)
     board.save(BOARD)
-    return board, rectangle, stitched, laid
+    return board, rectangle, stitched
 
 
 def main():
-    seed = "--seed-routing" in sys.argv
-    board, rectangle, stitched, laid = build(seed_routing=seed)
+    board, rectangle, stitched = build()
     left, top, right, bottom = rectangle
     width, height = right - left, bottom - top
     print(f"{BOARD.name}: {len(board.footprints)} footprints, "
@@ -1072,25 +850,8 @@ def main():
     print(f"  outline {width:.1f} x {height:.1f} mm = {width * height:.0f} mm2, "
           f"four layers, ground split at y = {placement.SPLIT_Y:.1f}")
     print(f"  {stitched} ground pads stitched to the planes")
-    if laid is None:
-        print("  no signal copper: place and pour only. The board is "
-              "hand-routed in KiCad from here.")
-    else:
-        tracks, vias, missed, refused, escaped = laid
-        print(f"  seeded: {tracks} track runs and {vias} vias, "
-              f"{len(escaped)} fine-pitch escapes laid first, "
-              f"{len(refused)} refused -- see rules.track_offset_limit()")
-        for net, why in sorted(refused.items()):
-            print(f"      REFUSED {net}: {why}")
-        if missed:
-            print(f"  {len(missed)} nets the router could not finish, named "
-                  f"rather than counted -- they go in verify.UNROUTED_ITEMS:")
-            for index in range(0, len(missed), 6):
-                print(f"      {', '.join(missed[index:index + 6])}")
-        else:
-            print("  nothing missed: every net is closed. The seed is a "
-                  "starting point, not an answer -- it is the person's board "
-                  "from here.")
+    print("  no signal copper: place and pour only. Route it with krt.py, or "
+          "in KiCad by hand.")
     print("  ** re-running this file discards hand-routed copper. To move a "
           "netlist change onto a routed board, use KiCad's Update PCB from "
           "Schematic against out/cv-module.kicad_sch. **")
