@@ -280,6 +280,74 @@ CGA, CNA and CNC do, so it joined that pattern rather than getting one of its
 own. **An unparsed code is reported and counted, never passed**, so a
 re-sourcing pass cannot quietly introduce a part number nothing decodes.
 
+### The fourth was not obsolete, and the check is the same either way
+
+`PMEG2010AEH,115` was reported obsolete as well. **It is not.** Nexperia's own
+product page gives its status as **Production**, and RS UK lists tens of
+thousands in stock for next-day delivery; what is true is that DigiKey has it
+out of stock and on backorder. That is a distributor's position read as a
+lifecycle status, which is now the second time in one afternoon — the
+`OPA1644AIDR` was the first. **The manufacturer's page is the one that says
+whether a part exists; a distributor's page says whether that distributor has
+one.**
+
+The proposed substitute, onsemi's `NRVB120VLSFT1G`, was measured anyway, so
+that the work is not repeated the day stock does dry up:
+
+| | fitted `PMEG2010AEH` | proposed `NRVB120VLSF` |
+|---|---|---|
+| package | SOD-123F, on `Diode_SMD:D_SOD-123F` | **SOD-123FL, CASE 498** — recommended land 1.25 × 1.22 mm pads on a 4.20 mm outer span, against this board's 1.1 × 1.1 on 3.90 mm. KiCad ships no SOD-123FL footprint |
+| V_F at the clamp's 36 mA | 259 mV, interpolated | **≤ 275 mV** — its table starts at 100 mA, and `_schottky_vf()` refuses to extrapolate below a table's first point, so the 100 mA maximum stands as a bound that cannot be wrong: a Schottky's drop only falls as the current does |
+| `clamp_gain()` | +6.35 dB, **1.49 dB** inside the mixer's headroom | +6.74 dB, **1.10 dB** inside it — still fits |
+| D806 on VSYS | V_F 0.2795, VSYS 4.720 V | V_F 0.275, VSYS 4.725 V — no consequence |
+| reverse leakage | 50 µA max at V_R = 5 V | **0.60 mA at 25 °C and 15 mA at 85 °C**, at the rated 20 V |
+
+**The leakage is the one number that gets worse, and it is the one nothing
+here computes.** The tolerance for it is a prose argument — D803's leakage
+lands on VREFN, a driven node inside U8's feedback loop, so the amplifier
+absorbs it — and that argument was written against 50 µA. The two figures are
+not directly comparable (5 V against 20 V), and at D803's actual 2.5 V of
+reverse bias the onsemi part will draw far less; but the datasheet offers only
+a curve there, and `bench.md`'s rule is that a number read off a plotted curve
+is not a reading.
+
+**Production is not the same as buyable, and the second look said so.** RS's
+stock carries a **minimum order of 40** for a board that fits two, and several
+distributors quote no stock before 2027. So the substitution question is real
+after all, and three candidates were put through the same filter the fitted
+part passed — `clamp_vf_ceiling()` at **320 mV**, against each datasheet's own
+**maxima**, because that is the rule `CLAMP_VF_TABLE` is written to.
+
+| candidate | land | V_F bound at 36 mA | `clamp_gain()` margin | reverse leakage |
+|---|---|---|---|---|
+| `PMEG2010AEH` *(fitted)* | SOD-123F | 259 mV, interpolated from a **10 mA** maximum | **+1.49 dB** | 50 µA **max** at 5 V |
+| **Toshiba `CRS06`** | **SOD-123F — Toshiba's own recommended land is 1.2 × 1.2 mm pads on 2.8 mm centres, and this board's is 1.1 × 1.1 at ±1.4** | **360 mV** — its only maximum is at **1 A** | **−0.98 dB, over** | 60 µA **typ** at 5 V; 1.0 mA max at 20 V |
+| onsemi `NRVB120VLSF` | SOD-123FL — 1.25 × 1.22 pads on a 4.20 mm span, and KiCad ships no such land | 275 mV, its lowest maximum being at 100 mA | **+1.10 dB** | 0.60 mA max at 25 °C, 15 mA at 85 °C, at 20 V |
+| Diotec `SKL12` | ~SOD-123FL | **550 mV** — its only forward-voltage figure at all is at 1 A | **−5.64 dB** | 200 µA max at 20 V |
+
+**The CRS06 is the near miss and it is worth being precise about why.** Its land
+is this board's, unchanged; its leakage is the best of the three; and its
+*typical* forward drop — 0.20 V at 100 mA — is better than the fitted part's
+maximum. It fails on one thing only: **Toshiba publishes no maximum below 1 A**,
+so the strongest bound its datasheet supports at 36 mA is the 360 mV it
+guarantees at a current 28 times higher. On typicals it clears the ceiling by
+2.94 dB; on maxima it exceeds it by 0.98 dB. This project does not resolve that
+gap by choosing the friendlier column — that is `CLAMP_VF = 0.3` again, which
+is the assumption that put a BAT54 here and cost 5.5 dB.
+
+**And the arithmetic that makes the whole question smaller.** The minimum buy
+is 40 pieces of a part this repository prices at **GBP 0.10–0.30**: **GBP
+4–12** for 37 spare diodes, which is less than the single spare converter
+deleted the same afternoon and less than a day of anybody's time. Where a
+minimum order is 40 of something cheap, the cheapest fix is to buy 40.
+
+So: **no change, and the reason is the price of the alternative rather than the
+price of the part.** If a second source is ever needed, `NRVB120VLSF` is the
+one that qualifies on stated maxima and costs a hand-drawn SOD-123FL land; the
+`CRS06` becomes available the moment somebody is willing to measure its forward
+drop at 36 mA and record it as a `MEASURED` value with a range, which is what
+that mechanism is for.
+
 ### And the quantities were wrong, by more than the board costs
 
 Asking why a board that fits one converter was ordering five found a bug rather
