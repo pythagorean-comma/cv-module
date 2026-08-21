@@ -20,14 +20,8 @@ back in a fresh checkout. Uploading the loose files instead is the same set.
 | hole to hole / hole to copper | **0.406 / 0.250 mm** — `rules.hole_rules()` |
 | finished thickness | **1.61 mm** — `rules.FAB_FINISHED_MM` |
 
-**The thickness is stated here because the package states a different one.**
-`cv-module-job.gbrjob` carries `BoardThickness: 1.6`, which is KiCad's own
-`(general (thickness ...))` field. It is neither `rules.FAB_FINISHED_MM` = 1.61,
-what PCBWay publishes for this construction, nor the 1.541 mm the
-stackup rows sum to, which is the same construction without solder mask. It is
-KiCad's own default, and nothing in this repository owned it until this file
-read it.
-**Order to the figure in the table above.**
+**The thickness is settled and the package agrees with it.** `cv-module-job.gbrjob` carries `BoardThickness: 1.61`, which is KiCad's `(general (thickness ...))` field and is now `rules.FAB_FINISHED_MM` -- what PCBWay publishes for this construction. It sat at KiCad's own default of 1.6 for the life of the design, because the stackup pass made the layer table real and left the summary field behind; `rules.apply_thickness()` writes it and `verify.check_stackup()` holds it, which matters because Board Setup recomputes that field from the stackup and would put 1.541 mm there -- the same construction without solder mask.
+**Order to 1.61 mm.**
 
 ## The stackup
 
@@ -78,11 +72,11 @@ read it.
 
 One combined file, plated and unplated together, each tool carrying its own
 `TA.AperFunction` attribute. `gen_fab.check_holes()` counts these against the
-board: 1032 hits against 994 vias, 34 plated and 4 unplated through-hole pads.
+board: 1173 hits against 1135 vias, 34 plated and 4 unplated through-hole pads.
 
 | tool | diameter mm | plating | hits |
 |---|---|---|---|
-| T1 | 0.300 | plated | 994 |
+| T1 | 0.300 | plated | 1135 |
 | T2 | 1.000 | plated | 34 |
 | T3 | 1.850 | **unplated** | 2 |
 | T4 | 2.200 | **unplated** | 2 |
@@ -106,7 +100,7 @@ filled in. They are order-form fields and they are a person's to choose:
 * **surface finish** — the job file says `Finish: None`, which is KiCad
   reporting that nobody set one, not a specification of bare copper;
 * **solder mask colour** and **silkscreen colour**;
-* **electrical test** — worth pricing at 1032 holes
+* **electrical test** — worth pricing at 1173 holes
   and 185 nets;
 * **panelisation or single boards**, and whether the fabricator may add rails;
 * **IPC class**, and any impedance control — there is none on this board:

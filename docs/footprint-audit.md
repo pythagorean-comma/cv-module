@@ -494,8 +494,8 @@ that grows.
 
 **All three faults are planted in `test_verify.py` and all three are caught** —
 `1N4148WS-7-F` on a SOD-123 land, a SOT-23 part on a two-pad land, and Omron's
-through-hole relay on the surface-mount model's footprint. The harness is at
-101.
+through-hole relay on the surface-mount model's footprint. The harness was at
+101 and the return-via ratchets took it to 103.
 
 **What it still cannot do is unchanged**: whether a code names a part that
 *exists* is a distributor's question, exactly as the ceramic check already

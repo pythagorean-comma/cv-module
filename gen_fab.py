@@ -422,17 +422,23 @@ def placement_sides(board=BOARD):
 
 
 def board_thickness(board=BOARD):
-    """What the board file tells a fabricator it is, which is a third number.
+    """What the board file tells a fabricator it is.
 
     `rules.FAB_STACKUP` sums to the bare construction, `rules.FAB_FINISHED_MM`
     is what the fabricator publishes for it, and `(general (thickness ...))` is
     what KiCad writes into the job file's `BoardThickness` -- the one of the
-    three a CAM operator reads. It is KiCad's default here rather than either
-    of ours, and ORDER.md says so rather than this file silently editing a
-    board nothing else is allowed to edit.
+    three a CAM operator reads. **It was KiCad's own 1.6 for the life of the
+    design**, because the stackup pass made the layer table real and left the
+    summary field behind; this file is what found the disagreement, and
+    `rules.apply_thickness()` is what closed it.
+
+    Read through `rules._GENERAL_THICKNESS`, which is anchored on the
+    `(general ...)` block. A bare search for `(thickness ...)` happens to find
+    this field first and would find a stackup layer's the day anything moved
+    above it -- and `(thickness ...)` appears 1205 times in this file.
     """
-    found = re.search(r"\(thickness ([\d.]+)\)", board.read_text())
-    return float(found.group(1)) if found else None
+    found = rules._GENERAL_THICKNESS.search(board.read_text())
+    return float(found.group(2)) if found else None
 
 
 def order_notes(layers, dropped, summary, board=BOARD, directory=None):
@@ -463,6 +469,41 @@ def order_notes(layers, dropped, summary, board=BOARD, directory=None):
     never = "".join(f"* **{layer}** — {why}\n"
                     for layer, why in sorted(NEVER.items()))
     thickness = board_thickness(board)
+    # **Three thicknesses, and the note says which of them agree.** Computed
+    # rather than written, because the sentence that was here described a
+    # disagreement and would have gone on describing it after the disagreement
+    # was closed -- which is the shape this repository keeps finding in its own
+    # prose. The stackup sum is never one of the two: it is the declared layers
+    # without solder mask, and nothing here has a mask thickness to add.
+    agree = (thickness is not None
+             and round(thickness, 6) == round(rules.FAB_FINISHED_MM, 6))
+    if agree:
+        thickness_note = (
+            f"The thickness is settled and the package agrees with it.** "
+            f"`{PROJECT}-job.gbrjob` carries `BoardThickness: {thickness:g}`, "
+            f"which is KiCad's `(general (thickness ...))` field and is now "
+            f"`rules.FAB_FINISHED_MM` -- what {rules.FABRICATOR} publishes for "
+            f"this construction. It sat at KiCad's own default of 1.6 for the "
+            f"life of the design, because the stackup pass made the layer "
+            f"table real and left the summary field behind; "
+            f"`rules.apply_thickness()` writes it and "
+            f"`verify.check_stackup()` holds it, which matters because Board "
+            f"Setup recomputes that field from the stackup and would put "
+            f"{rules.stackup_thickness():.3f} mm there -- the same "
+            f"construction without solder mask.\n**Order to "
+            f"{rules.FAB_FINISHED_MM:g} mm.")
+    else:
+        thickness_note = (
+            f"The thickness is stated here because the package states a "
+            f"different one.** `{PROJECT}-job.gbrjob` carries "
+            f"`BoardThickness: {thickness}`, which is KiCad's own "
+            f"`(general (thickness ...))` field. It is neither "
+            f"`rules.FAB_FINISHED_MM` = {rules.FAB_FINISHED_MM}, what "
+            f"{rules.FABRICATOR} publishes for this construction, nor the "
+            f"{rules.stackup_thickness():.3f} mm the stackup rows sum to, "
+            f"which is the same construction without solder mask. "
+            f"`rules.apply_thickness()` is what closes it.\n"
+            f"**Order to the figure in the table above.")
     placed = placement_sides(board)
     dnp = placed["dnp"]
     holes_pth = board_holes(board)["thru_hole"]
@@ -492,14 +533,7 @@ back in a fresh checkout. Uploading the loose files instead is the same set.
 | hole to hole / hole to copper | **{hole_to_hole:.3f} / {hole_to_copper:.3f} mm** — `rules.hole_rules()` |
 | finished thickness | **{rules.FAB_FINISHED_MM} mm** — `rules.FAB_FINISHED_MM` |
 
-**The thickness is stated here because the package states a different one.**
-`{PROJECT}-job.gbrjob` carries `BoardThickness: {thickness}`, which is KiCad's own
-`(general (thickness ...))` field. It is neither `rules.FAB_FINISHED_MM` = {rules.FAB_FINISHED_MM},
-what {rules.FABRICATOR} publishes for this construction, nor the {rules.stackup_thickness():.3f} mm the
-stackup rows sum to, which is the same construction without solder mask. It is
-KiCad's own default, and nothing in this repository owned it until this file
-read it.
-**Order to the figure in the table above.**
+**{thickness_note}**
 
 ## The stackup
 

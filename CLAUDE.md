@@ -395,10 +395,11 @@ the second one is editing.
 **And none of the seed's copper is on the board any more.** KiCadRoutingTools,
 through `krt.py`, re-routed every net and `--commit` promoted the result -- so
 `route.py` is now how a board is started from nothing, and not how this board
-was built. Measured on the tracked board: **5121 segments and 995 vias**, of
-which 151 are `gen_pcb.py`'s ground stitches and 844 the router's; one track
-width (0.2 mm), one via size (0.7/0.3), 12998 mm of track, and no signal copper
-on `In1.Cu` or `In2.Cu`.
+was built. Measured on the tracked board: **5081 segments and 1135 vias**, of
+which **290 are ground stitches** -- 151 `gen_pcb.py`'s, beside ground pads,
+and 139 `returns.py`'s, beside signal vias -- and 845 are on signal nets; one
+track width (0.2 mm), one via size (0.7/0.3), 13073 mm of track, and no signal
+copper on `In1.Cu` or `In2.Cu`.
 
 Two things about it that are worth not re-deriving. **The board is inside its
 competence rather than at the edge of it**: it closed the QFN board at
@@ -508,7 +509,7 @@ for **33 % more vias**.
 **And the board was replaced anyway, which is worth stating plainly rather
 than leaving the two sentences to be reconciled.** The full three-pass reroute
 is what `--commit` promoted and what is on disk: `verify.py` exits 0 and
-`test_verify.py` catches all 94 faults on copper the tool laid. What the via
+`test_verify.py` catches all 104 faults on copper the tool laid. What the via
 row argues is not "revert it" but that **a whole-board reroute is not a free
 improvement**: 844 router vias against the seed's 595 is 33 % more holes
 through both reference planes, bought with 9.8 % less track. Whether that trade
@@ -517,6 +518,102 @@ is right on this board is a person's call and no check here can make it --
 anything about the copper as laid, and it says the worst channel-to-channel
 adjacency is **-114.4 dB against -54 dB**. So the recommendation for *future*
 runs is unchanged and is about scope: re-route a region, not the board.
+
+## Every via changes reference plane, and nothing had ever measured that
+
+**`In1.Cu` and `In2.Cu` carry the same two nets in the same places** -- MAGND
+north of 156.44, MDGND south of 158.44 -- so a track that changes layer changes
+*reference plane*, and its return current has to transfer between them. The
+only conductor that does that is a ground via. `constraints.return_loops()` is
+the measurement: the loop is `rules.plane_separation()`, 1.03 mm of core, times
+the distance to the nearest ground via. `returns.py` is what moves it and
+`docs/return-vias.md` is the record.
+
+**Why the figure was what it was, and it is not a fault in the function that
+made it.** `gen_pcb.stitch_grounds()` places a via beside every ground *pad*,
+because that is what a ground pad needs. Nothing here had ever tried to put a
+stitch near a *signal* via, so nothing had ever asked how far the nearest one
+was: **22.76 mm at worst, 7.39 median, 6 of 217 within 2 mm.** After
+`returns.py`: **4.90, 1.50, 190 of 219**, and the total loop area from
+**1990.6 mm2 to 367.8**.
+
+Four things about it have to survive compaction.
+
+* **Only half the question is derivable and the honest end is the
+  sensitivity.** As a return *impedance* the number does not matter and the
+  arithmetic says so: 22.76 mm of In1/In2 pair is tens of nH, sub-milliohm at
+  20 kHz, tens of nV against a 144 uV floor. As a *pickup loop* for this
+  board's own 580 kHz converter and 1.1 MHz switcher it is not derived,
+  because the aggressor is a current loop inside a potted brick that no
+  datasheet draws -- `board_coupling()` solves trace against trace because
+  both conductors are known. So `return_sensitivity()` states the field at
+  which the loops reach the mixer's own floor -- **19.9 nT before, 107.4 nT
+  after** -- and claims nothing about what the field is. **Do not invent one.**
+* **A ground stitch is not a perforation of the reference plane and a signal
+  via is**, measured rather than argued: a signal via sits in a 0.55 mm void
+  in *both* planes and a ground via sits in solid copper with none. 845 signal
+  vias take 3.2 % of each plane; 290 ground vias take nothing. So the trade
+  `docs/routing-tool.md` flags -- *"every extra via is a hole through both
+  reference planes"* -- **is about signal vias only**, and 139 more stitches
+  cost 139 drill hits and nothing else. That, plus the fact that stitching
+  disturbs no copper already laid, is the whole reason the decision was to
+  spend the copper rather than the derivation.
+* **The reach is not a budget knob and it was priced before it was chosen.**
+  Across 1.5 to 5.0 mm the via count moves 130 to 71 while refusals move 71 to
+  0: the count is set by how many audio vias are in *distinct places*, and
+  what the reach buys is legality room. So `returns.py` runs two passes --
+  `TIGHT_MM` first because the loop *is* the distance, `WIDE_MM` after for the
+  ones in packed copper -- rather than one at a compromise.
+* **It only adds, so it is the thing to re-run after any re-route.**
+  `krt.py --nets "SIN2"` re-laid that net's 33.5 mm detour at 7.6 and moved
+  `AUDIO_OFF_MAGND_MM` from 144.1 to 118.1; it also put SIN2's vias somewhere
+  new, and a second `returns.py` run cost two stitches. Like `krt.py` it is in
+  neither pipeline and writes nothing without `--commit`; unlike `gen_pcb.py`
+  it cannot destroy anything.
+
+**Both ratchets are in `test_verify.py` now and neither had ever been shown to
+fail.** `AUDIO_OFF_MAGND_MM` = 118.2 and `AUDIO_RETURN_AREA_MM2` = 367.8, and
+they are planted in opposite ways on purpose: the return one in the
+**artefact**, a copy of the board with its stitching stripped, and the plane
+one in the **declaration**, by moving the ground split -- which is the move
+`check_isolation_gap()`'s two cases make, and for the same reason.
+
+**Both plants carry a dead-mutation guard, and the guard has to raise
+something the caller does not catch.** The provocations at the end of
+`test_verify.py` are run inside `except (SystemExit, AssertionError)`, so a
+guard that announces "this mutation planted nothing" by raising `SystemExit`
+is reported as *caught* -- the dead mutation, one level up, which is
+`dead_mutations()`' own subject. It raises `RuntimeError`.
+
+### The four faults drawing it found, and the last one is the rule
+
+Each is a property inferred from something next to it where the artefact could
+have been asked, which is this repo's oldest shape.
+
+* **A regex found 151 of 994 vias.** Modelled on `constraints._raw_segments()`,
+  which is exact for segments -- and KiCad writes `(tenting ...)` on a via from
+  KiCadRoutingTools and nothing on a via from `gen_pcb.py`, so the pattern
+  matched precisely the vias this repository wrote. The giveaway was that the
+  audio count came back **zero**. `_vias()` goes through the parser.
+* **76 of the 151 existing stitches were refused by their own pour.** KiCad
+  flattens a polygon-with-holes into one ring with zero-width slits, so
+  distance-to-boundary answers 0.038 mm in the middle of solid copper. A slit
+  is a pair of coincident opposed edges and is removed exactly.
+* **Every rotated footprint's pads were mirrored and their boxes transposed.**
+  The board's y axis points down, so a footprint's angle turns its pads the
+  *other* way; and a pad's own `at` angle is **absolute**, not added to the
+  footprint's. Both wrong at once is 0.7 mm for 0.5125 on an 0805 -- the size
+  of the clearances being checked. KiCad's DRC found it; a **track endpoint**
+  confirmed it, being an absolute coordinate with no convention in it.
+  `returns.check_pad_geometry()` is the instrument.
+* **And 135 vias were written inside a footprint.** The insertion marker was
+  `"\t(zone\n"`, which is a substring of `"\t\t(zone\n"`, so the first match
+  in the file is one of the Pico's own keep-out zones 60,000 lines early. The
+  board still parsed and KiCad would still have opened it. **The only thing
+  that said so is that the file measures the board back after writing it and
+  got the number it started with** -- and that comparison is a check that
+  raises now. A writer that does not read its own artefact back cannot tell
+  "wrote it" from "wrote it somewhere".
 
 ## The fabrication package exists, and what it will not decide is the point
 
@@ -543,8 +640,8 @@ Four things about it that must survive compaction:
   is the denial list, each entry with its reason.
 * **`check_holes()` is the check that is not a byte comparison**, and it is
   the one that could catch a wrong export *option*. The drill file's hits are
-  counted against the board's own vias, plated and unplated pads -- 995 + 34
-  + 4 = 1033, measured both ways -- and its unplated hits against the board's
+  counted against the board's own vias, plated and unplated pads -- 1135 + 34
+  + 4 = 1173, measured both ways -- and its unplated hits against the board's
   unplated pads, because a mounting hole plated by mistake is a short to
   whatever pours around it. `--verify` proves the package is of *this* board;
   only this proves it is *right about* it. `test_verify.py` plants both, plus
@@ -558,15 +655,26 @@ Four things about it that must survive compaction:
   board are byte-identical once `FAB_EPOCH` has replaced four timestamps --
   `PDF_EPOCH`'s argument, one artefact along, measured the same way.
 
-**And it found a third thickness.** `(general (thickness 1.6))` on the board is
-KiCad's default; `rules.FAB_FINISHED_MM` is 1.61, what PCBWay publishes for
-this construction; `rules.FAB_STACKUP` sums to 1.541, the same construction
-without solder mask. The job file hands a CAM operator the *first* of those as
-`BoardThickness`, and nothing in this repository owned it until `gen_fab.py`
-read it -- the stackup pass fixed the layer table and left the summary field
-behind. `ORDER.md` states the figure to order to and names the disagreement;
-the board is not edited to fix it, because the board is not this file's to
-edit.
+**And it found a third thickness, which is closed now.** `(general
+(thickness 1.6))` on the board was KiCad's default; `rules.FAB_FINISHED_MM` is
+1.61, what PCBWay publishes for this construction; `rules.FAB_STACKUP` sums to
+1.541, the same construction without solder mask. The job file hands a CAM
+operator that field as `BoardThickness`, and nothing owned it until
+`gen_fab.py` read it -- the stackup pass fixed the layer table and left the
+summary field behind. **`rules.apply_thickness()` writes 1.61 and
+`verify.check_stackup()` holds it.**
+
+Three things about that to carry. **1.541 is deliberately not the answer** --
+it is the declared layers without solder mask and this repository has no mask
+thickness, so making the two agree would mean inventing one. **The check is
+not ceremony**: KiCad's Board Setup recomputes that field from the stackup, so
+opening the dialogue puts 1.541 back. And **the reason it was left alone for a
+pass was a rule about who may edit the board** -- *"the board is not this
+file's to edit"* -- which was true while `gen_pcb.py` was the only writer and
+stopped being true when `returns.py` started adding copper by text. That is
+`floorplan.CROSSING_RULE` and "hand-laid and verified" a third time: **a rule
+written in terms of how it is currently satisfied outlives the thing that
+satisfied it.**
 
 **What it refuses to do is finish the order.** Surface finish, mask and silk
 colour, electrical test, panelisation, IPC class, quantity: none is derivable
@@ -1237,6 +1345,9 @@ cv-module/
     routing-tool.md      KiCadRoutingTools: what it is worth here and the
                          four things it must be told. Its defaults route on
                          the ground planes
+    return-vias.md       where a signal changes reference plane, what the
+                         loop is worth, and why the copper was cheaper than
+                         the derivation
     bench.md             what is left to measure, in order, and what each
                          reading decides. Three, and only noise_floor can be
                          taken before the board is fabricated
@@ -1271,6 +1382,11 @@ cv-module/
   krt.py                 drives KiCadRoutingTools from rules.py, placement.py
                          and design.py. Generates every argument; never writes
                          the board without --commit. docs/routing-tool.md
+  returns.py             the return-via stitching. Reads the board, finds the
+                         audio vias with no ground via near them, and adds one
+                         where the rules allow. Adds only -- it disturbs no
+                         copper, so re-run it after any re-route. --commit
+                         writes. docs/return-vias.md
   verify.py              the constraints, checked against KiCad's own netlist
   test_verify.py         plants faults to prove verify.py's checks can fail
 
@@ -1351,6 +1467,10 @@ then **one** run of `route.py` so that what somebody opens is a legal route to
 adjust rather than a ratsnest. It is a starting point and not an output --
 nothing downstream reads it, and the guard refuses the next run whether the
 copper came from the router or from a person.
+
+`returns.py` is a fourth way copper gets laid and it is not in either pipeline
+either. It adds ground stitches and nothing else, so unlike the other three it
+cannot destroy anything; `--commit` is still what writes.
 
 `krt.py` is a third way copper gets laid and it is not in either pipeline
 either: it routes a scope with KiCadRoutingTools and writes

@@ -540,6 +540,27 @@ def outer_dielectric():
     raise AssertionError("FAB_STACKUP has no dielectric in it")
 
 
+def plane_separation():
+    """The dielectric between In1.Cu and In2.Cu, as (thickness mm, Dk).
+
+    outer_dielectric() answers what a *track* references; this answers what the
+    two reference planes are to each other, which is a different question with
+    a different consumer. Every signal via on this board changes reference
+    plane, and the loop its return current makes while transferring between
+    them is that separation times the distance to the nearest ground via --
+    constraints.return_loops(). Derived from FAB_STACKUP rather than written
+    down, for the same reason outer_dielectric() is.
+    """
+    names = [row[0] for row in FAB_STACKUP]
+    first, second = names.index("In1.Cu"), names.index("In2.Cu")
+    between = [row for row in FAB_STACKUP[first + 1:second]
+               if row[1] in ("prepreg", "core")]
+    if len(between) != 1:
+        raise AssertionError(
+            f"FAB_STACKUP puts {len(between)} dielectrics between the planes")
+    return between[0][2], between[0][3]
+
+
 def stackup_thickness():
     """What the declared layers add to, mm. Not the finished figure."""
     return sum(row[2] for row in FAB_STACKUP)
@@ -583,6 +604,50 @@ def stackup_sexp():
 
 
 _STACKUP_BLOCK = re.compile(r"\n\t\t\(stackup\n(?:.*?\n)*?\t\t\)\n")
+
+
+_GENERAL_THICKNESS = re.compile(
+    r"(\n\t\(general\n(?:\t\t\([^\n]*\)\n)*?\t\t\(thickness )([\d.]+)(\))")
+
+
+def apply_thickness(board, mm=None):
+    """Put FAB_FINISHED_MM into the board's `(general (thickness ...))` field.
+
+    **This is the third thickness and it was the one nobody owned.** The board
+    carried KiCad's default 1.6; FAB_FINISHED_MM is 1.61, what PCBWay publishes
+    for this construction; FAB_STACKUP sums to 1.541, the same construction
+    without solder mask. `gen_fab.py` found the disagreement because the job
+    file hands a CAM operator the *first* of the three as `BoardThickness`, and
+    the stackup pass had made the layer table real and left the summary field
+    behind -- a value that exists only as somebody else's default, which is
+    check_stackup()'s own subject one field along.
+
+    **It is not FAB_STACKUP's sum on purpose.** That sum is the declared layers
+    and this repository has no figure for solder mask, so making the two agree
+    would mean inventing one. 1.61 is the fabricator's published finished
+    thickness and the number `fab/ORDER.md` already tells a person to order to.
+
+    **And KiCad may put it back.** Board Setup recomputes this field from the
+    stackup, so opening that dialogue could write 1.541 here. That is what
+    verify.check_stackup() holds it for: the field is a claim about the board
+    and it now fails when the board stops making it.
+
+    Anchored on the `(general ...)` block rather than on the word, because
+    `(thickness ...)` appears 1205 times in this file -- every stackup layer
+    and every piece of graphic text has one.
+    """
+    board = pathlib.Path(board)
+    text = board.read_text()
+    want = FAB_FINISHED_MM if mm is None else mm
+    match = _GENERAL_THICKNESS.search(text)
+    if match is None:
+        raise AssertionError(
+            "the board has no (general (thickness ...)) field to set")
+    if float(match.group(2)) == want:
+        return False
+    board.write_text(_GENERAL_THICKNESS.sub(
+        lambda m: f"{m.group(1)}{want:g}{m.group(3)}", text, count=1))
+    return True
 
 
 def apply_stackup(board):

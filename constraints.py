@@ -32,10 +32,12 @@ the one place that nearly happened is recorded below.
 import math
 import pathlib
 import re
+import statistics
 
 import design
 import delta
 import placement
+import rules
 import contract.socket as socket
 from contract.socket import source
 from toolchain import sexp
@@ -480,7 +482,7 @@ def parallel_runs(board):
 # line. So this is UNROUTED_ITEMS' rule applied to millimetres -- **down as
 # copper is moved, up only with the nets named** -- and not an assertion of
 # zero, which would be unachievable and would therefore be switched off.
-AUDIO_OFF_MAGND_MM = 144.5
+AUDIO_OFF_MAGND_MM = 118.2
 
 
 def audio_off_its_own_plane(board=BOARD):
@@ -532,6 +534,152 @@ def check_audio_off_its_own_plane(board=BOARD):
             f"{AUDIO_OFF_MAGND_MM:.1f} -- "
             + ", ".join(f"{net} {mm:.1f} mm" for net, mm in worst[:6])
             + ". Down as copper is moved, up only with the nets named.")
+    return measured
+
+
+# **Where a signal's return current crosses between the two ground planes.**
+#
+# In1.Cu and In2.Cu carry the same two nets in the same places -- MAGND north
+# of the pour edge, MDGND south of it -- so a track that changes layer changes
+# reference plane, and its return current has to transfer from one plane to the
+# other. The only conductor that does that is a ground via, and the loop the
+# current makes on the way is the separation between the planes times the
+# distance to the nearest one. rules.plane_separation() is the first figure and
+# this is the second.
+#
+# **What the number is not.** As a return *impedance* it does not matter and
+# the arithmetic says so plainly: the worst loop on this board before any of
+# this was 22.76 mm of In1/In2 pair, which is tens of nanohenries, sub-
+# milliohm at 20 kHz, and tens of nanovolts against a 144 uV floor. Nothing in
+# the audio band is decided here.
+#
+# What it is is a **pickup loop**, and this board carries two switchers of its
+# own -- the converter at 580 kHz and U22 at 1.1 MHz. An emf is the loop area
+# times dB/dt, and the field is the term nothing here derives: board_coupling()
+# solves trace against trace, where both conductors are known, and an aggressor
+# *field* needs the geometry of a current loop inside a potted brick that no
+# datasheet draws. So this file states the area and the sensitivity and stops
+# there, which is the honest end of the derivation.
+#
+# **The decision was to spend the copper rather than the derivation**, and what
+# makes that cheap is that a ground stitch is not a perforation. Measured on
+# the tracked board: a signal via sits in a 0.55 mm void in *both* planes --
+# the filler's own clearance, and 843 of them take 3.2 % of each plane's area
+# -- while a ground via sits in solid copper with no void at all. So the trade
+# routing-tool.md flags, "every extra via is a hole through both reference
+# planes", is a true statement about *signal* vias and does not apply to these.
+# Stitching is also not routing: it disturbs no copper that is already laid.
+RETURN_VIA_NETS = ("MAGND", "MDGND")
+
+
+def _vias(board=BOARD):
+    """Every via as (x, y, net), read through the parser and not by pattern.
+
+    **The regex this was first written as found 151 of 994.** It was modelled
+    on _raw_segments() above, which is exact for segments -- and KiCad writes a
+    `(tenting ...)` field on a via that came from KiCadRoutingTools and none on
+    a via that came from gen_pcb.py, so the pattern matched precisely the vias
+    this repository wrote and none of the ones it did not. The giveaway was
+    that the audio count came back zero, which is the failure mode this repo
+    collects: a probe that reports nothing found.
+    """
+    tree = sexp.parse(board.read_text() if hasattr(board, "read_text")
+                      else board)
+    out = []
+    for via in sexp.find_all(tree, "via"):
+        at, net = sexp.find(via, "at"), sexp.find(via, "net")
+        if at is None or net is None:
+            continue
+        # The net name is the last element, which reads both the two-element
+        # form KiCad 10 writes and the three-element one it used to --
+        # verify._board_copper()'s own correction, one artefact along.
+        out.append((float(at[1]), float(at[2]), str(net[-1])))
+    return out
+
+
+# The declared figure, and it is a ratchet in the shape AUDIO_OFF_MAGND_MM is.
+# Total plane-transfer loop area over every audio via on the board, mm^2:
+# sum of (distance to the nearest ground via) x rules.plane_separation().
+#
+# It was **1990.6 mm** before returns.py laid a stitch, at a median separation
+# of 7.39 mm and a worst of 22.76. Down as copper is laid; up only with the
+# vias named in the failure message.
+AUDIO_RETURN_AREA_MM2 = 367.8
+
+
+def return_loops(board=BOARD):
+    """The plane-transfer loop at every audio via, and what it adds to.
+
+    Sorted worst first, because the failure message wants to name the vias
+    that moved and a mean does not identify anything.
+    """
+    height, _dk = rules.plane_separation()
+    vias = _vias(board)
+    ground = [(x, y) for x, y, net in vias if net in RETURN_VIA_NETS]
+    if not ground:
+        # Said rather than raised out of min(), because "no ground vias on the
+        # board" is an answer to the question this function asks and an empty
+        # sequence is not.
+        raise AssertionError(
+            f"{len(vias)} vias on the board and not one of them is on "
+            f"{' or '.join(RETURN_VIA_NETS)} -- there is no return path to "
+            f"measure")
+    audio = re.compile(r"^(%s)\d+$" % "|".join(AUDIO_FAMILIES))
+    rows = []
+    for x, y, net in vias:
+        if not audio.match(net):
+            continue
+        gap = min(math.dist((x, y), q) for q in ground)
+        rows.append({"net": net, "x": x, "y": y, "gap_mm": gap,
+                     "area_mm2": gap * height})
+    rows.sort(key=lambda r: -r["gap_mm"])
+    gaps = sorted(r["gap_mm"] for r in rows)
+    return {
+        "height_mm": height,
+        "rows": rows,
+        "ground_vias": len(ground),
+        "audio_vias": len(rows),
+        "worst_mm": gaps[-1] if gaps else 0.0,
+        "median_mm": (statistics.median(gaps) if gaps else 0.0),
+        "within_2mm": sum(1 for g in gaps if g <= 2.0),
+        "total_mm2": sum(r["area_mm2"] for r in rows),
+        "declared_mm2": AUDIO_RETURN_AREA_MM2,
+    }
+
+
+def return_sensitivity(board=BOARD, hz=None):
+    """The ambient field that would put these loops at the mixer's own floor.
+
+    **This is not a claim about the field and it is written so it cannot be
+    read as one.** V = A dB/dt, so a total loop area A reaches a stated
+    voltage at exactly one flux density, and that is arithmetic on numbers
+    this project already owns: the area off the board, the frequency off the
+    converter's datasheet, the floor out of MEASURED. What it buys is a scale
+    -- it says what the copper laid here is worth without pretending to know
+    the aggressor.
+    """
+    hz = design.SUPPLY_KHZ_TYP * 1e3 if hz is None else hz
+    loops = return_loops(board)
+    area_m2 = loops["total_mm2"] * 1e-6
+    floor = socket.MEASURED["noise_floor"].value
+    return {
+        "hz": hz, "area_mm2": loops["total_mm2"], "floor_v": floor,
+        "tesla_at_floor": floor / (2 * math.pi * hz * area_m2),
+    }
+
+
+def check_return_loops(board=BOARD):
+    """The ratchet. Raises if the total loop area has grown."""
+    measured = return_loops(board)
+    if measured["total_mm2"] > AUDIO_RETURN_AREA_MM2 + 0.5:
+        worst = measured["rows"][:6]
+        raise AssertionError(
+            f"the audio return loops add to {measured['total_mm2']:.1f} mm2 "
+            f"and constraints.AUDIO_RETURN_AREA_MM2 declares "
+            f"{AUDIO_RETURN_AREA_MM2:.1f} -- worst: "
+            + ", ".join(f"{r['net']} at ({r['x']:.2f}, {r['y']:.2f}) "
+                        f"{r['gap_mm']:.2f} mm" for r in worst)
+            + ". Down as copper is laid, up only with the vias named.")
     return measured
 
 
@@ -708,9 +856,38 @@ def _report():
         print(f"   total {off['total_mm']:>6.1f} mm against "
               f"{off['declared_mm']:.1f} declared -- a ratchet, and every "
               f"millimetre of it reaches a relay contact at y = 161.4")
-        print(f"   was  {211.9:>6.1f} mm before the copper review: PIN5 and "
-              f"SIN3 had every pad in the analogue half and were routed "
-              f"through the digital one anyway")
+        print(f"   was  {211.9:>6.1f} mm before the copper review and "
+              f"{144.1:.1f} after it: PIN5 and SIN3 had every pad in the "
+              f"analogue half and were routed through the digital one anyway")
+        print(f"   then SIN2 came back as a detour rather than a necessity -- "
+              f"33.5 mm to reach a relay pad 5 mm past the pour edge, re-laid "
+              f"by krt.py --nets at 7.6")
+        print()
+        loops = check_return_loops()
+        field = return_sensitivity()
+        print("5d. where an audio signal changes reference plane")
+        print("    In1 and In2 carry the same nets in the same places, so "
+              "every via changes plane as well as layer and the return "
+              "current has to transfer")
+        print(f"   audio vias      {loops['audio_vias']:>6d}   against "
+              f"{loops['ground_vias']} ground vias")
+        print(f"   worst gap       {loops['worst_mm']:>6.2f} mm  "
+              f"median {loops['median_mm']:.2f}, "
+              f"{loops['within_2mm']} of {loops['audio_vias']} within 2 mm")
+        print(f"   loop area       {loops['total_mm2']:>6.1f} mm2 against "
+              f"{loops['declared_mm2']:.1f} declared -- a ratchet, at "
+              f"{loops['height_mm']:.2f} mm of plane separation")
+        print(f"   was            {1990.6:>6.1f} mm2 before returns.py, at a "
+              f"median of 7.39 mm and a worst of 22.76")
+        print(f"   not an impedance: {loops['worst_mm']:.2f} mm of In1/In2 "
+              f"pair is tens of nH, and tens of nV at 20 kHz")
+        print(f"   as a pickup loop it reaches the mixer's "
+              f"{field['floor_v'] * 1e6:.0f} uV floor at "
+              f"{field['tesla_at_floor'] * 1e9:.1f} nT of "
+              f"{field['hz'] / 1e3:.0f} kHz field")
+        print(f"   the field is the term nothing here derives -- "
+              f"board_coupling() solves trace against trace, and an aggressor "
+              f"inside a potted brick has no drawing")
         print()
         induced = max(r["inductive_db"] for r in b["rows"])
         print(f"   inductive, the same        {induced:>7.1f} dB   "

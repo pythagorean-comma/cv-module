@@ -56,17 +56,28 @@ what verify.py prints and what every 'constraint N' in design.py means
 
 5c. audio copper that is not over its own ground plane
     CROSSING_RULE says nothing audio-carrying crosses; check_crossings() reads the netlist and cannot see a track's path
-   SIN2               33.5 mm past y = 156.44
    PIN6               32.2 mm past y = 156.44
    IVOUT4             22.2 mm past y = 156.44
    SIN4               20.3 mm past y = 156.44
    PIN2               11.6 mm past y = 156.44
+   SIN2                7.6 mm past y = 156.44
    PIN4                7.1 mm past y = 156.44
    IVOUT2              6.3 mm past y = 156.44
    SIN6                6.1 mm past y = 156.44
    IVOUT6              5.0 mm past y = 156.44
-   total  144.1 mm against 144.5 declared -- a ratchet, and every millimetre of it reaches a relay contact at y = 161.4
-   was   211.9 mm before the copper review: PIN5 and SIN3 had every pad in the analogue half and were routed through the digital one anyway
+   total  118.1 mm against 118.2 declared -- a ratchet, and every millimetre of it reaches a relay contact at y = 161.4
+   was   211.9 mm before the copper review and 144.1 after it: PIN5 and SIN3 had every pad in the analogue half and were routed through the digital one anyway
+   then SIN2 came back as a detour rather than a necessity -- 33.5 mm to reach a relay pad 5 mm past the pour edge, re-laid by krt.py --nets at 7.6
+
+5d. where an audio signal changes reference plane
+    In1 and In2 carry the same nets in the same places, so every via changes plane as well as layer and the return current has to transfer
+   audio vias         219   against 290 ground vias
+   worst gap         4.90 mm  median 1.50, 190 of 219 within 2 mm
+   loop area        367.8 mm2 against 367.8 declared -- a ratchet, at 1.03 mm of plane separation
+   was            1990.6 mm2 before returns.py, at a median of 7.39 mm and a worst of 22.76
+   not an impedance: 4.90 mm of In1/In2 pair is tens of nH, and tens of nV at 20 kHz
+   as a pickup loop it reaches the mixer's 144 uV floor at 107.4 nT of 580 kHz field
+   the field is the term nothing here derives -- board_coupling() solves trace against trace, and an aggressor inside a potted brick has no drawing
 
    inductive, the same         -127.6 dB   computed, not dismissed: a stiff node still takes a series emf
    would fail at                 8361 ohm  <- the impedance decides it; the loom node is 8

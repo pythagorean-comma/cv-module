@@ -1253,6 +1253,28 @@ def check_stackup(board):
             f"the board's stackup is {found} and rules.FAB_STACKUP declares "
             f"{declared} -- run rules.apply_stackup(); the dielectric height "
             f"is what every coupling figure on this board is computed at")
+    # **And the summary field, which is a third thickness and was nobody's.**
+    # `(general (thickness ...))` is what KiCad puts in the job file as
+    # `BoardThickness`, so it is the figure a CAM operator is handed -- and it
+    # sat at KiCad's own 1.6 while the layer table said one thing and
+    # FAB_FINISHED_MM said another. Held separately from the layer rows above
+    # because it is a different claim: the rows are the construction, this is
+    # the finished figure the fabricator publishes for it, and the two do not
+    # sum to each other because this repository has no solder-mask thickness.
+    # KiCad's Board Setup recomputes this field from the stackup, so this is
+    # the check that catches the dialogue having been opened.
+    general = sexp.find(tree, "general")
+    stated = sexp.find(general, "thickness") if general is not None else None
+    if stated is None:
+        problems.append("the board has no (general (thickness ...)) field, so "
+                        "the job file's BoardThickness is whatever KiCad "
+                        "defaults to -- rules.apply_thickness() writes it")
+    elif round(float(stated[1]), 6) != round(rules.FAB_FINISHED_MM, 6):
+        problems.append(
+            f"the board states a finished thickness of {float(stated[1]):g} mm "
+            f"and rules.FAB_FINISHED_MM is {rules.FAB_FINISHED_MM:g} -- this "
+            f"is the number gen_fab.py puts in the job file, so it is what a "
+            f"fabricator builds to. rules.apply_thickness() writes it")
     return problems
 
 

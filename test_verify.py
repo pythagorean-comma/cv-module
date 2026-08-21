@@ -1220,6 +1220,98 @@ def main():
         finally:
             design.INLET_CHOKE_UH = original
 
+    # **The two ratchets in constraints.py, which are not verify.py checks and
+    # had never been shown to fail.** Both read the routed board and both hold
+    # a number that is a *measurement* rather than a threshold -- so the thing
+    # that has to be provable is not that the number is right but that the
+    # check notices when the copper stops matching it.
+    #
+    # Planted in opposite ways on purpose. The return-via one is planted in the
+    # **artefact**: a copy of the board with its ground vias stripped out is
+    # exactly what this board looked like before returns.py ran, and the loop
+    # area goes back to 1990.6 mm2. The audio-off-its-own-plane one is planted
+    # in the **declaration**, by moving the ground split north, which is the
+    # move check_isolation_gap()'s two cases make and for the same reason: the
+    # only way to change what that check measures on a routed board is to move
+    # a part and re-route, which is a different board rather than a fault.
+    def _return_stitching_stripped():
+        import constraints
+        import returns
+        import math
+        import re as _re
+        text = verify.PCB.read_text()
+        block = _re.compile(r"\t\(via\n(?:\t\t\([^\n]*\)\n)+\t\)\n")
+        audio = [(row["x"], row["y"])
+                 for row in constraints.return_loops(verify.PCB)["rows"]]
+        stripped, removed = [], 0
+        end = 0
+        for match in block.finditer(text):
+            stripped.append(text[end:match.start()])
+            end = match.end()
+            piece = match.group(0)
+            spot = _re.search(r"\(at ([-\d.]+) ([-\d.]+)\)", piece)
+            here = (float(spot.group(1)), float(spot.group(2)))
+            # **The return stitching identified by what it is for**, not by its
+            # net: gen_pcb.stitch_grounds() lays 151 ground vias too, and
+            # taking those out as well leaves a board with no ground vias at
+            # all -- a different fault, and one this check would report for a
+            # different reason. A ground via within TIGHT_MM of an audio via is
+            # returns.py's.
+            mine = (('(net "MAGND")' in piece or '(net "MDGND")' in piece)
+                    and any(math.dist(here, a) <= returns.TIGHT_MM
+                            for a in audio))
+            if mine:
+                removed += 1
+            else:
+                stripped.append(piece)
+        stripped.append(text[end:])
+        if not removed:
+            # **RuntimeError and not SystemExit, because the caller catches
+            # SystemExit and would report this as "caught".** A guard that
+            # announces a dead mutation through the same door the mutation's
+            # own success comes through is the dead mutation, one level up --
+            # which is dead_mutations()' whole subject.
+            raise RuntimeError(
+                "no ground via is within returns.TIGHT_MM of an audio via -- "
+                "the mutation plants nothing")
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write("".join(stripped))
+            planted = pathlib.Path(handle.name)
+        try:
+            constraints.check_return_loops(planted)
+        finally:
+            planted.unlink()
+
+    # **The finished-thickness field, planted in the declaration.** Same move
+    # as the two above and for the same reason -- the artefact is one token in
+    # a routed board and rewriting it in place would be a different board, not
+    # a fault. What has to be provable is that the check reads the board's
+    # field rather than assuming it.
+    def _thickness_is_kicads_default():
+        import rules as _rules
+        original = _rules.FAB_FINISHED_MM
+        _rules.FAB_FINISHED_MM = 1.6
+        try:
+            found = verify.check_stackup(verify.PCB)
+        finally:
+            _rules.FAB_FINISHED_MM = original
+        if not found:
+            raise RuntimeError(
+                "the board already states 1.6 mm -- the mutation plants "
+                "nothing, and rules.apply_thickness() has not been run")
+        raise AssertionError(found[0])
+
+    def _split_moves_north():
+        import constraints
+        import placement as _placement
+        original = _placement.SPLIT_Y
+        _placement.SPLIT_Y = original - 40.0
+        try:
+            constraints.check_audio_off_its_own_plane()
+        finally:
+            _placement.SPLIT_Y = original
+
     # **The order codes, and the three faults these plant all happened.** A
     # capacitance a decimal exponent out, and a case code against the wrong
     # land -- see design.Design.check_order_codes(), which also records the
@@ -1318,7 +1410,13 @@ def main():
              _module_from_the_mixer),
             ("contract: a pinned module lost its provenance marker",
              _pinned_marker_missing),
-            ("contract: the pinned hash is not a commit", _hash_is_not_a_commit)):
+            ("contract: the pinned hash is not a commit", _hash_is_not_a_commit),
+            ("the return stitching is stripped off the board",
+             _return_stitching_stripped),
+            ("audio copper falls south of the ground split",
+             _split_moves_north),
+            ("the board is built to KiCad's default thickness",
+             _thickness_is_kicads_default)):
         try:
             provoke()
             found = []

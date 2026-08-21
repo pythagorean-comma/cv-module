@@ -35,8 +35,10 @@ The rule that follows is the one to read before anything else here:
 **That rule read "the board is hand-laid and verified" for two passes, and by
 the end of them not one millimetre of this board had been laid by hand** —
 measured, not assumed: `out/cv-module.kicad_pcb` and the router's own candidate
-`out/cv-module-krt.kicad_pcb` carry the same 5121 segments and 995 vias,
-endpoint for endpoint, layer for layer, net for net. The
+`out/cv-module-krt.kicad_pcb` carried the same 5121 segments and 995 vias,
+endpoint for endpoint, layer for layer, net for net — the board has since
+gained `returns.py`'s stitching and one re-routed net, and stands at 5081 and
+1135. The
 half that was ever load-bearing is the second: `verify.py` asks DRC, the
 netlist against KiCad's own export, the ground split, the isolation region and
 both barriers *of the board*, by reading it back, and none of those questions
@@ -73,13 +75,13 @@ does not choose. See [`controller.md`](docs/controller.md).
 | ERC | ✅ **0 errors and 0 warnings** — `ERC_ALLOWED` is empty |
 | the envelope rectifier | ✅ derived, drawn and checked — τ from the transient, not from a target |
 | the fail-safe | ✅ drawn: de-energised **is** bypass, and the pump's own rise time is the power-up interlock |
-| section 5 constraints | ✅ checked mechanically, **94** planted faults caught — and the faults themselves are checked too. Five faults went dead when their targets left the board, and the guard named all five before a case ran |
+| section 5 constraints | ✅ checked mechanically, **104** planted faults caught — and the faults themselves are checked too. Five faults went dead when their targets left the board, and the guard named all five before a case ran. **The two ratchets in `constraints.py` are in the harness now**, and they had never been shown to fail: one planted in the artefact — a copy of the board with its return stitching stripped — and one in the declaration, by moving the ground split. The third new fault is the board built to KiCad's default thickness, which is what Board Setup would put back |
 | deltas against the mixer's own model | ✅ four disagreements, three of them with `00-current-state.md` |
 | floorplan, BOM, assumptions | ✅ |
-| board | ✅ **placed, poured and stitched by `gen_pcb.py`, and routed end to end by KiCadRoutingTools — 0 unconnected items, 0 DRC violations, and `check_board_is_the_design()` passes.** 290 footprints on 106.9 × 233.5 mm, 151 ground stitches, and **5121 segments and 995 vias**, of which 844 vias are the router's. Measured off the tracked board: **one track width (0.2 mm), one via size (0.7/0.3), 12998 mm of track, and no signal copper on either reference plane.** It is not an output the build reproduces — `gen_pcb.py` writes a board with no signal copper at all, and `gen_pcb_guard.refuse_to_discard_routing()` refuses whether the copper came from a router or from a person. **The previous row said 1652 track runs and 595 vias laid by `route.py` as a seed**, which was true of the board `route.py` left and not of the one on disk: the seed was replaced, and a row quoting the artefact it described stayed behind |
+| board | ✅ **placed, poured and stitched by `gen_pcb.py`, and routed end to end by KiCadRoutingTools — 0 unconnected items, 0 DRC violations, and `check_board_is_the_design()` passes.** 290 footprints on 106.9 × 233.5 mm, **290 ground stitches**, and **5081 segments and 1135 vias**, of which 845 are on signal nets. Measured off the tracked board: **one track width (0.2 mm), one via size (0.7/0.3), 13073 mm of track, and no signal copper on either reference plane.** It is not an output the build reproduces — `gen_pcb.py` writes a board with no signal copper at all, and `gen_pcb_guard.refuse_to_discard_routing()` refuses whether the copper came from a router or from a person. **The previous row said 1652 track runs and 595 vias laid by `route.py` as a seed**, which was true of the board `route.py` left and not of the one on disk: the seed was replaced, and a row quoting the artefact it described stayed behind |
 | the fan-out | ✅ **history, and it is `route.py`'s.** It closed the QFN board it was written for with four escapes at U17, and it laid two on the seed. Neither is on the board now — KiCadRoutingTools laid every millimetre of the current copper and has an escape model of its own. The arithmetic is kept at `rules.fan_out_class()` because it is what a *package* is chosen against, which is a question that outlives whichever router is drawing |
 | the second router | ✅ **adopted, and its defaults would have wrecked this board.** Pointed at it unconfigured, KiCadRoutingTools laid **4106 mm of signal track through both ground planes** with its own DRC, its own connectivity check and its own improvement gate all reporting success. `krt.py` generates the four things it has to be told — the poured layers, the fabrication floor, the primary's keep-out and the project rebuild afterwards — from the files that already own each number. `krt.check_planes_intact()` is the instrument, and it exists because until this tool nothing here could put copper on a plane. **And its four post-route checkers have now been run against the tracked board** — DRC, connectivity, orphan stubs and copper hygiene — with **0 dangling, unsupported or stacked vias and 0 orphan islands**; the one "dangling end" it reports is a T-junction mid-segment, which is a fact about its endpoint model rather than about the copper. [`routing-tool.md`](docs/routing-tool.md) |
-| the stackup | ✅ **chosen, and it never had been.** The board carried no `(stackup ...)` block at all, so KiCad's defaults set the dielectric height every coupling figure depends on. PCBWay's own 4-layer 1.61 mm construction now: 0.1855 mm of prepreg at Dk 4.74 between an outer layer and its plane, held by `verify.check_stackup()`. A value that exists only as somebody else's default cannot be wrong — `RAILS["V3V3"]` and zone P, a third time |
+| the stackup | ✅ **chosen, and it never had been — and the summary field is closed too.** The board carried no `(stackup ...)` block at all, so KiCad's defaults set the dielectric height every coupling figure depends on. PCBWay's own 4-layer 1.61 mm construction now: 0.1855 mm of prepreg at Dk 4.74 between an outer layer and its plane, and 1.03 mm of core between the two planes — which is the height `constraints.return_loops()` needed and nothing had asked for. `(general (thickness ...))` — the field that becomes the job file's `BoardThickness`, the one figure a CAM operator reads — sat at KiCad's own 1.6 behind the real layer table, and is 1.61 now. Both halves held by `verify.check_stackup()`. A value that exists only as somebody else's default cannot be wrong — `RAILS["V3V3"]` and zone P, a third time |
 | trace-to-trace coupling | ✅ **measured on the copper, and it never had been.** `constraint_5()` computes coupling between two wires in a *loom*; nothing computed it between two traces, and trace adjacency is a property of the board — so replacing the seed changed it and no instrument could say by how much. `constraints.parallel_runs()` reads the board back: the worst same-layer parallel run is IVOUT4/SIN5, 181.2 mm at 0.40 mm pitch, and at the chosen stackup that is **−114.4 dB against a −54 dB requirement, 60 dB inside it** |
 | DC bias | ⚠️ **modelled for the first time, and one capacitor is genuinely short.** TDK's own curves, read off their characterisation pages: `C840` gives **1.65 µF at 12 V against TI's "2.2 µF or higher"** — 25 %, four times its own tolerance, and it wants a higher-CV part in the same 1210 land. `C843` and `C814` are short of nominal and inside their parts' tolerance bands, declared in `CAP_BIAS_ALLOWED` with the figures. The six VCA input blocking caps sit at **zero bias** and do not derate at all. Three Murata lines have no curve here and are reported as unchecked |
 | the BOM | ✅ **re-sourced, and the exercise found three wrong part numbers and one that had been wrong for four passes.** Six obsolete Murata lines became TDK and Yageo parts; `Design.check_order_codes()` now decodes a ceramic's part number and compares its case, dielectric, voltage and capacitance against the value string and the land. It says plainly what it cannot do: whether a code names a *real* part is a question only a distributor answers |
@@ -90,8 +92,9 @@ does not choose. See [`controller.md`](docs/controller.md).
 | the supply | ✅ **chosen, drawn, placed, routed and checked** — Traco TMR 6-2422WI, isolated, ±12 V at 250 mA, **580 kHz PWM**, on this board. The isolation barrier is copper `verify.py` measures |
 | the +5 V rail | ✅ NCP1117 — and **the package is the answer**: 0.77 W against the SOT-223's own 160 °C/W is 124 degrees of rise, so it is a DPAK |
 | the shopping list | ⚠️ **three part numbers were obsolete or unstocked, and the spares were costing more than the board.** `GRM216R71H223KA01D` and `NCP1117DT50G` are obsolete at their manufacturers — now `CEU4J2X7R1H223K125AE` and `NCP1117DT50RKG`, both confirmed first-hand; `OPA1644AIDR` is ACTIVE but unstocked, so the tube suffix `OPA1644AID` is fitted instead. And `gen_bom.py` picked its spares with `"SO" in footprint`, which classified the **GBP 18.16 converter as a chip passive and ordered five**: spares were GBP 138–190 against a GBP 61–97 board, and nothing printed the figure. Decided by the land now, with `NO_SPARE` and a per-run alert — spares are **GBP 25–47** |
+| the return path | ✅ **stitched, and the figure was one nothing had ever measured.** `gen_pcb.stitch_grounds()` places a via beside every ground *pad*, so nothing had asked how far the nearest ground via was from a *signal* via — 22.76 mm at worst, 7.39 median, 6 of 217 within 2 mm. In1 and In2 carry the same nets in the same places, so every via changes reference plane and the return current has to transfer. `returns.py` laid **139 stitches**: worst **4.90 mm**, median 1.50, and the total plane-transfer loop area from **1990.6 mm² to 367.8**. It cost nothing but drill hits, because a ground via voids no plane copper where a signal via voids 0.55 mm of both. [`return-vias.md`](docs/return-vias.md) |
 | the footprint audit | ⚠️ **three part numbers named the wrong package — all three fixed, and the board needs one sync.** No instrument here opens a datasheet: the netlist comparison is pad number against pin number, and pad 1 on the wrong package is still pad 1. `G6S-2 DC5` was Omron's **through-hole** model on a surface-mount land and is now `G6S-2F DC5`; `1N4148WS-7-F` was **SOD-323** where the value string said `1N4148W` and is now `1N4148W-7-F`; the five `BAT54`s were **SOT-23 parts on a two-pad SOD-123 land** and are now on `SOT-23`, with a renumbered `cv:BAT54` symbol because the package numbers its anode 1 and its cathode 3. The one footprint this repo drew itself — the TMR 6WI — passes on every measurement. [`footprint-audit.md`](docs/footprint-audit.md) |
-| the fabrication package | ✅ **written, and it was a decision rather than a gate** — `fab/` holds nine gerbers, one combined drill file, the job file, the placement list and a generated `ORDER.md`. The layer set is *measured*: `package_layers()` exports the candidates and reads them back, so `B.Paste` and `B.SilkS` are absent because this board draws nothing on them rather than because a list says so. `check_holes()` counts the drill against the board — 995 vias + 34 plated + 4 unplated = **1033 hits**, both ways — and `--verify` says the tracked package is a package of the tracked board. **`ORDER.md` leaves finish, colours, test and panelisation open**, because nothing here derives them |
+| the fabrication package | ✅ **written, and it was a decision rather than a gate** — `fab/` holds nine gerbers, one combined drill file, the job file, the placement list and a generated `ORDER.md`. The layer set is *measured*: `package_layers()` exports the candidates and reads them back, so `B.Paste` and `B.SilkS` are absent because this board draws nothing on them rather than because a list says so. `check_holes()` counts the drill against the board — 1135 vias + 34 plated + 4 unplated = **1173 hits**, both ways — and `--verify` says the tracked package is a package of the tracked board. **`ORDER.md` leaves finish, colours, test and panelisation open**, because nothing here derives them |
 | documents to look at | ✅ the [schematic](docs/cv-module-schematic.pdf), the [layout](docs/cv-module-layout.pdf) one page per copper layer, and a [render](docs/cv-module-top.png) — **all three of the same design and the same board**, which they were not last pass. `gen_plots.py --verify` replots the tracked board into a temporary directory and compares bytes. The gerbers are no longer here: they are in [`fab/`](fab/ORDER.md), written by `gen_fab.py`, because what a fabricator is given and what a person reviews are two audiences |
 | the inlet choke | ✅ **fitted, and it is the second half of `barrier_return()`** — a WE-SL2 744222, 2 × 1 mH at 800 mA. The 580 kHz residual at the audio bond goes from 1.24 mV to **1.14 µV**: 42 dB *under* the mixer's own noise floor, where it was 18.7 dB over |
 | the envelope ADC | ✅ **chosen, drawn, placed, routed and checked** — MCP3564. The ADS131M08 lost on full scale: its reference input stops at 1.3 V, so 1.20 V of full scale against a 1.233 V signal |
@@ -256,8 +259,9 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | [`ssi2164-control-port.md`](docs/ssi2164-control-port.md) | the datasheet read first-hand. **Six spec corrections** |
 | [`fabrication-class.md`](docs/fabrication-class.md) | 0.20/0.20 on 1 oz against PCBWay — the decision, and the corridor that took it |
 | [`bench.md`](docs/bench.md) | what is left to measure, in order, and what each reading decides |
-| [`footprint-audit.md`](docs/footprint-audit.md) | a land pattern against the part's own drawing — **three parts fail and one cannot be fitted** |
+| [`footprint-audit.md`](docs/footprint-audit.md) | a land pattern against the part's own drawing — **three parts failed, all three fixed, and the board re-synced**. Then the pin maps and the vendor lands, nine symbols and 115 pins, all correct |
 | [`routing-tool.md`](docs/routing-tool.md) | KiCadRoutingTools measured against this board — and the four things it must be told before it lays copper |
+| [`return-vias.md`](docs/return-vias.md) | where a signal changes reference plane, what the loop is worth, and why the copper was cheaper than the derivation |
 | [`contract/socket.py`](contract/socket.py) | the only place upstream constants are adapted |
 | [`toolchain/`](toolchain/PROVENANCE.md) | KiCad plumbing, copied from the mixer. Ours to modify |
 | `design.py` | values, derivations, the netlist, and the borrowed-symbol patch |
@@ -271,6 +275,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | `gen_pcb.py` | the board, through the deprecated `pcbnew` bindings — **place and pour**, and `--seed-routing` for one pass of the router |
 | `route.py` | the maze router. **It runs once, as a seed, and no copper it laid is on the board any more** — `krt.py` re-routed every net. Kept because a board started from nothing still wants a legal route rather than a ratsnest |
 | `krt.py` | drives KiCadRoutingTools under this repo's own constraints — layers, fab floor, keep-outs and net scope all generated. Writes a candidate; `--commit` promotes it |
+| `returns.py` | the return-via stitching: a ground via where an audio signal changes reference plane. Adds copper and disturbs none, so it can be re-run after any re-route; `--commit` writes. [`return-vias.md`](docs/return-vias.md) |
 | `verify.py` / `test_verify.py` | the constraints against KiCad's own netlist, and proof the checks can fail |
 | [`FINDINGS.md`](docs/FINDINGS.md) | things wrong in the mixer repo — noted, never fixed |
 | [`ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) | everything guessed, with what it costs if wrong |
@@ -1365,7 +1370,7 @@ Three more things the pass turned up, each recorded where it happened:
 ## Open, in the order worth taking
 
 **Green end to end again, and one line of that is worth reading twice.**
-`verify.py` passes, `test_verify.py` catches all 95 planted faults, DRC is at
+`verify.py` passes, `test_verify.py` catches all 104 planted faults, DRC is at
 zero, the unrouted count is zero, `check_board_is_the_design()` now holds land
 patterns as well as references, and the fabrication package is written.
 
@@ -1392,27 +1397,38 @@ declared range, and one decided with a trigger attached.
    "put the designator on F.Fab" by **pad count**, which a SOT-23's unconnected
    middle pin breaks. It counts connected terminals now.
 
-2. **Review the copper — and it is a review now, not a routing job.** What
-   opens in KiCad is 290 footprints, the outline, two inner ground pours, 151
-   stitch vias and **every net closed**, at one track width and one via size,
-   with nothing on either reference plane. What is left is the judgement
-   neither router has: which nets are audio, where a return current wants to
-   go, and which of two equal paths runs beside the 1.1 MHz switcher.
-   `krt.py --nets "…"` re-lays a region inside the same constraints and leaves
-   every other net's copper alone, measured per-net; `verify.py` grades the
-   result — DRC, the netlist against KiCad's own export, the ground split, the
-   isolation region and both barriers — and `verify.UNROUTED_ITEMS` is the
-   ratchet: **down as copper is laid, up only with the nets named there.**
+2. **Review the copper — and three of the four things it was for are done.**
+   What opens in KiCad is 290 footprints, the outline, two inner ground pours,
+   **290 stitch vias** and every net closed, at one track width and one via
+   size, with nothing on either reference plane. `krt.py --nets "…"` re-lays a
+   region inside the same constraints and leaves every other net's copper
+   alone; `verify.py` grades the result — DRC, the netlist against KiCad's own
+   export, the ground split, the isolation region and both barriers — and
+   `verify.UNROUTED_ITEMS` is the ratchet: **down as copper is laid, up only
+   with the nets named there.**
 
-   **Two numbers now exist that would have decided this and did not before.**
+   **Which nets are audio has now been asked three times, and each time it was
+   a figure nothing had ever measured.**
    `constraints.parallel_runs()` says the worst channel-to-channel adjacency
    the router chose is **−114.4 dB against a −54 dB requirement**, so trace
-   adjacency is not a reason to move any of it. The via count is the other
-   half and it points the other way: **844 router vias against the seed's
-   595**, 33 % more perforations of both reference planes for 9.8 % less
-   track, which is the one trade [`routing-tool.md`](docs/routing-tool.md)
-   flags as not obviously good on this board. Neither is a check that can
-   fail; both are a person's call.
+   adjacency is not a reason to move any of it.
+   `constraints.audio_off_its_own_plane()` found eleven audio nets with copper
+   in the digital half and is at **118.1 mm** from 211.9 — two nets that had no
+   business there, and then `SIN2`'s 33.5 mm detour re-laid at 7.6.
+   `constraints.return_loops()` found the return path at every layer change and
+   is at **367.8 mm² from 1990.6**: 139 ground stitches, worst separation 22.76
+   mm down to 4.90. [`return-vias.md`](docs/return-vias.md) is the record, and
+   the part worth carrying is that **a ground stitch is not a perforation** —
+   measured, a signal via voids 0.55 mm of both planes and a ground via voids
+   nothing, so the via-count trade below is about signal vias only.
+
+   **What is left is one number and it is a person's call.** **844 router vias
+   against the seed's 595**, 33 % more perforations of both reference planes
+   for 9.8 % less track, which is the one trade
+   [`routing-tool.md`](docs/routing-tool.md) flags as not obviously good on
+   this board. It is not a check that can fail and no instrument here grades
+   it. The recommendation is unchanged and is about scope: **re-route a region,
+   not the board.**
 3. **`MEASURED["noise_floor"]`** — a meter on the mixer's mono output, and
    the only one of the three that can be taken before this board exists. It is
    still this module's most load-bearing unknown: across its declared range
@@ -1431,7 +1447,7 @@ declared range, and one decided with a trigger attached.
    gerbers, one combined drill file, the job file, the CPL and a generated
    `ORDER.md`; the layer set derived by exporting and reading back, every
    timestamp normalised so the package is a function of the board, and
-   `check_holes()` counting 1033 drill hits against the board's own 995 vias,
+   `check_holes()` counting 1173 drill hits against the board's own 1135 vias,
    34 plated and 4 unplated pads.
 
    **What is still open is the order, and `ORDER.md` says which parts:**
@@ -1439,14 +1455,24 @@ declared range, and one decided with a trigger attached.
    IPC class, quantity. Not one of them is derivable from anything in this
    repository, so not one of them is filled in.
 
-   **And it found a third board thickness.** The job file hands a fabricator
-   `BoardThickness: 1.6`, which is KiCad's own default — against
+   ~~**And it found a third board thickness.**~~ **Closed.** The job file
+   handed a fabricator `BoardThickness: 1.6` — KiCad's own default, against
    `rules.FAB_FINISHED_MM` = 1.61, what PCBWay publishes for this
    construction, and the 1.541 mm `rules.FAB_STACKUP` sums to without solder
    mask. The stackup pass made the layer table real and left the summary field
-   behind; nothing owned it until this file read it. `ORDER.md` names the
-   figure to order to. **Setting it is a one-field edit in KiCad's Board
-   Setup, and it is a person's edit because the board is nobody's to rewrite.**
+   behind, and nothing owned it until `gen_fab.py` read it. It is
+   **1.61** now: `rules.apply_thickness()` writes it and
+   `verify.check_stackup()` holds it.
+
+   **What changed is not the argument but who may edit the board.** The
+   previous note said this was "a person's edit because the board is nobody's
+   to rewrite" — which was true of a repository whose only board writer was
+   `gen_pcb.py`, and stopped being true the moment `returns.py` started adding
+   copper to it by text. **1.541 is deliberately not the answer**: that is the
+   declared layers without solder mask and this repository has no mask
+   thickness, so making the two agree would mean inventing one. The check
+   earns its place on the same point — Board Setup recomputes the field from
+   the stackup, so opening that dialogue would write 1.541 there.
 
 ### Closed this pass
 
