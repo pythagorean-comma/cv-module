@@ -253,14 +253,14 @@ third star in it.
 |---|---|---|
 | R_0805 | 130 | 3 |
 | C_0805 | 83 | 3 |
-| D_SOD-123 | 20 | 4 |
 | C_1210 | 15 | 10 |
+| D_SOD-123 | 15 | 4 |
 | SOIC-14 | 10 | 58 |
 | PinHeader_1x02 | 9 | 22 |
+| SOT-23 | 7 | 13 |
 | Relay_DPDT_Omron_G6S-2F | 3 | 164 |
 | PinHeader_1x03 | 3 | 21 |
 | SOIC-16 | 2 | 66 |
-| SOT-23 | 2 | 13 |
 | SOIC-8 | 1 | 40 |
 | SOIC-20W | 1 | 145 |
 | TestPoint | 1 | 6 |
@@ -274,9 +274,9 @@ third star in it.
 | SO-6L | 1 | 44 |
 | L_Bourns_SRN6045TA | 1 | 42 |
 
-Placed courtyard area **4151 mm²**. At a packing factor of 2.5 that is a minimum of **10378 mm²** — about 102 mm square — before any of the deferred blocks.
+Placed courtyard area **4196 mm²**. At a packing factor of 2.5 that is a minimum of **10490 mm²** — about 102 mm square — before any of the deferred blocks.
 
-**With the coarse pad still fitted this board would be 14292 mm².** It occupied 1566 mm² of placed courtyard — 1512 of relay envelope and 54 of resistors that are not coming back — which was **27%** of the board, the relays alone being 26%. `design.pad_benefit()` is why it went, and the argument there is noise rather than area; this is what the noise argument was worth in millimetres.
+**With the coarse pad still fitted this board would be 14405 mm².** It occupied 1566 mm² of placed courtyard — 1512 of relay envelope and 54 of resistors that are not coming back — which was **27%** of the board, the relays alone being 26%. `design.pad_benefit()` is why it went, and the argument there is noise rather than area; this is what the noise argument was worth in millimetres.
 
 ## Blocked
 **Blocked on nothing, and the arithmetic has moved three times now -- the last

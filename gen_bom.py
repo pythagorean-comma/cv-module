@@ -33,6 +33,7 @@ writes `out/cv-module-bom.csv` and `docs/SHOPPING.md`.
 
 import collections
 import csv
+import io
 import pathlib
 
 import design
@@ -216,8 +217,10 @@ PRICES = {
         "position."),
     design.ENV_DIODE: band(
         0.02, 0.08, "GBP", 100,
-        "1N4148WS-7-F or any 1N4148 in SOD-123. Inside an op-amp's feedback "
-        "loop, so the forward drop does not reach the answer."),
+        "1N4148W-7-F or any 1N4148 in SOD-123 -- the W and not the WS, which "
+        "is Diodes' SOD-323 part and is what this line asked for until the "
+        "footprint audit. Inside an op-amp's feedback loop, so the forward "
+        "drop does not reach the answer."),
 
     # -- passives ----------------------------------------------------------
     # Three classes, and the first is the one that costs something.
@@ -262,7 +265,9 @@ PRICES = {
     "1u/16V X7R": band(0.02, 0.08, "GBP", 100, "0805 X7R"),
     design.PUMP_DIODE: band(
         0.05, 0.15, "GBP", 100,
-        "BAT54-7-F, in SOD-123. Five of them do two jobs -- the two-diode "
+        "BAT54-7-F, in **SOT-23** -- three terminals, anode 1 and cathode 3, "
+        "and it sat on a two-pad SOD-123 land until the footprint audit. "
+        "Five of them do two jobs -- the two-diode "
         "pump and three coil flybacks -- and what the pump wants from it is "
         "*leakage*, 2 uA max at 25 V, because the same diode has to hold a "
         "1 uF node up between 10 kHz cycles. Its forward drop at the pump's "
@@ -282,7 +287,9 @@ PRICES = {
 
     design.BYPASS_RELAY: band(
         3.00, 5.50, "GBP", 10,
-        "Omron G6S-2 DC5, surface-mount G6S-2F body. Single-side stable, "
+        "Omron G6S-2F DC5 -- the F is load-bearing: the plain G6S-2 is the "
+        "through-hole model, eight 1 mm holes per relay, and this board fits "
+        "the surface-mount land. Single-side stable, "
         "which is Omron's name for non-latching and is the property the "
         "whole fail-safe turns on. The line worth reading twice is the "
         "contact material -- bifurcated crossbar, Ag(Au-Alloy) -- because a "
@@ -457,6 +464,65 @@ def lines():
     return sorted(out, key=lambda row: sort_key(row["refs"][0]))
 
 
+def order_list(rows):
+    """One line per **part number**, with the quantity to order against it.
+
+    Returns [(mpn, quantity)], sorted by part number, for the paste box every
+    distributor has. It is not the `order` column added up, and the difference
+    is not small.
+
+    **A row is a value on a footprint; an order line is a part number, and the
+    two do not correspond.** lines() groups by (value, footprint, mpn) because
+    that is what a BOM is, and nine of this board's rows carry the *same* pin
+    header -- CH1 through CH6, PWR, TAP and RESET each have their own value
+    string. Summing the `order` column over those rows buys 9 x (1 + 4) = 45
+    two-pin headers for a board that uses nine. Grouped here, and the spares
+    are added **once per part number** rather than once per row: 9 + 4 = 13.
+
+    The same arithmetic applies to the three-pin header on three rows. Nothing
+    else on this board repeats, checked rather than assumed -- 63 rows, 53 part
+    numbers.
+
+    **The quantity carries the mixer's spares rule and nothing else.** No
+    attrition allowance, no reel or MOQ rounding, no packaging minimum: those
+    are the distributor's arithmetic and they are done in its basket, where the
+    numbers are visible. What this list says is how many the board needs plus
+    what the rule allows for losing.
+    """
+    grouped = {}
+    for row in rows:
+        if not row["mpn"]:
+            continue
+        entry = grouped.setdefault(row["mpn"], {"fitted": 0, "active": False})
+        entry["fitted"] += row["fitted"]
+        # A part number is active if any row calls it active. lines() decides
+        # that from the footprint, so two rows on one MPN cannot disagree --
+        # but taking the stricter of the two is free and does not depend on
+        # that staying true.
+        entry["active"] |= row["footprint"] is None or "SO" in (row["footprint"] or "")
+    return sorted(
+        (mpn, entry["fitted"] + (SPARE_ACTIVE if entry["active"]
+                                 else SPARE_PASSIVE))
+        for mpn, entry in grouped.items())
+
+
+def _csv_lines(pairs):
+    """`mpn,quantity` per line, quoted where a part number needs it.
+
+    Written through csv.writer rather than an f-string because two of this
+    board's part numbers contain commas -- `PMEG2010AEH,115` is a packaging
+    suffix and `TLP2761(TP,E)` a taping code -- and an unquoted line for either
+    reads as three fields. The lineterminator is "\n" for the reason
+    write_csv() carries at length: this text is committed, and csv's default
+    CRLF against an LF blob makes a generated file dirty on every run.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    for mpn, quantity in pairs:
+        writer.writerow([mpn, quantity])
+    return buffer.getvalue().splitlines()
+
+
 def totals(rows):
     """Extended cost, per currency, as a range.
 
@@ -575,6 +641,57 @@ def write_shopping(rows):
             f"| {span} | {row['value'] or 'NOT CHOSEN'} | `{mpn}` | "
             f"{row['fitted']} | {row['order']} | {unit} | {price.basis} | "
             f"{link} |")
+
+    ordered = order_list(rows)
+    commas = [mpn for mpn, _ in ordered if "," in mpn]
+    lines_out += [
+        "",
+        "## The order list, one line per part number",
+        "",
+        "**Part number, quantity — one line each, for a distributor's paste "
+        "box.** Quantities include the spares rule above, added **once per "
+        "part number**.",
+        "",
+        "That last clause is the whole reason this is generated rather than "
+        "copied out of the table. A row above is a *value on a footprint* and "
+        "an order line is a *part number*, and the two do not correspond: nine "
+        "rows carry the same two-pin header, because `CH1` through `CH6`, "
+        "`PWR`, `TAP` and `RESET` each have their own value string. Adding the "
+        "`order` column down those rows buys "
+        f"9 x (1 + {SPARE_PASSIVE}) = {9 * (1 + SPARE_PASSIVE)} headers for a "
+        f"board that uses nine. The three-pin header repeats three times for "
+        "the same reason. Nothing else on this board does, counted rather than "
+        f"assumed: **{len(rows)} rows, {len(ordered)} part numbers.**",
+        "",
+        "```",
+        *_csv_lines(ordered),
+        "```",
+        "",
+        f"**{sum(quantity for _, quantity in ordered)} components across "
+        f"{len(ordered)} part numbers**, against "
+        f"{sum(row['fitted'] for row in rows)} placements on the board.",
+        "",
+        (f"**{len(commas)} of those part numbers contain a comma of their "
+         f"own** — {', '.join(f'`{mpn}`' for mpn in commas)} — so the lines "
+         f"are written by `csv.writer` and those two arrive quoted. A "
+         f"comma-separated list whose own fields carry commas is a format "
+         f"that works until the parts that break it, and here that is a "
+         f"packaging suffix and a taping code. If a paste box rejects the "
+         f"quotes, split those lines by hand: the quantity is the number "
+         f"after the **last** comma."
+         if commas else
+         "No part number on this board contains a comma, so every line "
+         "splits on its only one."),
+        "",
+        "Two things this list is not. It is **not rounded to anybody's reel, "
+        "MOQ or packaging multiple** — that arithmetic belongs in the basket "
+        "where its numbers are visible. And a part number here is a claim this "
+        "repository can only half check: `Design.check_order_codes()` decodes "
+        "a ceramic's case, dielectric, voltage and capacitance and compares "
+        "all four to the value string and the land, and it says plainly that "
+        "whether a code names a part that **exists** is a question only a "
+        "distributor answers.",
+    ]
 
     sums, unpriced = totals(rows)
     lines_out += ["", "## Totals, per currency, fitted quantities", ""]

@@ -661,17 +661,22 @@ def shared_block(sch, y):
     sch.label("FSAC", bx + 6.35, by)
 
     # D801 clamps FSAC's negative half to ground, D802 charges the hold cap on
-    # the positive one. Cathode is pin 1 on Device:D, so the two are drawn the
-    # same way round and differ only in which net each end carries -- which is
-    # the whole of a two-diode pump and the whole of what a transposition
-    # would destroy.
+    # the positive one. The two are drawn the same way round and differ only in
+    # which net each end carries -- which is the whole of a two-diode pump and
+    # the whole of what a transposition would destroy.
+    #
+    # **cv:BAT54 and not Device:D, which is the same drawing with the SOT-23's
+    # pin numbers on it.** The part is a three-terminal package and was fitted
+    # on a two-pad land for the life of the design; design.SOT23_DIODE_PINS is
+    # the map and patch_symbol() puts it on the symbol, so the numbers here are
+    # the package's -- 1 anode, 3 cathode -- rather than the generic symbol's.
     for ref, left, right, dy in (("D801", "FSAC", "MDGND", 10.16),
                                  ("D802", "FSG", "FSAC", -10.16)):
         part = circuit.PARTS[ref]
-        d = sch.place(ref, "Device:D", part.value, 700 * G, fy + dy,
+        d = sch.place(ref, "cv:BAT54", part.value, 700 * G, fy + dy,
                       footprint=part.footprint, angle=HORIZ)
-        for pin, net in ((str(circuit.DIODE_PINS["K"]), left),
-                         (str(circuit.DIODE_PINS["A"]), right)):
+        for pin, net in ((str(circuit.SOT23_DIODE_PINS["K"]), left),
+                         (str(circuit.SOT23_DIODE_PINS["A"]), right)):
             px, py = d.pin(pin)
             side = -5.08 if px < 700 * G else 5.08
             sch.wire((px, py), (px + side, py))
@@ -726,11 +731,11 @@ def shared_block(sch, y):
             sch.label(net, px, py + step)
         flyback = f"D{80 + index + 1}3"
         part = circuit.PARTS[flyback]
-        d = sch.place(flyback, "Device:D", part.value,
+        d = sch.place(flyback, "cv:BAT54", part.value,
                       (640 + 40 * index) * G, fy + 76.2,
                       footprint=part.footprint, angle=HORIZ)
-        for pin, net in ((str(circuit.DIODE_PINS["K"]), "VMOD"),
-                         (str(circuit.DIODE_PINS["A"]), "FSD")):
+        for pin, net in ((str(circuit.SOT23_DIODE_PINS["K"]), "VMOD"),
+                         (str(circuit.SOT23_DIODE_PINS["A"]), "FSD")):
             px, py = d.pin(pin)
             side = -5.08 if px < (640 + 40 * index) * G else 5.08
             sch.wire((px, py), (px + side, py))

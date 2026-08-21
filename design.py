@@ -1675,6 +1675,43 @@ ENV_DIODE = "1N4148W"
 # triangle points left and current runs right to left.
 DIODE_PINS = {"K": 1, "A": 2}
 
+# **And the same map for a diode in a three-terminal package, which is not the
+# same map.** The BAT54 is SOT-23 -- Diodes Incorporated DS11005, "Case:
+# SOT-23", and its own Ordering Information column says SOT-23 for every
+# member of the family -- and this repository fitted it on SOD-123, a two-pad
+# land, for the life of the design. Five parts, and a three-lead package does
+# not go on two pads at 2.6 mm in any orientation. docs/footprint-audit.md.
+#
+# The numbering is the package's rather than the symbol's: **pin 1 anode, pin
+# 2 not connected, pin 3 cathode**, which is Table 2 of Nexperia's BAT54 data
+# sheet of 1 July 2022. Diodes' own document draws the internal connection and
+# does not number it in words, so the numbering is quoted from the vendor who
+# states it, for a type number both of them make to the same convention.
+#
+# **The symbol is renumbered onto this and the footprint is KiCad's own**, per
+# the rule LIBS already runs on: a symbol carries a pin map and a footprint
+# carries a body. Pin 2 gets no net, because the package has nothing on it.
+SOT23_DIODE_PINS = {"A": 1, "K": 3}
+
+
+def diode_pins(ref):
+    """Which of the two maps a given diode uses, decided by its package.
+
+    **A consumer that names one map is a consumer that goes wrong the day a
+    part changes package**, and that is not hypothetical: moving five BAT54s
+    off SOD-123 broke ten assertions in verify.check_fail_safe(), which was
+    reading DIODE_PINS for every diode on the board because every diode on the
+    board had two pads. The check was right to fail and wrong about why -- the
+    netlist was correct and the check's own idea of the pin map was stale.
+
+    So the map is asked of the part rather than of the reader. Substring rather
+    than equality because a footprint name carries a library nickname, and it
+    is safe here for a reason worth stating: the SOT-23-N families are all
+    multi-pin actives, and nothing in PARTS puts a diode in one.
+    """
+    return (SOT23_DIODE_PINS if "SOT-23" in (PARTS[ref].footprint or "")
+            else DIODE_PINS)
+
 # Fretted, so the highest fundamental is not an open string. The fret count of
 # the instrument is written down nowhere in this project and is not invented
 # here -- envelope_sample_rate() shows the answer is flat above the eighth fret
@@ -5000,10 +5037,23 @@ def fail_states():
 # coil is 25-40 mA; three of them is 75-120 mA held for as long as the module is
 # working, against about 55 mA for every amplifier and VCA on the board. See
 # coil_budget() -- it is a requirement on the deferred supply, not a detail.
-# **Chosen, and the choice is a reading rather than a preference.** Omron G6S-2
-# DC5: DPDT, single-side stable -- which is Omron's name for non-latching, and
-# the property the whole block turns on -- fully sealed, in the surface-mount
-# G6S-2F body. From the ratings table on page 2 of its data sheet, at 5 VDC:
+# **Chosen, and the choice is a reading rather than a preference.** Omron
+# G6S-2F DC5: DPDT, single-side stable -- which is Omron's name for
+# non-latching, and the property the whole block turns on -- fully sealed,
+# surface-mount. From the ratings table on page 2 of its data sheet, at 5 VDC:
+#
+# **It said G6S-2 for four passes and that is the through-hole model.** Page 5
+# of the same datasheet lists G6S-2F and G6S-2G under "Mounting Dimensions"
+# and G6S-2 under "PCB Mounting Holes -- Eight, 1-dia. holes", so the part
+# number named the drilled variant while RELAY_FP fitted the surface-mount
+# one's land: three relays, 24 terminals, and no holes for any of them. The
+# sentence that hid it was this comment's own -- "fully sealed, in the
+# surface-mount G6S-2F body" -- which treats -2F as a body style the -2
+# shares, where the datasheet treats them as different models.
+#
+# **Nothing else moved.** The ratings below, the contact material and
+# RELAY_PINS are the family's and were read off the -2F's own top-view
+# diagram, so the fix is the two characters. See docs/footprint-audit.md.
 # 28.1 mA of coil, 178 ohm, must-operate 75 % max of rated and must-release
 # 10 % min, which is 3.75 V and 0.5 V.
 #
@@ -5014,7 +5064,7 @@ def fail_states():
 # produces -- a plain silver contact needs a wetting current this signal path
 # will never provide, and its failure mode is intermittent and looks like a bad
 # solder joint.
-BYPASS_RELAY = "G6S-2 DC5"
+BYPASS_RELAY = "G6S-2F DC5"
 # **SOT-523 and the spec said SOT-23**, which is worth being explicit about
 # because the package was the one part of that requirement nobody had derived.
 # UNSPECIFIED filtered on Vgs(th) <= 1.0 V and Id >= 200 mA, both computed, and
@@ -6700,6 +6750,18 @@ LIBS = {
     # carries both.
     "cv:TL074": ("cv", "Amplifier_Operational", "TL074", None),
     "Device:D": ("Device", "Device", "D", None),
+    # **The same symbol again, renumbered onto a three-terminal package.**
+    # KiCad ships BAT54A/C/S/W/J and no plain BAT54, because the single one is
+    # an ordinary diode -- so this borrows Device:D and moves its two pins onto
+    # the SOT-23 numbering the package has, 1 anode and 3 cathode. patch_symbol
+    # does the renumbering; SOT23_DIODE_PINS is the single copy of the map and
+    # this is the other end of it.
+    #
+    # Renumbering the symbol rather than drawing a footprint whose pads are
+    # numbered to suit the symbol, which is the tempting shortcut and is the
+    # wrong way round: a footprint would then carry a pin map, and the one
+    # place a pin map may live is a symbol.
+    "cv:BAT54": ("cv", "Device", "D", "BAT54"),
     # Under the "cv" nickname, not "Device": the symbol lives in KiCad's
     # Transistor_FET library, and a lib_id of Device:Q_NMOS_GSD asks the
     # Device library for it. ERC said so in one line -- "Symbol
@@ -6996,6 +7058,17 @@ def patch_symbol(lib_id, definition):
             for role, iec in (("COIL+", "A1"), ("COIL-", "A2"),
                               ("COM_A", "11"), ("NC_A", "12"), ("NO_A", "14"),
                               ("COM_B", "21"), ("NC_B", "22"), ("NO_B", "24"))})
+    elif lib_id.endswith(":BAT54"):
+        # Device:D numbers its cathode 1 and its anode 2; a SOT-23 numbers its
+        # anode 1 and its cathode 3, with 2 not connected. Both maps are read
+        # off documents rather than guessed -- KiCad's own symbol for the
+        # first, Nexperia's Table 2 for the second -- and this is where they
+        # meet. Written as a permutation through _renumber() for the reason
+        # that function exists: 1 appears on both sides.
+        _set_property(definition, "Description",
+                      "Schottky barrier diode, SOT-23, anode 1 cathode 3")
+        _renumber(definition, {str(DIODE_PINS["A"]): SOT23_DIODE_PINS["A"],
+                               str(DIODE_PINS["K"]): SOT23_DIODE_PINS["K"]})
     return definition
 
 R_FP = "Resistor_SMD:R_0805_2012Metric"
@@ -7175,10 +7248,15 @@ ORDER_CODES = {
     PUMP_HOLD_C:      "GRM21BR71C105KA01L",
     PUMP_DIODE:       "BAT54-7-F",
     CLAMP_DIODE:      "PMEG2010AEH,115",
-    BYPASS_RELAY:     "G6S-2 DC5",
+    BYPASS_RELAY:     "G6S-2F DC5",
     BYPASS_FET:       "DMG1012T-7",
     ENV_OPAMP:        "TL074CDR",
-    ENV_DIODE:        "1N4148WS-7-F",
+    # **1N4148W and not 1N4148WS.** Diodes Incorporated puts the WS in
+    # SOD-323 (DS30097) and the W in SOD-123 (DS30086), and this line carried
+    # the WS against ENV_DIODE's own value string and a SOD-123 land -- so the
+    # part number disagreed with the two things beside it and only it was
+    # wrong. Thirteen parts. See docs/footprint-audit.md.
+    ENV_DIODE:        "1N4148W-7-F",
     "10k 1%":         "RC0805FR-0710KL",
     "4k99 1%":        "RC0805FR-074K99L",
     # The controller block. The module, the opto, the switcher and the
@@ -8554,16 +8632,16 @@ def fail_safe(design):
                description="Fail-safe pump: the AC coupling that makes a "
                            "stuck level -- high, low or hi-Z -- indistinguish"
                            "able from a dead MCU")
-    design.add(Part("D801", PUMP_DIODE, SOD123_FP,
+    design.add(Part("D801", PUMP_DIODE, SOT23_FP,
                     description="Fail-safe pump clamp: anode MDGND, cathode "
                                 "FSAC"))
-    design.connect("MDGND", ("D801", DIODE_PINS["A"]))
-    design.connect("FSAC", ("D801", DIODE_PINS["K"]))
-    design.add(Part("D802", PUMP_DIODE, SOD123_FP,
+    design.connect("MDGND", ("D801", SOT23_DIODE_PINS["A"]))
+    design.connect("FSAC", ("D801", SOT23_DIODE_PINS["K"]))
+    design.add(Part("D802", PUMP_DIODE, SOT23_FP,
                     description="Fail-safe pump rectifier: anode FSAC, cathode "
                                 "FSG"))
-    design.connect("FSAC", ("D802", DIODE_PINS["A"]))
-    design.connect("FSG", ("D802", DIODE_PINS["K"]))
+    design.connect("FSAC", ("D802", SOT23_DIODE_PINS["A"]))
+    design.connect("FSG", ("D802", SOT23_DIODE_PINS["K"]))
     _capacitor(design, "C806", PUMP_HOLD_C, "FSG", "MDGND",
                description="Fail-safe hold: starts at zero volts, which is "
                            "what makes the power-up interlock a property of "
@@ -8595,11 +8673,11 @@ def fail_safe(design):
         design.connect("VMOD", (ref, RELAY_PINS["COIL+"]))
         design.connect("FSD", (ref, RELAY_PINS["COIL-"]))
         diode = f"D{80 + index}3"
-        design.add(Part(diode, FLYBACK_DIODE, SOD123_FP,
+        design.add(Part(diode, FLYBACK_DIODE, SOT23_FP,
                         description=f"{ref} coil flyback: anode FSD, cathode "
                                     f"VMOD"))
-        design.connect("FSD", (diode, DIODE_PINS["A"]))
-        design.connect("VMOD", (diode, DIODE_PINS["K"]))
+        design.connect("FSD", (diode, SOT23_DIODE_PINS["A"]))
+        design.connect("VMOD", (diode, SOT23_DIODE_PINS["K"]))
 
     # The clamp on the inverted reference, which is the fail-loud path the pump
     # cannot see. Reverse-biased at -2.5 V in normal operation and doing

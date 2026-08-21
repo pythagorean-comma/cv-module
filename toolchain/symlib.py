@@ -7,6 +7,8 @@ CD4066BE). Second, report where each pin's connection point sits, so wires can
 be drawn to real coordinates instead of guessed ones.
 """
 
+import copy
+
 from . import kicad
 from .sexp import Sym, find, find_all, parse
 
@@ -41,15 +43,33 @@ def flatten(libname, symname, rename=None):
     `rename` gives the flattened symbol a new name; its unit sub-symbols are
     renamed to match, which KiCad requires (unit bodies must be called
     <symbol>_<unit>_<style>).
+
+    **"Copy" was a claim this function did not honour, and it took two lib_ids
+    borrowing one symbol to find out.** Every list built below is shallow --
+    `[x for x in symbol[2:]]` copies the outer list and shares every unit body,
+    and a unit body is where the pins are. So a caller that renumbers a pin on
+    a flattened symbol renumbers it inside `_library_cache`, and the *next*
+    flatten of the same source returns the mutated one.
+
+    Nothing showed for as long as each borrowed symbol had one borrower. The
+    day cv-module borrowed Device:D twice -- once as itself and once as a
+    SOT-23 BAT54 with its pins renumbered onto the package -- the generic diode
+    lost pin 2, and six envelope rectifier diodes drawn with it failed with a
+    KeyError. That is the good version of this failure: it stopped the build.
+    The bad version is a repin or a property edit, which mutates the cache just
+    as silently and changes a symbol somebody else is using.
+
+    A deep copy, taken before anything is merged, so the cache is read-only to
+    every caller by construction rather than by everybody remembering.
     """
-    symbol = _raw_symbol(libname, symname)
+    symbol = copy.deepcopy(_raw_symbol(libname, symname))
     parent_ref = find(symbol, "extends")
 
     if parent_ref is None:
         merged = [x for x in symbol[2:]]
         own_properties = {}
     else:
-        parent = _raw_symbol(libname, parent_ref[1])
+        parent = copy.deepcopy(_raw_symbol(libname, parent_ref[1]))
         # Take the parent's body (units, pin_names, flags) but let the child's
         # properties win -- that is exactly what `extends` means.
         merged = [x for x in parent[2:] if not (isinstance(x, list) and str(x[0]) == "property")]

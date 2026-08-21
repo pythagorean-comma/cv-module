@@ -307,20 +307,32 @@ def _(nets, values, open_pins, violations, drc, board):
     nets["MDGND"].add(("K802", design.RELAY_PINS["COIL-"]))
 
 
+# **These two carried "1" and "2" as literals and went dead the day the part
+# changed package**, which is the third time this file has recorded that shape
+# -- after the relay's IEC contact numbers and the two class-value mutations
+# that stopped matching. A BAT54 is SOT-23 and its pins are 1 and 3, so
+# discarding pin 2 removed nothing and both cases went on reporting "caught".
+# dead_mutations() named them before a case ran, which is what it is for.
+#
+# They ask design.diode_pins() now -- the same function verify.check_fail_safe()
+# asks -- so the mutation is a transposition of whatever the package's two pins
+# are, and a package change moves both ends of the test together.
 @case("a flyback diode is fitted backwards", verify.check_fail_safe)
 def _(nets, values, open_pins, violations, drc, board):
-    nets["FSD"].discard(("D823", "2"))
-    nets["VMOD"].discard(("D823", "1"))
-    nets["FSD"].add(("D823", "1"))
-    nets["VMOD"].add(("D823", "2"))
+    pins = design.diode_pins("D823")
+    nets["FSD"].discard(("D823", str(pins["A"])))
+    nets["VMOD"].discard(("D823", str(pins["K"])))
+    nets["FSD"].add(("D823", str(pins["K"])))
+    nets["VMOD"].add(("D823", str(pins["A"])))
 
 
 @case("the pump's two diodes are swapped", verify.check_fail_safe)
 def _(nets, values, open_pins, violations, drc, board):
-    nets["FSAC"].discard(("D802", "2"))
-    nets["FSG"].discard(("D802", "1"))
-    nets["FSAC"].add(("D802", "1"))
-    nets["FSG"].add(("D802", "2"))
+    pins = design.diode_pins("D802")
+    nets["FSAC"].discard(("D802", str(pins["A"])))
+    nets["FSG"].discard(("D802", str(pins["K"])))
+    nets["FSAC"].add(("D802", str(pins["K"])))
+    nets["FSG"].add(("D802", str(pins["A"])))
 
 
 @case("the VREFN clamp is reversed, shorting the inverted reference",
@@ -903,7 +915,13 @@ def main():
     import gen_fab
     drill = gen_fab.FAB / f"{gen_fab.PROJECT}.drl"
     if not drill.exists():
-        report("gen_fab: the package exists to be checked", False)
+        # **Skipped rather than missed, and the distinction is real here.** The
+        # package is a gated artefact: gen_fab.py deletes it when the board is
+        # not the design's board, so its absence is a state this repository
+        # deliberately produces rather than a check that failed to fire. Printed
+        # loudly, because a silent skip is how a case stops meaning anything.
+        print(f"  {'gen_fab: skipped -- no package on disk':<52} "
+              f"(run gen_fab.py)")
     else:
         with tempfile.TemporaryDirectory() as scratch:
             scratch = pathlib.Path(scratch)
@@ -988,6 +1006,30 @@ def main():
             handle.write(stale)
             planted = pathlib.Path(handle.name)
         report("the board carries a part design.py does not have",
+               verify.check_board_is_the_design(planted))
+        planted.unlink()
+
+    # **And the same board carrying the right parts on the wrong lands**,
+    # which is the half of that check that did not exist for a pass and is the
+    # one this project walked into: five diodes moved from a two-pad land to a
+    # three-pad one in design.py, and every check here stayed green because the
+    # refs had not changed. A ref is not a part.
+    #
+    # The mutation renames the *land* on one footprint rather than the part on
+    # it, so the ref set is untouched and only the new half can catch it --
+    # which is what makes this a case rather than a second copy of the one
+    # above. It is guarded the same way, because a replace that matches nothing
+    # plants nothing.
+    relanded = original.replace('(footprint "Diode_SMD:D_SOD-123F"',
+                                '(footprint "Diode_SMD:D_SOD-123"', 1)
+    if relanded == original:
+        report("the board carries a part on the wrong land pattern", [])
+    else:
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(relanded)
+            planted = pathlib.Path(handle.name)
+        report("the board carries a part on the wrong land pattern",
                verify.check_board_is_the_design(planted))
         planted.unlink()
 

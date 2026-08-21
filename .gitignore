@@ -202,3 +202,13 @@ out/cv-module-krt.kicad_prl
 # additionally depend on the zlib that built it, so tracking it would put a
 # machine into the history of a board. Rebuild it with `python3 gen_fab.py`.
 fab/*.zip
+
+# KiCad 10's Local History: a git repository KiCad creates and commits into on
+# every save, holding whole-file snapshots of the board and the sheet -- 6.6 MB
+# after one save here, and it grows with each one. It is a recovery store on
+# this machine, like the .kicad_prl beside it, and staging it makes it a
+# gitlink: a clone would carry a hash pointing at a repository that exists
+# nowhere. Ignored rather than deleted, because it is exactly what you want the
+# hour after an Update PCB from Schematic goes wrong. KiCad's own switch is
+# Preferences > Common > Project Backup.
+out/.history/

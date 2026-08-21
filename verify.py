@@ -789,7 +789,10 @@ def check_fail_safe(nets, values):
     coils are the only inductance on this board and the FET is the only thing
     that switches them off; a diode reversed here is a short across V5 through
     the drain, which is a part destroyed rather than a fault heard. Asserted by
-    role, per design.DIODE_PINS.
+    role, per design.diode_pins() -- which asks the part's own footprint which
+    of the two pin maps it is on, because three of the diodes here are SOT-23
+    and one is SOD-123F, and a check that names one map is a check that goes
+    stale the day a package moves.
 
     **The pump's two diodes are the pump.** D801 clamps FSAC to MDGND and D802
     passes the positive half to the hold node, and swapping them gives a
@@ -824,7 +827,7 @@ def check_fail_safe(nets, values):
             if (ref, str(pin)) not in nets.get(net, ()):
                 problems.append(f"{ref}.{pin} is not on {net}")
         for role, net in (("A", "FSD"), ("K", "VMOD")):
-            if (diode, str(design.DIODE_PINS[role])) not in nets.get(net, ()):
+            if (diode, str(design.diode_pins(diode)[role])) not in nets.get(net, ()):
                 problems.append(
                     f"{diode}'s {'anode' if role == 'A' else 'cathode'} is not "
                     f"on {net} -- a flyback the wrong way round is a short "
@@ -834,7 +837,7 @@ def check_fail_safe(nets, values):
                                   ("D802", "FSAC", "FSG"),
                                   ("D803", "VREFN", "MAGND")):
         for role, net in (("A", anode), ("K", cathode)):
-            if (diode, str(design.DIODE_PINS[role])) not in nets.get(net, ()):
+            if (diode, str(design.diode_pins(diode)[role])) not in nets.get(net, ()):
                 problems.append(
                     f"{diode}'s {'anode' if role == 'A' else 'cathode'} is not "
                     f"on {net} -- see design.fail_safe()")
@@ -1793,17 +1796,34 @@ def check_board_is_the_design(board):
     check_ground_split_on_the_board() -- are now the only things standing
     between a stale board and a fabrication package.
 
-    Refs only. Positions are deliberately not compared: placement.py is
-    advisory once a person is laying the board out, and a check that fires
-    every time somebody nudges a part is a check that gets switched off.
+    Refs **and land patterns**. Positions are deliberately not compared:
+    placement.py is advisory once a person is laying the board out, and a check
+    that fires every time somebody nudges a part is a check that gets switched
+    off.
+
+    **The footprint half is new and it was refs-only for a pass, which is a
+    gap this repository walked straight into.** Five BAT54s moved from SOD-123
+    to SOT-23 in design.py -- a two-pad land to a three-pad one, because the
+    part had never been in SOD-123 -- and every check in this file stayed
+    green: the refs had not changed, the netlist comes from the generated
+    sheet, and DRC agrees with the board's own stale embedded netlist. The
+    board would have gone to a fabricator with two-pad lands for three-lead
+    parts, which is the fault the change was made to fix, now invisible.
+
+    A ref is not a part. A part is a ref, a value and a land, and the land is
+    the half that decides whether the thing in the bag can be soldered to the
+    thing on the board.
     """
     problems = []
     tree = sexp.parse(board.read_text())
     on_board = set()
+    lands = {}
     for footprint in sexp.find_all(tree, "footprint"):
+        library = str(footprint[1])
         for prop in sexp.find_all(footprint, "property"):
             if prop[1] == "Reference":
                 on_board.add(str(prop[2]))
+                lands[str(prop[2])] = library
     declared = set(design.PARTS)
     missing = sorted(declared - on_board)
     extra = sorted(on_board - declared)
@@ -1820,6 +1840,26 @@ def check_board_is_the_design(board):
             f"-- the same sync, and note it will leave their copper behind: "
             f"a track whose part has gone keeps its net and stops being "
             f"anybody's subject")
+
+    # **The board writes a lib_id and design.py writes a library path.** KiCad
+    # puts `cv:TRACO_...` or `Diode_SMD:D_SOD-123` on a footprint, and
+    # design.py names the same thing the same way, so these compare directly --
+    # except for the project's own library, whose nickname is the one thing the
+    # two spell differently. Compared on the part after the colon for that
+    # reason, which is exact here because no two land patterns in this design
+    # share a name across libraries.
+    wrong = []
+    for ref in sorted(declared & on_board):
+        want = (design.PARTS[ref].footprint or "").split(":")[-1]
+        got = lands[ref].split(":")[-1]
+        if want and want != got:
+            wrong.append(f"{ref} is on {got} and design.py says {want}")
+    if wrong:
+        problems.append(
+            f"{len(wrong)} parts are on the wrong land pattern "
+            f"({'; '.join(wrong[:6])}{', ...' if len(wrong) > 6 else ''}) -- "
+            f"the same sync, KiCad's Update PCB from Schematic, and the copper "
+            f"at those pads has to be re-laid because the pads have moved")
     return problems
 
 

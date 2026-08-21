@@ -12,8 +12,8 @@ C805,2n2/50V C0G,Capacitor_SMD:C_0805_2012Metric,GRM2165C1H222JA01D,1,5,0.02,0.0
 "C807,C808,C811,C812,C813",10u/50V X7R,Capacitor_SMD:C_1210_3225Metric,CNA6P1X7R1H106K250AE,5,9,0.30,0.80,GBP,25,band,"typical distributor band, not read this session"
 C840,4u7/50V X7R,Capacitor_SMD:C_1210_3225Metric,CGA6P3X7R1H475K250AB,1,5,0.08,0.30,GBP,25,band,"typical distributor band, not read this session"
 C843,22u/16V X5R,Capacitor_SMD:C_1210_3225Metric,C3225X5R1C226M250AA,1,5,0.08,0.30,GBP,25,band,"typical distributor band, not read this session"
-"D151,D152,D251,D252,D351,D352,D451,D452,D551,D552,D651,D652,D805",1N4148W,Diode_SMD:D_SOD-123,1N4148WS-7-F,13,14,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
-"D801,D802,D813,D823,D833",BAT54,Diode_SMD:D_SOD-123,BAT54-7-F,5,6,0.05,0.15,GBP,100,band,"typical distributor band, not read this session"
+"D151,D152,D251,D252,D351,D352,D451,D452,D551,D552,D651,D652,D805",1N4148W,Diode_SMD:D_SOD-123,1N4148W-7-F,13,14,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
+"D801,D802,D813,D823,D833",BAT54,Package_TO_SOT_SMD:SOT-23,BAT54-7-F,5,6,0.05,0.15,GBP,100,band,"typical distributor band, not read this session"
 "D803,D806",PMEG2010AEH,Diode_SMD:D_SOD-123F,"PMEG2010AEH,115",2,3,0.10,0.30,GBP,100,band,"typical distributor band, not read this session"
 D804,B340A,Diode_SMD:D_SMA,B340A-13-F,1,5,0.20,0.60,GBP,10,band,"typical distributor band, not read this session"
 F801,1.6A T 250V,Fuse:Fuse_Schurter_UMT250,3403.0168.11,1,5,1.80,1.80,USD,1,read,https://www.digikey.com/en/products/detail/schurter-inc/3403-0168-11/957690
@@ -29,7 +29,7 @@ J16,MIDIOUT,Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical,613003111
 J17,TAP,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
 J18,EXPR,Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical,61300311121,1,5,0.30,0.75,GBP,10,band,"typical distributor band, not read this session"
 J19,RESET,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-"K801,K802,K803",G6S-2 DC5,Relay_SMD:Relay_DPDT_Omron_G6S-2F,G6S-2 DC5,3,7,3.00,5.50,GBP,10,band,"typical distributor band, not read this session"
+"K801,K802,K803",G6S-2F DC5,Relay_SMD:Relay_DPDT_Omron_G6S-2F,G6S-2F DC5,3,7,3.00,5.50,GBP,10,band,"typical distributor band, not read this session"
 L801,744222,Inductor_SMD:L_CommonMode_Wuerth_WE-SL2,744222,1,5,1.97,1.97,GBP,1,read,https://www.digikey.co.uk/en/products/detail/w%C3%BCrth-elektronik/744222/1638889
 L802,15u 20%,Inductor_SMD:L_Bourns_SRN6045TA,SRN6045TA-150M,1,5,0.30,0.90,GBP,25,band,"typical distributor band, not read this session"
 Q801,DMG1012T,Package_TO_SOT_SMD:SOT-523,DMG1012T-7,1,2,0.06,0.20,GBP,100,band,"typical distributor band, not read this session"

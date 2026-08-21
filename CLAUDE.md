@@ -1055,6 +1055,48 @@ which cannot be C0G. `C_FILM_FP` is the same shape and is still bare. This
 repo has instruments for a value nothing uses and none for a value used
 everywhere with no reason beside it.
 
+## No instrument here opens a datasheet, and three parts were wrong
+
+**`docs/footprint-audit.md` is the record and it must be read before anything
+is ordered.** Checked against the manufacturers' own documents, before a first
+order:
+
+* **`BAT54-7-F` is SOT-23** (Diodes DS11005, *"Case: SOT-23"*) and sits on
+  `Diode_SMD:D_SOD-123`, a two-pad land. Five parts, and no orientation fits a
+  three-lead package on two pads at 2.6 mm. **This one cannot be assembled.**
+* **`G6S-2 DC5` is Omron's through-hole model.** Its datasheet page 5 lists
+  `G6S-2F` and `G6S-2G` with *"Mounting Dimensions"* and `G6S-2` with *"PCB
+  Mounting Holes -- Eight, 1-dia. holes"*. The board fits the **-2F** land, so
+  three relays want 24 drilled holes the fabrication package does not have.
+  The design's own comment -- *"fully sealed, in the surface-mount G6S-2F
+  body"* -- is where the two models became one. **Every other reading is
+  right, including the pin map**, which was taken from the top-view diagram
+  and top view *is* the -2F row. `G6S-2F DC5` is the whole fix.
+* **`1N4148WS-7-F` is SOD-323**; the SOD-123 part is `1N4148W-7-F`, which is
+  what the value string beside it has said all along.
+
+**The general form, and it is why no green light was wrong.** `verify.py`
+compares KiCad's netlist to `design.py` by name *and pin* -- and a pad
+numbered 1 on the wrong package is still pad 1. `check_order_codes()` decodes
+a ceramic's part number against its land and stops at ceramics.
+`check_courtyards()` holds `placement.SIZE` to KiCad's courtyard, which is
+KiCad's opinion of a part this project never checked. **Every instrument here
+reads an artefact this project wrote**, and a footprint is a claim about
+something that arrives in a bag.
+
+**The one footprint this repo drew itself passes on every measurement** --
+`gen_project.TMR6WI` against page 4 of the TMR 6WI datasheet: 21.8 x 9.1 body,
+the 2.0 / 2 x 2.54 / 5.08 / 3 x 2.54 pin string, pin 4 absent, the row 3.5 mm
+from the near long edge and 5.6 from the far one, and the **dual-output**
+pinout column rather than the single-output one they differ from at pins 7 and
+8. Which is the joke of the pass: the hand-drawn one is right and three
+library choices are not.
+
+**What would mechanise it** is `check_order_codes()` one class out -- a
+package suffix table per vendor, reported when unparsed, never passed. It
+would have caught all three. What it still cannot do is say whether a part
+exists.
+
 ## Toolchain
 
 **Follow `../summing-mixer`. Do not use SKiDL.**

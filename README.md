@@ -89,6 +89,7 @@ does not choose. See [`controller.md`](docs/controller.md).
 | the Schottky clamp | ✅ **read, and it had failed** — the BAT54 missed by 5.5 dB. PMEG2010AEH fits with 1.5 dB |
 | the supply | ✅ **chosen, drawn, placed, routed and checked** — Traco TMR 6-2422WI, isolated, ±12 V at 250 mA, **580 kHz PWM**, on this board. The isolation barrier is copper `verify.py` measures |
 | the +5 V rail | ✅ NCP1117 — and **the package is the answer**: 0.77 W against the SOT-223's own 160 °C/W is 124 degrees of rise, so it is a DPAK |
+| the footprint audit | ⚠️ **three part numbers named the wrong package — all three fixed, and the board needs one sync.** No instrument here opens a datasheet: the netlist comparison is pad number against pin number, and pad 1 on the wrong package is still pad 1. `G6S-2 DC5` was Omron's **through-hole** model on a surface-mount land and is now `G6S-2F DC5`; `1N4148WS-7-F` was **SOD-323** where the value string said `1N4148W` and is now `1N4148W-7-F`; the five `BAT54`s were **SOT-23 parts on a two-pad SOD-123 land** and are now on `SOT-23`, with a renumbered `cv:BAT54` symbol because the package numbers its anode 1 and its cathode 3. The one footprint this repo drew itself — the TMR 6WI — passes on every measurement. [`footprint-audit.md`](docs/footprint-audit.md) |
 | the fabrication package | ✅ **written, and it was a decision rather than a gate** — `fab/` holds nine gerbers, one combined drill file, the job file, the placement list and a generated `ORDER.md`. The layer set is *measured*: `package_layers()` exports the candidates and reads them back, so `B.Paste` and `B.SilkS` are absent because this board draws nothing on them rather than because a list says so. `check_holes()` counts the drill against the board — 995 vias + 34 plated + 4 unplated = **1033 hits**, both ways — and `--verify` says the tracked package is a package of the tracked board. **`ORDER.md` leaves finish, colours, test and panelisation open**, because nothing here derives them |
 | documents to look at | ✅ the [schematic](docs/cv-module-schematic.pdf), the [layout](docs/cv-module-layout.pdf) one page per copper layer, and a [render](docs/cv-module-top.png) — **all three of the same design and the same board**, which they were not last pass. `gen_plots.py --verify` replots the tracked board into a temporary directory and compares bytes. The gerbers are no longer here: they are in [`fab/`](fab/ORDER.md), written by `gen_fab.py`, because what a fabricator is given and what a person reviews are two audiences |
 | the inlet choke | ✅ **fitted, and it is the second half of `barrier_return()`** — a WE-SL2 744222, 2 × 1 mH at 800 mA. The 580 kHz residual at the audio bond goes from 1.24 mV to **1.14 µV**: 42 dB *under* the mixer's own noise floor, where it was 18.7 dB over |
@@ -254,6 +255,7 @@ somebody already thought of. `test_verify.py` plants all four ways it must fail.
 | [`ssi2164-control-port.md`](docs/ssi2164-control-port.md) | the datasheet read first-hand. **Six spec corrections** |
 | [`fabrication-class.md`](docs/fabrication-class.md) | 0.20/0.20 on 1 oz against PCBWay — the decision, and the corridor that took it |
 | [`bench.md`](docs/bench.md) | what is left to measure, in order, and what each reading decides |
+| [`footprint-audit.md`](docs/footprint-audit.md) | a land pattern against the part's own drawing — **three parts fail and one cannot be fitted** |
 | [`routing-tool.md`](docs/routing-tool.md) | KiCadRoutingTools measured against this board — and the four things it must be told before it lays copper |
 | [`contract/socket.py`](contract/socket.py) | the only place upstream constants are adapted |
 | [`toolchain/`](toolchain/PROVENANCE.md) | KiCad plumbing, copied from the mixer. Ours to modify |
@@ -1361,18 +1363,35 @@ Three more things the pass turned up, each recorded where it happened:
 
 ## Open, in the order worth taking
 
-**Everything a check can decide is decided.** `verify.py` passes end to end,
-`test_verify.py` catches all 94 planted faults, `placement.check_courtyard_gap()`
-is at zero, DRC is at zero and so is the unrouted count. The fabrication
-package is written. What is open is work on a bench, a review of copper that no
-check can grade, and the order-form fields `fab/ORDER.md` lists as open.
+**Green end to end again, and one line of that is worth reading twice.**
+`verify.py` passes, `test_verify.py` catches all 95 planted faults, DRC is at
+zero, the unrouted count is zero, `check_board_is_the_design()` now holds land
+patterns as well as references, and the fabrication package is written.
+
+**Every one of those checks was green while three parts named the wrong
+package**, which is what the footprint audit is really about: **no check here
+opens a datasheet.** What is open is work on a bench, a review of copper no
+check can grade, and the order-form fields `fab/ORDER.md` lists.
 
 **Ten assumptions were open and eight are**, which is the other thing this
 pass moved: one closed by reading a page, two retired against their own whole
 declared range, and one decided with a trigger attached.
 [`bench.md`](docs/bench.md) is the list and the order.
 
-1. **Review the copper — and it is a review now, not a routing job.** What
+1. ~~**Sync the board.**~~ **Done, and the loop closed.** Update PCB from
+   Schematic put the new lands on the board, the affected scope was re-routed,
+   and `verify.py` passes with 0 DRC and 0 unconnected on **5116 segments and
+   992 vias**. [`footprint-audit.md`](docs/footprint-audit.md) records what it
+   took, and three parts of it were not on anybody's list: the re-route scope
+   had to be **derived from the DRC report** rather than guessed, because the
+   moved pads landed under `MISO`, `IRQ`, `MOSI` and `PWM5`; `D801`'s ground
+   stitch had been silently re-netted to `FSAC` when the cathode pad moved onto
+   it, so it read 0.00 mm against the `MDGND` pour and had to be replaced by
+   hand; and twelve silkscreen collisions came from `gen_pcb.py` deciding
+   "put the designator on F.Fab" by **pad count**, which a SOT-23's unconnected
+   middle pin breaks. It counts connected terminals now.
+
+2. **Review the copper — and it is a review now, not a routing job.** What
    opens in KiCad is 290 footprints, the outline, two inner ground pours, 151
    stitch vias and **every net closed**, at one track width and one via size,
    with nothing on either reference plane. What is left is the judgement
@@ -1393,20 +1412,20 @@ declared range, and one decided with a trigger attached.
    track, which is the one trade [`routing-tool.md`](docs/routing-tool.md)
    flags as not obviously good on this board. Neither is a check that can
    fail; both are a person's call.
-2. **`MEASURED["noise_floor"]`** — a meter on the mixer's mono output, and
+3. **`MEASURED["noise_floor"]`** — a meter on the mixer's mono output, and
    the only one of the three that can be taken before this board exists. It is
    still this module's most load-bearing unknown: across its declared range
    the module costs **0.01 dB or 0.79 dB quiescent, and 0.08 dB or 3.13 dB
    while the lead feature runs**. It also gates a component value —
    **below 81 µV, `R_IN` should move from 12k1 to 7.5 kΩ**. See
    [`bench.md`](docs/bench.md).
-3. **`MEASURED["mcu_dcdc_efficiency"]` and `MEASURED["pico_smps_efficiency"]`**
+4. **`MEASURED["mcu_dcdc_efficiency"]` and `MEASURED["pico_smps_efficiency"]`**
    — two ammeters, after fabrication, and **they are confirmations rather than
    a gate**. One in series with U22's VIN and one in series with the Pico's
    VSYS pin with GPIO23 high. Floors of **53 %** and **45 %**, each with the
    other stage at its own pessimistic end, against declared ranges starting at
    75 and 86.
-4. ~~**Gerbers.**~~ **Written — `fab/`, by `gen_fab.py`.** The gate was
+5. ~~**Gerbers.**~~ **Written — `fab/`, by `gen_fab.py`.** The gate was
    empty and what was left was a decision, and it has been taken. Nine
    gerbers, one combined drill file, the job file, the CPL and a generated
    `ORDER.md`; the layer set derived by exporting and reading back, every

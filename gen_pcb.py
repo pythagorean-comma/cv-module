@@ -230,14 +230,31 @@ class Board:
         footprint.SetReference(ref)
         footprint.SetValue(str(part.value))
         footprint.SetPosition(point(x, y))
-        # **Designators for two-pad passives go on F.Fab, not on silk.** This
+        # **Designators for two-terminal parts go on F.Fab, not on silk.** This
         # board has 128 of them on a 4 mm pitch, and their reference text is
         # wider than the part: KiCad's DRC reported thirteen silkscreen
         # collisions on the first clean placement and every one was a
         # designator, not a part. F.Fab is where an assembly drawing reads them
         # from anyway; what silk is for is the parts a human orients by hand,
         # which is the ICs and the connectors.
-        if len(list(footprint.Pads())) <= 2:
+        #
+        # **The test was `len(footprint.Pads()) <= 2` and that is a proxy for
+        # the intent, not the intent.** Moving five BAT54s from SOD-123 to
+        # their real package took them from two pads to three -- a SOT-23 has
+        # a pin 2 that is not connected -- so the rule stopped applying, five
+        # designators were promoted onto silk, and DRC reported 12 silkscreen
+        # collisions among parts that had not moved a micron. The part is
+        # exactly as small as it was; what changed was a number the rule was
+        # reading instead of the thing it meant.
+        #
+        # So it counts the terminals the *design* connects, which is what
+        # "two-terminal part" means and is a fact about the circuit rather than
+        # about a land pattern. Q801's SOT-523 has three connected pins and
+        # keeps its designator on silk, which is right: a transistor is
+        # oriented by hand.
+        connected = sum(1 for pad in footprint.Pads()
+                        if (ref, pad.GetNumber()) in self._owner)
+        if connected <= 2:
             footprint.Reference().SetLayer(pcbnew.F_Fab)
         if rotation:
             footprint.SetOrientationDegrees(float(rotation))

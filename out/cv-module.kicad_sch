@@ -4316,6 +4316,199 @@
 			)
 			(embedded_fonts no)
 		)
+		(symbol "cv:BAT54"
+			(pin_numbers
+				(hide yes)
+			)
+			(pin_names
+				(offset 1.016)
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "D"
+				(at 0 2.54 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "BAT54"
+				(at 0 -2.54 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" "Schottky barrier diode, SOT-23, anode 1 cathode 3"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Sim.Device" "D"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Sim.Pins" "1=K 2=A"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_keywords" "diode"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_fp_filters" "TO-???* *_Diode_* *SingleDiode* D_*"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "BAT54_0_1"
+				(polyline
+					(pts
+						(xy -1.27 1.27)
+						(xy -1.27 -1.27)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 1.27 1.27)
+						(xy 1.27 -1.27)
+						(xy -1.27 0)
+						(xy 1.27 1.27)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 1.27 0)
+						(xy -1.27 0)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(symbol "BAT54_1_1"
+				(pin passive line
+					(at -3.81 0 0)
+					(length 2.54)
+					(name "K"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "3"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at 3.81 0 180)
+					(length 2.54)
+					(name "A"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
 		(symbol "cv:MAX6126"
 			(property "Reference" "U"
 				(at 0 6.35 0)
@@ -45141,7 +45334,7 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:D")
+		(lib_id "cv:BAT54")
 		(at 889 949.96 90)
 		(unit 1)
 		(exclude_from_sim no)
@@ -45167,7 +45360,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Diode_SMD:D_SOD-123"
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
 			(at 889 949.96 0)
 			(effects
 				(font
@@ -45188,8 +45381,8 @@
 		(pin "1"
 			(uuid "27b2b779-f3ce-5e3c-a3dc-a6b45cd98f23")
 		)
-		(pin "2"
-			(uuid "59fa6c6f-4e7e-55ae-a9e4-a843e34e1c7e")
+		(pin "3"
+			(uuid "e8de50c5-6b68-544f-a192-2ad651080942")
 		)
 		(instances
 			(project "cv-module"
@@ -45260,7 +45453,7 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:D")
+		(lib_id "cv:BAT54")
 		(at 889 929.64 90)
 		(unit 1)
 		(exclude_from_sim no)
@@ -45286,7 +45479,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Diode_SMD:D_SOD-123"
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
 			(at 889 929.64 0)
 			(effects
 				(font
@@ -45307,8 +45500,8 @@
 		(pin "1"
 			(uuid "8e686709-9bac-5954-89f3-d5954d7ac389")
 		)
-		(pin "2"
-			(uuid "d46dd41c-36ea-5b27-80e6-7a61aee7ca8b")
+		(pin "3"
+			(uuid "d7e073b2-403e-5739-99c8-b83479dedadc")
 		)
 		(instances
 			(project "cv-module"
@@ -45758,7 +45951,7 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:D")
+		(lib_id "cv:BAT54")
 		(at 812.8 1016 90)
 		(unit 1)
 		(exclude_from_sim no)
@@ -45784,7 +45977,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Diode_SMD:D_SOD-123"
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
 			(at 812.8 1016 0)
 			(effects
 				(font
@@ -45805,8 +45998,8 @@
 		(pin "1"
 			(uuid "2872a33f-955b-57ff-b041-53b25f58f370")
 		)
-		(pin "2"
-			(uuid "9dc3fe78-d12b-51e5-900a-e844474a1cca")
+		(pin "3"
+			(uuid "581152b8-f54a-59d5-b0ea-77651eee5993")
 		)
 		(instances
 			(project "cv-module"
@@ -45896,7 +46089,7 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:D")
+		(lib_id "cv:BAT54")
 		(at 863.6 1016 90)
 		(unit 1)
 		(exclude_from_sim no)
@@ -45922,7 +46115,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Diode_SMD:D_SOD-123"
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
 			(at 863.6 1016 0)
 			(effects
 				(font
@@ -45943,8 +46136,8 @@
 		(pin "1"
 			(uuid "a9855f67-aab2-5784-9b37-2d13c3665157")
 		)
-		(pin "2"
-			(uuid "a951f354-0ae7-5977-a0bf-53078ae256a9")
+		(pin "3"
+			(uuid "31fd907b-544a-53bd-a256-81fc557db9e4")
 		)
 		(instances
 			(project "cv-module"
@@ -46034,7 +46227,7 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:D")
+		(lib_id "cv:BAT54")
 		(at 914.4 1016 90)
 		(unit 1)
 		(exclude_from_sim no)
@@ -46060,7 +46253,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Diode_SMD:D_SOD-123"
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
 			(at 914.4 1016 0)
 			(effects
 				(font
@@ -46081,8 +46274,8 @@
 		(pin "1"
 			(uuid "aac0c2a7-b520-5ad2-b8f4-303d50c866cb")
 		)
-		(pin "2"
-			(uuid "fb293fe1-b34c-5aaf-afdd-d0622bbdbbd0")
+		(pin "3"
+			(uuid "f78ef6dc-124d-5d43-978f-5c5606fc89a4")
 		)
 		(instances
 			(project "cv-module"

@@ -34,7 +34,7 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | C807–C813 | 10u/50V X7R | `CNA6P1X7R1H106K250AE` | 5 | 9 | GBP 0.30–0.80 | band | [search](https://www.mouser.co.uk/c/?q=CNA6P1X7R1H106K250AE) |
 | C840 | 4u7/50V X7R | `CGA6P3X7R1H475K250AB` | 1 | 5 | GBP 0.08–0.30 | band | [search](https://www.mouser.co.uk/c/?q=CGA6P3X7R1H475K250AB) |
 | C843 | 22u/16V X5R | `C3225X5R1C226M250AA` | 1 | 5 | GBP 0.08–0.30 | band | [search](https://www.mouser.co.uk/c/?q=C3225X5R1C226M250AA) |
-| D151–D805 | 1N4148W | `1N4148WS-7-F` | 13 | 14 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=1N4148WS-7-F) |
+| D151–D805 | 1N4148W | `1N4148W-7-F` | 13 | 14 | GBP 0.02–0.08 | band | [search](https://www.mouser.co.uk/c/?q=1N4148W-7-F) |
 | D801–D833 | BAT54 | `BAT54-7-F` | 5 | 6 | GBP 0.05–0.15 | band | [search](https://www.mouser.co.uk/c/?q=BAT54-7-F) |
 | D803, D806 | PMEG2010AEH | `PMEG2010AEH,115` | 2 | 3 | GBP 0.10–0.30 | band | [search](https://www.mouser.co.uk/c/?q=PMEG2010AEH,115) |
 | D804 | B340A | `B340A-13-F` | 1 | 5 | GBP 0.20–0.60 | band | [search](https://www.mouser.co.uk/c/?q=B340A-13-F) |
@@ -51,7 +51,7 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | J17 | TAP | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
 | J18 | EXPR | `61300311121` | 1 | 5 | GBP 0.30–0.75 | band | [search](https://www.mouser.co.uk/c/?q=61300311121) |
 | J19 | RESET | `61300211121` | 1 | 5 | GBP 0.25–0.60 | band | [search](https://www.mouser.co.uk/c/?q=61300211121) |
-| K801–K803 | G6S-2 DC5 | `G6S-2 DC5` | 3 | 7 | GBP 3.00–5.50 | band | [search](https://www.mouser.co.uk/c/?q=G6S-2 DC5) |
+| K801–K803 | G6S-2F DC5 | `G6S-2F DC5` | 3 | 7 | GBP 3.00–5.50 | band | [search](https://www.mouser.co.uk/c/?q=G6S-2F DC5) |
 | L801 | 744222 | `744222` | 1 | 5 | GBP 1.97 | read | [search](https://www.mouser.co.uk/c/?q=744222) |
 | L802 | 15u 20% | `SRN6045TA-150M` | 1 | 5 | GBP 0.30–0.90 | band | [search](https://www.mouser.co.uk/c/?q=SRN6045TA-150M) |
 | Q801 | DMG1012T | `DMG1012T-7` | 1 | 2 | GBP 0.06–0.20 | band | [search](https://www.mouser.co.uk/c/?q=DMG1012T-7) |
@@ -84,6 +84,74 @@ Only one line on this board is `read`. That is worth stating plainly rather than
 | U19 | RaspberryPi_Pico | `SC0915` | 1 | 5 | GBP 3.60–5.00 | band | [search](https://www.mouser.co.uk/c/?q=SC0915) |
 | U21 | TLP2761 | `TLP2761(TP,E)` | 1 | 2 | GBP 1.00–2.20 | band | [search](https://www.mouser.co.uk/c/?q=TLP2761(TP,E)) |
 | U22 | TPS560430XF | `TPS560430XFDBVR` | 1 | 2 | GBP 0.70–1.60 | band | [search](https://www.mouser.co.uk/c/?q=TPS560430XFDBVR) |
+
+## The order list, one line per part number
+
+**Part number, quantity — one line each, for a distributor's paste box.** Quantities include the spares rule above, added **once per part number**.
+
+That last clause is the whole reason this is generated rather than copied out of the table. A row above is a *value on a footprint* and an order line is a *part number*, and the two do not correspond: nine rows carry the same two-pin header, because `CH1` through `CH6`, `PWR`, `TAP` and `RESET` each have their own value string. Adding the `order` column down those rows buys 9 x (1 + 4) = 45 headers for a board that uses nine. The three-pin header repeats three times for the same reason. Nothing else on this board does, counted rather than assumed: **63 rows, 53 part numbers.**
+
+```
+1N4148W-7-F,14
+3403.0168.11,5
+61300211121,13
+61300311121,7
+744222,5
+B340A-13-F,5
+BAT54-7-F,6
+C3225X5R1C226M250AA,5
+CC0805KRX7R9BB563,10
+CGA4J2X7R1H104K125AE,40
+CGA4J2X7R1H154K125AA,10
+CGA6M3X7R1C106K200AB,12
+CGA6P3X7R1H475K250AB,5
+CNA6P1X7R1H106K250AE,9
+DMG1012T-7,2
+ERA6AEB103V,18
+ERA6AEB1212V,16
+G6S-2F DC5,7
+GRM2165C1H101JA01D,10
+GRM2165C1H122JA01D,16
+GRM2165C1H222JA01D,5
+GRM216R71H223KA01D,10
+GRM21BR71C105KA01L,7
+GRM21BR71H474KA88L,11
+MAX6126AASA25+,2
+MCP1700T-3302E/TT,2
+MCP3564-E/ST,2
+NCP1117DT50G,2
+OPA1644AIDR,9
+"PMEG2010AEH,115",3
+RC0805FR-07100KL,11
+RC0805FR-0710KL,29
+RC0805FR-0717K8L,16
+RC0805FR-071KL,7
+RC0805FR-071ML,16
+RC0805FR-07220RL,10
+RC0805FR-0722K1L,5
+RC0805FR-0722KL,22
+RC0805FR-07390RL,5
+RC0805FR-074K99L,16
+RC0805FR-074R7L,6
+RC0805FR-0788K7L,5
+RC0805JR-070RL,6
+RC0805JR-0710RL,5
+RC0805JR-0733RL,5
+SC0915,5
+SN74AHC541DWR,2
+SRN6045TA-150M,5
+SSI2164S-RT,3
+TL074CDR,3
+"TLP2761(TP,E)",2
+TMR 6-2422WI,5
+TPS560430XFDBVR,2
+```
+
+**459 components across 53 part numbers**, against 289 placements on the board.
+
+**2 of those part numbers contain a comma of their own** — `PMEG2010AEH,115`, `TLP2761(TP,E)` — so the lines are written by `csv.writer` and those two arrive quoted. A comma-separated list whose own fields carry commas is a format that works until the parts that break it, and here that is a packaging suffix and a taping code. If a paste box rejects the quotes, split those lines by hand: the quantity is the number after the **last** comma.
+
+Two things this list is not. It is **not rounded to anybody's reel, MOQ or packaging multiple** — that arithmetic belongs in the basket where its numbers are visible. And a part number here is a claim this repository can only half check: `Design.check_order_codes()` decodes a ceramic's case, dielectric, voltage and capacitance and compares all four to the value string and the land, and it says plainly that whether a code names a part that **exists** is a question only a distributor answers.
 
 ## Totals, per currency, fitted quantities
 
@@ -120,9 +188,9 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **C843** — 1210 X5R
 
-**D151–D805** — 1N4148WS-7-F or any 1N4148 in SOD-123. Inside an op-amp's feedback loop, so the forward drop does not reach the answer.
+**D151–D805** — 1N4148W-7-F or any 1N4148 in SOD-123 -- the W and not the WS, which is Diodes' SOD-323 part and is what this line asked for until the footprint audit. Inside an op-amp's feedback loop, so the forward drop does not reach the answer.
 
-**D801–D833** — BAT54-7-F, in SOD-123. Five of them do two jobs -- the two-diode pump and three coil flybacks -- and what the pump wants from it is *leakage*, 2 uA max at 25 V, because the same diode has to hold a 1 uF node up between 10 kHz cycles. Its forward drop at the pump's 18 uA is off the bottom of its own table; PUMP_DIODE_VF's 0.32 V sits above the datasheet maximum at ten times that current, deliberately.
+**D801–D833** — BAT54-7-F, in **SOT-23** -- three terminals, anode 1 and cathode 3, and it sat on a two-pad SOD-123 land until the footprint audit. Five of them do two jobs -- the two-diode pump and three coil flybacks -- and what the pump wants from it is *leakage*, 2 uA max at 25 V, because the same diode has to hold a 1 uF node up between 10 kHz cycles. Its forward drop at the pump's 18 uA is off the bottom of its own table; PUMP_DIODE_VF's 0.32 V sits above the datasheet maximum at ten times that current, deliberately.
 
 **D803, D806** — PMEG2010AEH in SOD123F, and it is the one diode on this board chosen by a number rather than a class. It is a 1 A part carrying 36 mA, which is the whole trick: 259 mV max there against the BAT54's 545 mV, and design.clamp_vf_ceiling() says the mixer's headroom will take 320 mV. The BAT54 that used to be fitted here missed by 5.5 dB. Higher leakage is the price and it is free on a node inside an op-amp's feedback loop.
 
@@ -154,7 +222,7 @@ Kept per currency rather than converted: two lines were priced in dollars becaus
 
 **J19** — Wurth WR-PHD 1x02 vertical, gold-plated: CONN_MPN[2]. Two ways because the loom is a shielded pair -- the shield lands at the mixer end only, so it has no pin here. See design.FRONT_R.
 
-**K801–K803** — Omron G6S-2 DC5, surface-mount G6S-2F body. Single-side stable, which is Omron's name for non-latching and is the property the whole fail-safe turns on. The line worth reading twice is the contact material -- bifurcated crossbar, Ag(Au-Alloy) -- because a plain silver contact needs a wetting current a guitar string will never supply, and fails intermittently in a way that looks like a dry joint.
+**K801–K803** — Omron G6S-2F DC5 -- the F is load-bearing: the plain G6S-2 is the through-hole model, eight 1 mm holes per relay, and this board fits the surface-mount land. Single-side stable, which is Omron's name for non-latching and is the property the whole fail-safe turns on. The line worth reading twice is the contact material -- bifurcated crossbar, Ag(Au-Alloy) -- because a plain silver contact needs a wetting current a guitar string will never supply, and fails intermittently in a way that looks like a dry joint.
 
 **L801** — page fetched: £1.97 at 1, £1.94 at 10, £1.75 at 50, £1.69 at 100, £1.37 at 1000 T&R, net of VAT, 12,641 in stock. The listing's own "1 mH @ 100 kHz", 800 mA and 207 mOhm agree with the datasheet read for design.INLET_CHOKE, and its "6 kOhms @ 4 MHz" is the frequency the datasheet's Zmax row omits -- which is what puts 580 kHz on the inductive slope rather than over the peak. The datasheet is at https://www.we-online.com/components/products/datasheet/744222.pdf -- fetched and read.
 

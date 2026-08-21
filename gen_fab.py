@@ -657,6 +657,17 @@ def refusals(board=BOARD):
         reasons.append(f"the board does not pass DRC: {problems[0]}"
                        + (f" (and {len(problems) - 1} more)"
                           if len(problems) > 1 else ""))
+    # **And the board has to be the design's board**, which DRC cannot say:
+    # it reports against the board's own embedded netlist, so a board three
+    # netlist revisions old agrees with itself perfectly. check_board_is_the_design()
+    # compares refs and land patterns against design.py, and its own docstring
+    # names this exact moment -- "the only things standing between a stale
+    # board and a fabrication package". A package is the one artefact here
+    # that leaves the repository, so it is the one place that sentence has to
+    # be executable rather than true.
+    stale = verify.check_board_is_the_design(board)
+    if stale:
+        reasons.append(f"the board is not the design's board: {stale[0]}")
     return reasons
 
 
@@ -666,8 +677,22 @@ def main():
 
     reasons = refusals()
     if reasons:
-        if ZIP.exists():
-            ZIP.unlink()
+        # **The whole package goes, not just the archive.** The sibling deletes
+        # its zip for this reason -- "no fabrication package is written while a
+        # board has known errors" -- and here the loose files are the package
+        # and the archive is a wrapper, so deleting only the wrapper would
+        # leave the thing somebody actually uploads sitting on disk, correct in
+        # every respect except which board it is of. A tracked artefact
+        # disappearing is a loud signal; a stale one is a silent hazard.
+        removed = 0
+        if FAB.exists():
+            for path in sorted(FAB.iterdir()):
+                if path.is_file():
+                    path.unlink()
+                    removed += 1
+        if removed:
+            print(f"removed {removed} files from fab/ -- a package that is not "
+                  f"this board's must not be sitting where somebody uploads it")
         print("no fabrication package written, and each of these is a gate:")
         for reason in reasons:
             print(f"    {reason}")
