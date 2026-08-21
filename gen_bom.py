@@ -52,6 +52,35 @@ DOCS = HERE / "docs"
 SPARE_PASSIVE = 4
 SPARE_ACTIVE = 1
 
+# **Which parts are "a few 0805s", decided by the land rather than by a
+# substring in its name.** The test here was `"SO" in footprint`, meaning to
+# catch SOIC, SOT and SOD -- and it caught nothing else, so every part whose
+# land pattern does not happen to contain those two letters was classified as
+# a chip passive and bought four spares. That is the Traco converter at
+# **GBP 18.16 each, ordered five for a board that fits one**: GBP 72.64 of
+# spare converter, against a fitted parts cost of GBP 60.67 for the whole
+# board. The Pico, three relays, the common-mode choke, the power inductor,
+# the inlet fuse, an SMA diode and every pin header were in the same class.
+#
+# A land is a fact about the part; a substring of its name is a fact about
+# KiCad's library conventions. These are the two chip lands design.py owns,
+# and everything on one of them is a part you lose off tweezers.
+CHIP_LANDS = frozenset({design.R_FP, design.C_FP, design.C_FILM_FP})
+
+# **And where even one spare is not worth buying, said once with a reason.**
+# A spare is insurance against destroying a part at the bench, and insurance
+# is priced: nobody buys a second GBP 18 converter for a one-off build of a
+# board that fits one, and both of these are stock items a distributor ships
+# in a day. check() reports any *other* line whose spares cost more than
+# SPARE_ALERT so that this list cannot quietly go stale -- a declaration
+# nothing re-examines is this repository's oldest complaint about itself.
+NO_SPARE = {
+    "TMR 6-2422WI": "GBP 18.16 each and one is fitted -- the single most "
+                    "expensive line on the board, and a stock item",
+    "SC0915": "a Pico is a shelf item everywhere and one is fitted",
+}
+SPARE_ALERT_GBP = 2.00
+
 # What a price line carries. `low` and `high` are the same number where the
 # figure was read, and a band where it was not.
 Price = collections.namedtuple(
@@ -87,10 +116,12 @@ PRICES = {
     design.OPAMP: snippet(
         2.40, 4.98, "USD", 1,
         "https://octopart.com/opa1644aid-texas+instruments-18186989",
-        "**Out of stock at TI itself** -- ti.com/product/OPA1644 shows "
-        "'Out of stock' for both OPA1644AIDR and OPA1644AID and displays no "
-        "price at all. Eight of these is the largest line on the board, so "
-        "the stock position matters more than the price. See ASSUMPTIONS."),
+        "**OPA1644AID, the tube, and the suffix is a stock question rather "
+        "than an obsolescence one.** TI lists AID (SOIC-14, 50 per tube) and "
+        "AIDR (the same part, 2500 per reel) both ACTIVE; distributors have "
+        "the tube and quote no in-stock date for the reel. Nine pieces is a "
+        "tube's business either way. Eight fitted is the largest line on the "
+        "board, so the stock position matters more than the price."),
 
     design.VREF_PART: snippet(
         8.76, 9.96, "USD", 1,
@@ -122,7 +153,8 @@ PRICES = {
 
     design.V5_PART: band(
         0.35, 0.90, "GBP", 10,
-        "NCP1117DT50G, DPAK. **The DT suffix and not ST**, which is the whole "
+        "NCP1117DT50RKG, DPAK -- the DT50G is obsolete and this is onsemi's "
+        "own active carrier for the same die. **The DT suffix and not ST**, which is the whole "
         "of v5_regulator(): the SOT-223 part is the same die, the same price "
         "and 160 C/W against 0.77 W."),
 
@@ -449,7 +481,7 @@ def lines():
     out = []
     for (value, footprint, mpn), refs in groups.items():
         refs.sort(key=sort_key)
-        active = footprint is None or "SO" in (footprint or "")
+        chip = footprint in CHIP_LANDS
         price = price_for(value, mpn)
         out.append({
             "refs": refs,
@@ -457,7 +489,8 @@ def lines():
             "footprint": footprint,
             "mpn": mpn,
             "fitted": len(refs),
-            "order": len(refs) + (SPARE_ACTIVE if active else SPARE_PASSIVE),
+            "order": len(refs) + (0 if mpn in NO_SPARE else
+                                  SPARE_PASSIVE if chip else SPARE_ACTIVE),
             "price": price,
             "unspecified": value in design.UNSPECIFIED,
         })
@@ -543,6 +576,49 @@ def totals(rows):
     return dict(out), unpriced
 
 
+def spare_alerts(rows):
+    """Lines where the spares cost more than SPARE_ALERT and nobody has said so.
+
+    **Reported, not raised**, and the distinction is the one this repository
+    keeps arriving at: a spare is a money decision, and a check that fails
+    every build until somebody edits a dict is a check that gets switched off.
+    What it does instead is make the spend visible on every run, so that
+    NO_SPARE staying short is a choice somebody is re-making rather than one
+    made once and forgotten.
+
+    The alert exists because the *absence* of one cost GBP 138-190 of spares
+    against a GBP 61-97 board, and nothing printed the number: totals() reports
+    the fitted cost and the CSV carries the order quantity, so the money in the
+    basket and the money on the page were different figures with nothing
+    comparing them.
+    """
+    alerts = []
+    for row in rows:
+        extra = row["order"] - row["fitted"]
+        price = row["price"]
+        if not extra or price.high is None or row["mpn"] in NO_SPARE:
+            continue
+        if extra * price.high > SPARE_ALERT_GBP:
+            alerts.append((row, extra, extra * price.low, extra * price.high))
+    return sorted(alerts, key=lambda a: -a[3])
+
+
+def spend(rows):
+    """(fitted, spares) per currency, which is what the basket will say."""
+    fitted = collections.defaultdict(lambda: [0.0, 0.0])
+    spares = collections.defaultdict(lambda: [0.0, 0.0])
+    for row in rows:
+        price = row["price"]
+        if price.low is None:
+            continue
+        extra = row["order"] - row["fitted"]
+        fitted[price.currency][0] += row["fitted"] * price.low
+        fitted[price.currency][1] += row["fitted"] * price.high
+        spares[price.currency][0] += extra * price.low
+        spares[price.currency][1] += extra * price.high
+    return fitted, spares
+
+
 def check(rows):
     """Every line has a part number and a price, or says why it has neither."""
     problems = []
@@ -604,7 +680,18 @@ def write_shopping(rows):
         "failure that warning describes.",
         "",
         "The `order` column carries spares on the mixer's rule: "
-        f"{SPARE_PASSIVE} spare of each passive, {SPARE_ACTIVE} of each active.",
+        f"{SPARE_PASSIVE} spare of each chip passive, {SPARE_ACTIVE} of "
+        f"everything else, and none of the parts in `gen_bom.NO_SPARE`.",
+        "",
+        "**Which parts are \"chip passives\" is decided by the land, and it "
+        "used to be decided by a substring.** The test was `\"SO\" in "
+        "footprint` -- meaning to catch SOIC, SOT and SOD -- so every part "
+        "whose land pattern does not contain those two letters was bought "
+        "four spares: the Traco converter at GBP 18.16 each, ordered five for "
+        "a board that fits one, which is GBP 72.64 of spare converter against "
+        "a GBP 60.67 board. The Pico, three relays, both inductors, the inlet "
+        "fuse, an SMA diode and every pin header were in the same class. It "
+        "reads `design.R_FP`, `design.C_FP` and `design.C_FILM_FP` now.",
         "",
         "## The basis column, and why the totals are a range",
         "",
@@ -694,9 +781,31 @@ def write_shopping(rows):
     ]
 
     sums, unpriced = totals(rows)
-    lines_out += ["", "## Totals, per currency, fitted quantities", ""]
+    fitted, spares = spend(rows)
+    lines_out += ["", "## Totals, per currency", "",
+                  "| | fitted | spares | basket |", "|---|---|---|---|"]
     for currency, (low, high) in sorted(sums.items()):
-        lines_out.append(f"- **{currency} {low:.2f} – {high:.2f}**")
+        extra = spares[currency]
+        lines_out.append(
+            f"| **{currency}** | {low:.2f} – {high:.2f} | "
+            f"{extra[0]:.2f} – {extra[1]:.2f} | "
+            f"**{low + extra[0]:.2f} – {high + extra[1]:.2f}** |")
+    alerts = spare_alerts(rows)
+    if alerts:
+        lines_out += [
+            "",
+            f"**{len(alerts)} lines carry more than {SPARE_ALERT_GBP:.2f} of "
+            f"spares and nobody has decided about them.** Reported rather than "
+            f"raised: a spare is a money decision, and a check that fails "
+            f"every build until somebody edits a dict is a check that gets "
+            f"switched off. Put a part in `gen_bom.NO_SPARE` with a reason to "
+            f"settle it.",
+            "",
+            "| part | spares | cost |", "|---|---|---|"]
+        for row, extra, low, high in alerts:
+            lines_out.append(
+                f"| `{row['mpn']}` | {extra} | {row['price'].currency} "
+                f"{low:.2f} – {high:.2f} |")
     lines_out += [
         "",
         "Kept per currency rather than converted: two lines were priced in "
@@ -740,8 +849,18 @@ def main():
     bases = collections.Counter(
         r["price"].basis if r["price"] else "MISSING" for r in rows)
     print(f"  provenance: " + ", ".join(f"{k} {v}" for k, v in sorted(bases.items())))
+    fitted, spares = spend(rows)
     for currency, (low, high) in sorted(sums.items()):
-        print(f"  total {currency} {low:.2f} - {high:.2f}")
+        extra = spares[currency]
+        print(f"  total {currency} {low:.2f} - {high:.2f} fitted, "
+              f"+ {extra[0]:.2f} - {extra[1]:.2f} in spares")
+    alerts = spare_alerts(rows)
+    if alerts:
+        print(f"  {len(alerts)} lines carry more than "
+              f"{SPARE_ALERT_GBP:.2f} of spares and are not in NO_SPARE:")
+        for row, extra, low, high in alerts:
+            print(f"      {row['mpn']:24s} {extra} spare "
+                  f"{row['price'].currency} {low:.2f}-{high:.2f}")
     if unpriced:
         print(f"  unpriced: {[r['refs'][0] for r in unpriced]}")
 

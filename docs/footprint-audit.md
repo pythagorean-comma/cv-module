@@ -259,6 +259,55 @@ named all three before a case ran, which is the third time that guard has
 earned its place. They ask `design.diode_pins()` now — the same function the
 check asks — so a package change moves both ends of the test together.
 
+## Sourcing, checked the same way and on the same day
+
+Three part numbers came back from a distributor as obsolete or unstocked. Each
+was checked against the manufacturer rather than taken on trust, and all three
+substitutions hold:
+
+| was | is | what the manufacturer says |
+|---|---|---|
+| `GRM216R71H223KA01D` | **`CEU4J2X7R1H223K125AE`** | Murata's part carries an **obsolete** life-cycle code and RS no longer stocks it. TDK's product page gives the replacement as 22 nF, 50 V, X7R, 2.0 × 1.25 × 1.25 mm — 0805, on the land already fitted |
+| `NCP1117DT50G` | **`NCP1117DT50RKG`** | onsemi's own ordering information: the DT50G is 75 per rail and **obsolete**; the DT50RKG is 2500 on tape and reel and **active**. Same die, same DPAK-3, same fixed 5.0 V at 1 A |
+| `OPA1644AIDR` | **`OPA1644AID`** | **not obsolescence — stock.** TI lists both as ACTIVE; `D` is the SOIC-14 and `R` is the 2500-piece reel. Distributors have the tube and quote no date for the reel, and nine pieces is a tube's business either way |
+
+**The repository's own check agrees, which is the point of having it.**
+`decode_capacitor_code()` reads `CEU4J2X7R1H223K125AE` as 0805 / X7R / 50 V /
+22 nF and compares all four to the value string and the land —
+independently of anything read on a web page. It had to be taught the `CEU`
+prefix first: it is TDK's commercial series and numbers its cases exactly as
+CGA, CNA and CNC do, so it joined that pattern rather than getting one of its
+own. **An unparsed code is reported and counted, never passed**, so a
+re-sourcing pass cannot quietly introduce a part number nothing decodes.
+
+### And the quantities were wrong, by more than the board costs
+
+Asking why a board that fits one converter was ordering five found a bug rather
+than a policy. `gen_bom.py` chose the spares count with `"SO" in footprint` —
+meaning to catch SOIC, SOT and SOD — so **every part whose land pattern does
+not contain those two letters was classified as a chip passive** and bought
+four spares:
+
+| | |
+|---|---|
+| TMR 6-2422WI | 1 fitted, **5 ordered**, GBP 18.16 each — **GBP 72.64 of spare converter** |
+| SC0915 (Pico) | 1 fitted, 5 ordered |
+| G6S-2F DC5 | 3 fitted, 7 ordered |
+| both inductors, the inlet fuse, an SMA diode, twelve pin headers | all 1 fitted, 5 ordered |
+
+Spares were **GBP 138–190 against a fitted parts cost of GBP 60.67–96.94** —
+more than the board — and nothing printed that number, because `totals()`
+reported the fitted cost while the CSV carried the order quantity. Two figures
+about one basket with nothing comparing them, which is this repository's oldest
+complaint about itself arriving at the money.
+
+The class is decided by the land now — `design.R_FP`, `design.C_FP`,
+`design.C_FILM_FP`, the three chip lands `design.py` owns — and `NO_SPARE`
+holds the parts where even one spare is not bought, each with its reason.
+`spare_alerts()` reports every other line whose spares cost more than
+`SPARE_ALERT_GBP`, on every run, so that list cannot go stale in silence.
+Spares are **GBP 25.32–47.22** now.
+
 ## What this suggests as an instrument
 
 `Design.check_order_codes()` already decodes one vendor family's part numbers

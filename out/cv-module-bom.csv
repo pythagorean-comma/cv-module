@@ -4,7 +4,7 @@ Reference,Value,Footprint,MPN,Fitted,Order,Unit low,Unit high,Currency,Qty break
 "C121,C221,C321,C421,C521,C621",100p/50V C0G,Capacitor_SMD:C_0805_2012Metric,GRM2165C1H101JA01D,6,10,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
 "C131,C231,C331,C431,C531,C631",150n/50V X7R,Capacitor_SMD:C_0805_2012Metric,CGA4J2X7R1H154K125AA,6,10,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
 "C141,C241,C341,C441,C541,C641",56n/50V X7R,Capacitor_SMD:C_0805_2012Metric,CC0805KRX7R9BB563,6,10,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
-"C142,C242,C342,C442,C542,C642",22n/50V X7R,Capacitor_SMD:C_0805_2012Metric,GRM216R71H223KA01D,6,10,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
+"C142,C242,C342,C442,C542,C642",22n/50V X7R,Capacitor_SMD:C_0805_2012Metric,CEU4J2X7R1H223K125AE,6,10,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
 "C151,C251,C351,C451,C551,C651,C810",470n/50V X7R,Capacitor_SMD:C_0805_2012Metric,GRM21BR71H474KA88L,7,11,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
 "C701,C702,C703,C704,C705,C706,C707,C708,C709,C710,C711,C712,C713,C714,C715,C716,C717,C718,C719,C720,C721,C722,C723,C724,C801,C803,C809,C817,C818,C819,C835,C836,C837,C838,C841,C842",100n/50V X7R,Capacitor_SMD:C_0805_2012Metric,CGA4J2X7R1H104K125AE,36,40,0.01,0.05,GBP,100,band,"typical distributor band, not read this session"
 C805,2n2/50V C0G,Capacitor_SMD:C_0805_2012Metric,GRM2165C1H222JA01D,1,5,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
@@ -15,23 +15,23 @@ C843,22u/16V X5R,Capacitor_SMD:C_1210_3225Metric,C3225X5R1C226M250AA,1,5,0.08,0.
 "D151,D152,D251,D252,D351,D352,D451,D452,D551,D552,D651,D652,D805",1N4148W,Diode_SMD:D_SOD-123,1N4148W-7-F,13,14,0.02,0.08,GBP,100,band,"typical distributor band, not read this session"
 "D801,D802,D813,D823,D833",BAT54,Package_TO_SOT_SMD:SOT-23,BAT54-7-F,5,6,0.05,0.15,GBP,100,band,"typical distributor band, not read this session"
 "D803,D806",PMEG2010AEH,Diode_SMD:D_SOD-123F,"PMEG2010AEH,115",2,3,0.10,0.30,GBP,100,band,"typical distributor band, not read this session"
-D804,B340A,Diode_SMD:D_SMA,B340A-13-F,1,5,0.20,0.60,GBP,10,band,"typical distributor band, not read this session"
-F801,1.6A T 250V,Fuse:Fuse_Schurter_UMT250,3403.0168.11,1,5,1.80,1.80,USD,1,read,https://www.digikey.com/en/products/detail/schurter-inc/3403-0168-11/957690
-J1,CH1,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-J2,CH2,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-J3,CH3,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-J4,CH4,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-J5,CH5,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-J6,CH6,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-J8,PWR,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-J15,MIDIIN,Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical,61300311121,1,5,0.30,0.75,GBP,10,band,"typical distributor band, not read this session"
-J16,MIDIOUT,Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical,61300311121,1,5,0.30,0.75,GBP,10,band,"typical distributor band, not read this session"
-J17,TAP,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-J18,EXPR,Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical,61300311121,1,5,0.30,0.75,GBP,10,band,"typical distributor band, not read this session"
-J19,RESET,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,5,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
-"K801,K802,K803",G6S-2F DC5,Relay_SMD:Relay_DPDT_Omron_G6S-2F,G6S-2F DC5,3,7,3.00,5.50,GBP,10,band,"typical distributor band, not read this session"
-L801,744222,Inductor_SMD:L_CommonMode_Wuerth_WE-SL2,744222,1,5,1.97,1.97,GBP,1,read,https://www.digikey.co.uk/en/products/detail/w%C3%BCrth-elektronik/744222/1638889
-L802,15u 20%,Inductor_SMD:L_Bourns_SRN6045TA,SRN6045TA-150M,1,5,0.30,0.90,GBP,25,band,"typical distributor band, not read this session"
+D804,B340A,Diode_SMD:D_SMA,B340A-13-F,1,2,0.20,0.60,GBP,10,band,"typical distributor band, not read this session"
+F801,1.6A T 250V,Fuse:Fuse_Schurter_UMT250,3403.0168.11,1,2,1.80,1.80,USD,1,read,https://www.digikey.com/en/products/detail/schurter-inc/3403-0168-11/957690
+J1,CH1,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,2,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
+J2,CH2,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,2,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
+J3,CH3,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,2,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
+J4,CH4,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,2,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
+J5,CH5,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,2,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
+J6,CH6,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,2,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
+J8,PWR,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,2,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
+J15,MIDIIN,Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical,61300311121,1,2,0.30,0.75,GBP,10,band,"typical distributor band, not read this session"
+J16,MIDIOUT,Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical,61300311121,1,2,0.30,0.75,GBP,10,band,"typical distributor band, not read this session"
+J17,TAP,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,2,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
+J18,EXPR,Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical,61300311121,1,2,0.30,0.75,GBP,10,band,"typical distributor band, not read this session"
+J19,RESET,Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical,61300211121,1,2,0.25,0.60,GBP,10,band,"typical distributor band, not read this session"
+"K801,K802,K803",G6S-2F DC5,Relay_SMD:Relay_DPDT_Omron_G6S-2F,G6S-2F DC5,3,4,3.00,5.50,GBP,10,band,"typical distributor band, not read this session"
+L801,744222,Inductor_SMD:L_CommonMode_Wuerth_WE-SL2,744222,1,2,1.97,1.97,GBP,1,read,https://www.digikey.co.uk/en/products/detail/w%C3%BCrth-elektronik/744222/1638889
+L802,15u 20%,Inductor_SMD:L_Bourns_SRN6045TA,SRN6045TA-150M,1,2,0.30,0.90,GBP,25,band,"typical distributor band, not read this session"
 Q801,DMG1012T,Package_TO_SOT_SMD:SOT-523,DMG1012T-7,1,2,0.06,0.20,GBP,100,band,"typical distributor band, not read this session"
 "R101,R102,R201,R202,R301,R302,R401,R402,R501,R502,R601,R602,R801,R802",10k 0.1%,Resistor_SMD:R_0805_2012Metric,ERA6AEB103V,14,18,0.10,0.30,GBP,100,band,"typical distributor band, not read this session"
 "R111,R121,R211,R221,R311,R321,R411,R421,R511,R521,R611,R621",12k1 0.1%,Resistor_SMD:R_0805_2012Metric,ERA6AEB1212V,12,16,0.10,0.30,GBP,25,band,"typical distributor band, not read this session"
@@ -50,15 +50,15 @@ R829,10R 5%,Resistor_SMD:R_0805_2012Metric,RC0805JR-0710RL,1,5,0.01,0.05,GBP,100
 R850,88k7 1%,Resistor_SMD:R_0805_2012Metric,RC0805FR-0788K7L,1,5,0.01,0.05,GBP,100,band,"typical distributor band, not read this session"
 R851,22k1 1%,Resistor_SMD:R_0805_2012Metric,RC0805FR-0722K1L,1,5,0.01,0.05,GBP,100,band,"typical distributor band, not read this session"
 "R901,R902",0R,Resistor_SMD:R_0805_2012Metric,RC0805JR-070RL,2,6,0.01,0.03,GBP,100,band,"typical distributor band, not read this session"
-"U1,U2,U3,U4,U5,U6,U7,U8",OPA1644,Package_SO:SOIC-14_3.9x8.7mm_P1.27mm,OPA1644AIDR,8,9,2.40,4.98,USD,1,snippet,https://octopart.com/opa1644aid-texas+instruments-18186989
+"U1,U2,U3,U4,U5,U6,U7,U8",OPA1644,Package_SO:SOIC-14_3.9x8.7mm_P1.27mm,OPA1644AID,8,9,2.40,4.98,USD,1,snippet,https://octopart.com/opa1644aid-texas+instruments-18186989
 "U9,U10",SSI2164,Package_SO:SOIC-16_3.9x9.9mm_P1.27mm,SSI2164S-RT,2,3,3.80,3.80,GBP,1,read,https://www.thonk.co.uk/shop/ssi2164/
 U11,74AHC541,Package_SO:SOIC-20W_7.5x12.8mm_P1.27mm,SN74AHC541DWR,1,2,0.40,0.90,GBP,10,band,"typical distributor band, not read this session"
 U12,MAX6126A25,Package_SO:SOIC-8_3.9x4.9mm_P1.27mm,MAX6126AASA25+,1,2,8.76,9.96,USD,1,snippet,"Digi-Key, via search; MAX6126B25+ at $8.76/1 and MAX6126AASA50+ at $9.96/1"
 "U13,U14",TL074,Package_SO:SOIC-14_3.9x8.7mm_P1.27mm,TL074CDR,2,3,0.25,0.70,GBP,10,band,"typical distributor band, not read this session"
-U15,TMR6-2422WI,cv:TRACO_TMR-6-xxxxWI_Dual_THT,TMR 6-2422WI,1,5,18.16,18.16,GBP,1,read,https://www.tme.eu/gb/details/tmr6-2422wi/dc-dc-converters/traco-power/tmr-6-2422wi/
-U16,NCP1117-5.0,Package_TO_SOT_SMD:TO-252-2,NCP1117DT50G,1,2,0.35,0.90,GBP,10,band,"typical distributor band, not read this session"
+U15,TMR6-2422WI,cv:TRACO_TMR-6-xxxxWI_Dual_THT,TMR 6-2422WI,1,1,18.16,18.16,GBP,1,read,https://www.tme.eu/gb/details/tmr6-2422wi/dc-dc-converters/traco-power/tmr-6-2422wi/
+U16,NCP1117-5.0,Package_TO_SOT_SMD:TO-252-2,NCP1117DT50RKG,1,2,0.35,0.90,GBP,10,band,"typical distributor band, not read this session"
 U17,MCP3564,Package_SO:TSSOP-20_4.4x6.5mm_P0.65mm,MCP3564-E/ST,1,2,5.35,5.35,GBP,1,read,https://www.digikey.co.uk/en/products/detail/microchip-technology/MCP3564-E-ST/11618284
 U18,MCP1700-3.3,Package_TO_SOT_SMD:SOT-23,MCP1700T-3302E/TT,1,2,0.38,0.38,GBP,1,read,https://www.digikey.co.uk/en/products/detail/microchip-technology/MCP1700T-3302E-TT/652676
-U19,RaspberryPi_Pico,Module:RaspberryPi_Pico_SMD_HandSolder,SC0915,1,5,3.60,5.00,GBP,1,band,"typical distributor band, not read this session"
+U19,RaspberryPi_Pico,Module:RaspberryPi_Pico_SMD_HandSolder,SC0915,1,1,3.60,5.00,GBP,1,band,"typical distributor band, not read this session"
 U21,TLP2761,Package_SO:SO-6L_10x3.84mm_P1.27mm,"TLP2761(TP,E)",1,2,1.00,2.20,GBP,10,band,"typical distributor band, not read this session"
 U22,TPS560430XF,Package_TO_SOT_SMD:SOT-23-6,TPS560430XFDBVR,1,2,0.70,1.60,GBP,10,band,"typical distributor band, not read this session"

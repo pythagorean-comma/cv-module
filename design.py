@@ -5548,7 +5548,14 @@ PRIMARY_NETS = frozenset({"IGND", "IGND_J", "VIN", "VIN_F", "VIN_J", "VIN_P"})
 # SOT-223 is what a 100 mA regulator goes in, and 160 C/W against 0.77 W is
 # 124 degrees of rise. The DPAK is the same die with a tab.
 V5_PART = "NCP1117-5.0"
-V5_MPN = "NCP1117DT50G"
+# **NCP1117DT50RKG and not DT50G, which is obsolete.** onsemi's own ordering
+# information puts the DT50G in 75-unit rails and the DT50RKG on a 2500 tape
+# and reel; the first is discontinued and the second is active. Same die, same
+# DPAK-3 (TO-252), same fixed 5.0 V at 1 A, so nothing above this line moves --
+# what changed is the carrier, and a carrier is the half of a part number that
+# decides whether it can be bought. Checked 2026-08-21, see
+# docs/footprint-audit.md.
+V5_MPN = "NCP1117DT50RKG"
 V5_VOLTS = 5.0
 V5_VIN_MAX = 20.0
 V5_DROPOUT_V = 1.10                    # maximum, at Iout = 100 mA
@@ -7223,7 +7230,11 @@ ORDER_CODES = {
     "0R":             "RC0805JR-070RL",
     "100p/50V C0G":   "GRM2165C1H101JA01D",
     "1200p/50V C0G":  "GRM2165C1H122JA01D",
-    "22n/50V X7R":    "GRM216R71H223KA01D",
+    # **Murata's GRM216R71H223KA01D is obsolete** -- RS lists its life-cycle
+    # code as such and no longer stocks it. TDK's CEU4J2X7R1H223K125AE is the
+    # same thing: 22 nF, 50 V, X7R, 2.0 x 1.25 x 1.25 mm, which is 0805 on the
+    # land already fitted. Checked against TDK's own product page, 2026-08-21.
+    "22n/50V X7R":    "CEU4J2X7R1H223K125AE",
     # **Six lines were re-sourced and none of the values moved.** The Murata
     # parts below were obsolete or unbuyable; what replaced them is a TDK CGA
     # or C part at the same value, and one Yageo. Checked digit by digit
@@ -7243,7 +7254,13 @@ ORDER_CODES = {
     # nothing compared them. The old code was also X5R while this value string
     # says X7R, so that one line disagreed with itself twice over.
     "10u/16V X7R":    "CGA6M3X7R1C106K200AB",
-    OPAMP:            "OPA1644AIDR",
+    # **The tube and not the reel, and this one is stock rather than
+    # obsolescence.** TI lists OPA1644AID (SOIC-14, 50 per tube) and
+    # OPA1644AIDR (the identical part, 2500 per reel) both as ACTIVE; what
+    # differs is that distributors have the tube and quote no in-stock date for
+    # the reel. Nine pieces is a tube's business either way -- ordering the
+    # reel suffix for nine parts asks a distributor to break a 2500-piece reel.
+    OPAMP:            "OPA1644AID",
     PUMP_C:           "GRM2165C1H222JA01D",
     PUMP_HOLD_C:      "GRM21BR71C105KA01L",
     PUMP_DIODE:       "BAT54-7-F",
@@ -7882,12 +7899,18 @@ def decode_capacitor_code(mpn):
         return _decoded(CAP_CASE_CODES["murata"].get(case),
                         CAP_DIELECTRIC_CODES.get(dielectric),
                         CAP_VOLTAGE_CODES.get(volts), _eia_farads(farads))
-    # CGA, CNA and CNC share one scheme: series, case index, thickness letter,
-    # a digit, then dielectric/voltage/capacitance. CNA is CNC's AEC-Q200
-    # sibling and CGA is the older automotive line; all three number their
-    # cases the same way, which is why one pattern covers them and why that
-    # is stated rather than left for the next reader to rediscover.
-    found = re.match(r"^C(?:GA|NA|NC)(\d)\w\d(C0G|X5R|X7R)(\w\w)(\d{3})",
+    # CGA, CNA, CNC and CEU share one scheme: series, case index, thickness
+    # letter, a digit, then dielectric/voltage/capacitance. CNA is CNC's
+    # AEC-Q200 sibling, CGA is the older automotive line and CEU is the
+    # commercial one; all four number their cases the same way, which is why
+    # one pattern covers them and why that is stated rather than left for the
+    # next reader to rediscover.
+    #
+    # **CEU joined the day a Murata part went obsolete**, which is the argument
+    # for this check rather than a footnote to it: an unparsed code is reported
+    # and counted, never passed, so a re-sourcing pass cannot quietly swap in a
+    # part number nothing decodes.
+    found = re.match(r"^C(?:GA|NA|NC|EU)(\d)\w\d(C0G|X5R|X7R)(\w\w)(\d{3})",
                      mpn)
     if found:
         case, dielectric, volts, farads = found.groups()
