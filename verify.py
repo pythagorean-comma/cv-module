@@ -1299,6 +1299,17 @@ def check_ground_split_on_the_board(board):
     for zone in sexp.find_all(tree, "zone"):
         net = sexp.find(zone, "net")
         layer = sexp.find(zone, "layer")
+        # **Rule areas are skipped, and they are not an edge case any more.**
+        # A keep-out has no net and no fill -- mounts.py draws one around each
+        # of the six fixings so the pours are voided where a screw passes
+        # through both planes, which would otherwise bridge MAGND to MDGND at
+        # every fixing and give the module six ground stars instead of one.
+        # This check is about where *poured copper* is, so a zone with no net
+        # is not its subject. It read net[1] unconditionally until the first
+        # board-level rule area existed, and then it did not fail -- it raised
+        # a TypeError, which is the loud version and the lucky one.
+        if net is None or sexp.find(zone, "keepout") is not None:
+            continue
         points = sexp.find(sexp.find(zone, "polygon"), "pts")
         corners = [(float(xy[1]), float(xy[2]))
                    for xy in sexp.find_all(points, "xy")]
@@ -1842,6 +1853,18 @@ def check_board_is_the_design(board):
     lands = {}
     for footprint in sexp.find_all(tree, "footprint"):
         library = str(footprint[1])
+        # **Board fixings are not the design's parts and never will be.** They
+        # have no pins, no net, no BOM line and no symbol -- a mounting hole
+        # is mechanical, and a netlist has nothing to say about one. Excluded
+        # here by the same all-NPTH test check_mounting_holes() uses, so the
+        # two agree by construction rather than by both being maintained; that
+        # check is what holds them against placement.mounting_holes(), and
+        # this one would otherwise report six parts "on the board and not in
+        # design.py" for ever.
+        pads = list(sexp.find_all(footprint, "pad"))
+        if pads and all(len(pad) > 2 and str(pad[2]).startswith("np_")
+                        for pad in pads):
+            continue
         for prop in sexp.find_all(footprint, "property"):
             if prop[1] == "Reference":
                 on_board.add(str(prop[2]))
@@ -2300,6 +2323,71 @@ def check_midi_bypass(board):
     return problems
 
 
+# How many fixings **the board has**, in the shape UNROUTED_ITEMS is: a
+# declared measure of how far the artefact is from the design, held against
+# the board by the check below and gated on by gen_plots.orderable(). It is 0.
+# Up as fixings are laid, and only with the pattern they were laid to.
+#
+# The only four unplated holes in the fabrication package belong to the
+# Raspberry Pi Pico's own footprint, so a 106.9 x 233.1 mm board carrying a
+# 21.8 x 9.1 x 11.2 mm converter brick, three relays and a soldered-down
+# module has nothing to bolt it to anything.
+#
+# **Nothing here could have said so.** gen_fab.check_holes() counts the drill
+# file against the board's own vias and pads and agrees with it exactly -- a
+# package can be a perfect package of a board with no fixings in it.
+# placement.check_placed() holds the parts the netlist declares, and a
+# mounting hole is not in a netlist. The repo does carry an argument *about*
+# mounting holes -- MOUNTING_IS_ISOLATED, quoting the mixer's own "four plated
+# holes would be four more bridges between AGND and PGND" -- so the reasoning
+# arrived from upstream at the pinned commit and the holes did not. An
+# inherited argument with nothing to apply it to.
+#
+# **What the design asks for is placement.mounting_holes(), and it is six.**
+# That was briefly written here as underivable, on the grounds that where
+# fixings go is a property of an enclosure this repository does not have. The
+# dependency runs the other way: the enclosure is bespoke and is drawn *after*
+# this board, so the pattern is an input to it. Section 6 forbids inventing a
+# value and requires deriving one that can be derived, and this one can --
+# from the board's own span, thickness and courtyards. See
+# placement.mounting_deflection().
+MOUNTING_HOLES = 6
+
+
+def check_mounting_holes(board):
+    """The board's fixings, counted off the board, held against MOUNTING_HOLES.
+
+    A fixing is a footprint whose pads are *all* non-plated: that is what
+    distinguishes a mounting hole from a through-hole part, and it is why the
+    Pico's own four NPTH do not count -- it has 40 electrical pads as well.
+
+    Held in both directions, like every other ratchet here. Going up needs the
+    declaration moved, which is the point at which somebody has to say where
+    they went and against which enclosure.
+    """
+    if not board.exists():
+        raise SystemExit(f"{board} does not exist -- run gen_pcb.py")
+    tree = sexp.parse(board.read_text())
+    fixings = []
+    for footprint in sexp.find_all(tree, "footprint"):
+        pads = list(sexp.find_all(footprint, "pad"))
+        if not pads:
+            continue
+        if all(len(pad) > 2 and str(pad[2]).startswith("np_") for pad in pads):
+            reference = None
+            for prop in sexp.find_all(footprint, "property"):
+                if len(prop) > 2 and str(prop[1]) == "Reference":
+                    reference = str(prop[2])
+            fixings.append(reference)
+    if len(fixings) != MOUNTING_HOLES:
+        return [f"the board carries {len(fixings)} board fixings "
+                f"({', '.join(sorted(f for f in fixings if f)) or 'none'}) "
+                f"and verify.MOUNTING_HOLES declares {MOUNTING_HOLES}. Up "
+                f"only with the enclosure they were placed against -- see "
+                f"gen_plots.orderable(), which refuses a package at zero"]
+    return []
+
+
 CHECKS = (
     ("1  no load on the mixer's rails", check_no_mixer_rail_load, ("nets",)),
     ("2a exactly one ground bond", check_one_ground_bond, ("nets",)),
@@ -2340,6 +2428,7 @@ CHECKS = (
     ("   MIDI in is isolated, and by one part", check_midi,
      ("nets", "values")),
     ("   U21's bypass is inside its 10 mm", check_midi_bypass, ("board",)),
+    ("   the board's fixings are declared", check_mounting_holes, ("board",)),
 )
 
 

@@ -615,6 +615,230 @@ have been asked, which is this repo's oldest shape.
   raises now. A writer that does not read its own artefact back cannot tell
   "wrote it" from "wrote it somewhere".
 
+## Every geometric instrument was pointed at the audio nets
+
+**And the class none of them covered is the one carrying the fastest edges.**
+`constraints.parallel_runs()` compares audio against audio and audio against
+the CV filter's passive node. `audio_off_its_own_plane()` and
+`return_loops()` both filter to `AUDIO_FAMILIES`. `floorplan.check_crossings()`
+reads the **netlist**, so it knows *which* thirteen signals cross the domain
+boundary and nothing at all about where or how. So two things were true of the
+board as laid and no number in this repository moved for either:
+
+* **MCLK runs 0.428 mm from `SIN6` for 30.2 mm.** A continuously running
+  10.4 MHz clock, beside the module's own output to the mixer's wiper, on
+  `F.Cu`;
+* **the ADC's bundle crosses the ground split 75.6 mm from `R902`**, which is
+  the only conductor joining the two planes. `In1.Cu` and `In2.Cu` are split at
+  the same y, so a crossing signal has no return path underneath it at all: the
+  current runs along one pour's edge to the star, crosses, and runs back. The
+  loop is about twice the figure.
+
+`constraints.digital_audio_runs()` and `constraints.crossing_returns()` are the
+instruments and both are **ratchets** — `DIGITAL_AUDIO_MM` = 244.2 and
+`CROSSING_RETURN_MM` = 75.6, in the shape `AUDIO_OFF_MAGND_MM` is. Section 5e
+of `docs/constraints.md` is the output.
+
+Four things about them that must survive compaction.
+
+* **The aggressor list is read, not written.** `crossing_signals()` takes
+  `floorplan.CROSSINGS` and drops the rails and the two grounds, so a
+  fourteenth crossing arrives in `constraints.py` by being declared in
+  `floorplan.py`. That is `CROSSING_RULE`'s own correction applied to its
+  consumer: the rule went stale because a second artefact restated it.
+* **`PWM1`–`PWM6` are absent from the crossing list and that is the right
+  answer, not a gap.** `U11` straddles the split by design — digital in on one
+  row, precision analogue out on the other — so those six never cross in
+  copper. It is the arrangement `shared()` argues for at length and is worth
+  40 dB. The ADC's bundle did not get it.
+* **`domain_bridges()` is derived from the netlist rather than named.**
+  `verify.check_module_star()` names `R902`, and a named part cannot tell you
+  that a second one would have helped. Read from `design.NETS`, a stitching
+  capacitor across the split shows up by being drawn.
+* **What lowers each figure is different, and neither is a re-route of the
+  board.** `DIGITAL_AUDIO_MM` comes down with `krt.py --nets "MCLK"` — one net,
+  seconds, every other net's copper untouched, and `returns.py` after it.
+  `CROSSING_RETURN_MM` comes down with two or three 10 nF bridging MAGND to
+  MDGND *on the split*, at x ≈ 65 and x ≈ 80. **That adds no DC path, so
+  `R902` stays the module's only DC star and constraint §5.2 — which is about
+  `R901` and the *mixer* — is untouched either way.** What it does need first
+  is for `verify.check_module_star()` to learn the difference between a DC
+  bridge and an AC one, because today it holds "exactly one MAGND/MDGND part"
+  and would refuse the fix.
+
+**And the coupling figure is comfortable, which is not the finding.** Priced
+the way `board_coupling()` prices the others — `trace_mutual_capacitance()`
+into `pin_impedance()` — the worst pair lands near −104 dB against a −54 dB
+requirement. The finding is that **nothing computed it**, so replacing the seed
+router changed the number and no instrument could say by how much. That is the
+trace-coupling finding one section up, arriving one *net class* along instead
+of one router along.
+
+## The board's six fixings, and "underivable" was a claim about a dependency
+
+**Read this before wondering why `gen_fab.py` exits 1.**
+
+The only four unplated holes in the fabrication package belong to the
+Raspberry Pi Pico's own footprint. A 106.9 × 233.1 mm board carrying a
+21.8 × 9.1 × 11.2 mm converter brick, three relays and a soldered-down module
+had **no fixings at all**. `verify.MOUNTING_HOLES` is the board's own count,
+declared in the shape `UNROUTED_ITEMS` is; `verify.check_mounting_holes()`
+holds it against the board, and `gen_plots.orderable()` gates on the
+*shortfall* against what the design asks for. It read 0 for the life of the
+design and reads **6** now.
+
+**Nothing here could have said so.** `gen_fab.check_holes()` counts the drill
+file against the board's own vias and pads and agrees exactly -- *a perfect
+package of a board with nothing to bolt down*. `placement.check_placed()`
+holds the parts the netlist declares, and a mounting hole is not in a netlist.
+And the repo carries an argument *about* mounting holes: `MOUNTING_IS_ISOLATED`,
+quoting the mixer's own *"four plated holes would be four more bridges between
+AGND and PGND"*. **The reasoning arrived from upstream at the pinned commit and
+the holes did not** -- an inherited argument with nothing to apply it to.
+
+### The correction, and it is the reusable half
+
+This section first said the pattern was **not derivable here**, because where
+fixings go is a property of an enclosure this repository does not have, and
+§6 forbids guessing. Every clause true, and the conclusion wrong, because it
+assumed a dependency direction: *enclosure decides board*.
+
+**It runs the other way.** The mixer targeted a 1590J because that was a
+standard size and its own 122.8 × 50.4 mm board fits one. This board fits no
+standard enclosure, which is exactly why the enclosure became bespoke -- and a
+bespoke enclosure is drawn **after** the board, to whatever pattern the board
+declares. So the fixings are an *input* to the enclosure, and §6 stops
+forbidding and starts requiring: a value that can be derived should be.
+
+**The general form, and it is a new shape for this collection.** Every previous
+instance was a claim whose *test* had gone stale — a rule written in terms of
+how it was currently satisfied, a constant that was a fact about its only
+caller. This one is a claim of *impossibility* resting on an unstated
+dependency direction. "X cannot be derived here" is never a fact about X on its
+own; it is a fact about what X is assumed to depend on, and that assumption is
+the thing to check first. Nothing can instrument it — a missing derivation
+leaves no artefact, which is `DEFERRED`'s lesson at one more remove.
+
+### What the derivation says, and two things came out of it
+
+`placement.mounting_deflection()` models the board as a uniformly loaded beam
+along its **long** axis -- the one that bends -- with the thickness taken from
+`rules.FAB_FINISHED_MM` so it moves if the stackup does. It reports sag per g
+and the acceleration that reaches a millimetre, and **claims nothing about what
+acceleration a pedal on a stage floor sees**: that is `return_sensitivity()`'s
+discipline reused.
+
+| fixings | span | sag per g | 1 mm of sag at |
+|---|---|---|---|
+| 2 | 233.1 mm | 0.166 mm | 6.0 g |
+| **4** | **233.1 mm** | **0.166 mm** | **6.0 g** |
+| **6** | 116.5 mm | 0.010 mm | **96.5 g** |
+| 8 | 77.7 mm | 0.002 mm | 488.6 g |
+
+* **Four fixings are worth nothing over two.** Four means one at each corner,
+  and the corners on the long axis are still the full 233 mm apart. The
+  obvious pattern is the one that buys nothing.
+* **Six, and the choice is robust rather than close.** 4 → 6 is **16×** for
+  two holes because it halves a span entering to the fourth power; 6 → 8 is
+  5.1× for two more. `FR4_MODULUS_PA` and `FR4_DENSITY_KG_M3` are borrowed and
+  flagged as borrowed, in the style `rules.track_current()` uses for IPC-2221
+  — and the L⁴ dependence means three times out in either moves the
+  acceleration by three and does not reorder the table at all. That is this
+  repo's own test for whether a borrowed number may be used.
+
+`placement.mounting_holes()` then **walks** each fixing along its own edge from
+the nominal corner or mid-edge until the keep-out clears every courtyard, so a
+position is a result rather than a literal — `pack_east()` and `clear_south()`
+one artefact along. `check_mounting_gap()` walks all 290 parts against it, the
+way `check_courtyard_gap()` does, so a walk that gave up says which pair beat
+it.
+
+**Two of the six had to slide, and the second is a finding.**
+
+* `H901` slid **16.5 mm** east: the north-west corner is taken by `J1`, the
+  first of the six loom connectors, whose column runs down the west edge.
+* `H906` slid **53.0 mm** west, and there is no south-east fixing at all.
+  `U19` is `EDGE_PARTS`' one entry — at the east edge so its USB socket is
+  reachable — **and it is the southernmost thing on the board as well**, which
+  is the same two-sided fact that grew the primary's isolation region a tail.
+  So `placement.mounting_reach()` puts the **SE corner 57.1 mm from its nearest
+  fixing, and that corner carries the USB socket**: a plug pushed into it is a
+  force at the free end of a cantilever. Grow the board, move the module, or
+  accept it — all three are decisions, so the function reports the distance
+  rather than taking one.
+
+### They are fitted, and `mounts.py` is how
+
+`verify.MOUNTING_HOLES` is **6**, the board carries them, and `gen_fab.py`
+writes a package again — 1186 drill hits, of which **six are the 3.2 mm
+unplated tool**.
+
+**`mounts.py` is `returns.py`'s sibling and it needs `pcbnew` where
+`returns.py` needed only text.** A stitch is a via in copper that already
+exists. A fixing is a *hole through both reference planes*: `In1.Cu` is MAGND
+and `In2.Cu` is MDGND, so an M3 screw through an unvoided hole bridges the two
+domains at every fixing — **six ground stars instead of one**, which is
+constraint §5.2 defeated by a bag of hardware. So each hole gets a rule area on
+all four copper layers and the pours are refilled around it, and a zone fill is
+not something a text edit can do. Measured on the board: every fixing sits in a
+void with **1.85 to 3.28 mm** between the hole edge and the nearest plane
+copper.
+
+It adds and replaces and disturbs nothing — `6256 tracks and vias, unchanged`
+is asserted rather than hoped for, and the fixings are measured back off the
+saved board before it reports success, which is `returns.py`'s own rule after
+135 vias once landed inside a footprint.
+
+**The router had to be told first, and that is the finding.** Nothing ever
+reserved the margin, so the router used it: `PIN5` ran **183 mm** through two of
+the six keep-outs and was the only net that did. `krt.keepout_rects()` has seven
+entries now instead of one — the primary's region and the six fixings, all
+derived from `placement` rather than typed — and `krt.py --nets "PIN5"` re-laid
+it in one pass, gate accept, planes intact. `returns.py` afterwards cost four
+stitches and moved `AUDIO_RETURN_AREA_MM2` from 367.8 to **370.7**, which is the
+ratchet's sanctioned case: *up only with the vias named*, and the named net is
+the one that moved.
+
+**Three things bit on the way and all three are recorded in the file.**
+
+* **`MOUNTING_KEEPOUT_MM` is KiCad's courtyard, not an M3 washer's.** The
+  derivation wanted 6.5 mm; `MountingHole_3.2mm_M3` draws its `F.CrtYd` circle
+  at `(end 3.45 0)` — **6.9 mm** — and DRC grades against the courtyard, so the
+  land pattern's number binds and ours does not. Two overlaps on positions this
+  repo had just certified as clear. That is `check_courtyards()`'s finding
+  arriving at a part this project *placed* rather than one it routed.
+* **And then 46 µm of it was the stroke width.** `H906` cleared `U19` by
+  0.046 mm on the corrected arithmetic and DRC still called them overlapping,
+  because a courtyard outline is a *stroked* polygon and both strokes count.
+  `mounting_reach_mm()` adds `COURTYARD_TOLERANCE_MM`, which is the same 0.06
+  `check_courtyards()` already uses.
+* **`check_ground_split_on_the_board()` had never seen a zone with no net.**
+  A rule area has none, so `str(net[1])` raised `TypeError` the first time a
+  board-level keep-out existed. It did not fail quietly, which is the lucky
+  version; it is skipped explicitly now, because that check's subject is where
+  *poured copper* is.
+
+**Two `pcbnew` facts that cost an hour and are not written down anywhere
+else.** `ZONE.SetOutline()` takes ownership through SWIG, so an outline built
+as a local is freed when the function returns and the filler **segfaults**
+several hundred lines later — build into `zone.Outline()` instead. And after
+`board.Remove()`, SWIG's type registry stops resolving *for the rest of the
+process*: `GetArea()` returns raw `SwigPyObject`s and even module-level
+`pcbnew.FootprintLoad` comes back as an object with no `FootprintLoad` on it.
+Reloading the board does not clear it. So `mounts.py --commit` runs its child
+twice — remove and save in one interpreter, add and fill in the next.
+
+**And a fixing is not one of the design's parts.**
+`check_board_is_the_design()` reported six parts "on the board and not in
+design.py" until it learned that: a mounting hole has no pins, no net, no BOM
+line and no symbol, and a netlist has nothing to say about one. It is excluded
+by the same all-NPTH test `check_mounting_holes()` uses, so the two agree by
+construction rather than by both being maintained.
+
+**What is still open is the south-east corner**, and it is a decision rather
+than a defect: `mounting_reach()` puts it **57 mm** from `H906`, and it carries
+the USB socket. Grow the board, move the module, or accept it.
+
 ## The fabrication package exists, and what it will not decide is the point
 
 **`gen_fab.py` writes `fab/`, and the gate it reads is the one that was
@@ -1382,6 +1606,11 @@ cv-module/
   krt.py                 drives KiCadRoutingTools from rules.py, placement.py
                          and design.py. Generates every argument; never writes
                          the board without --commit. docs/routing-tool.md
+  mounts.py              the board's six fixings. Derives nothing itself --
+                         placement.mounting_holes() does -- and puts them on
+                         the board through pcbnew, with a rule area each so
+                         the pours are voided where a screw passes through
+                         both planes. Idempotent; --commit writes
   returns.py             the return-via stitching. Reads the board, finds the
                          audio vias with no ground via near them, and adds one
                          where the rules allow. Adds only -- it disturbs no

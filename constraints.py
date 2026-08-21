@@ -482,7 +482,7 @@ def parallel_runs(board):
 # line. So this is UNROUTED_ITEMS' rule applied to millimetres -- **down as
 # copper is moved, up only with the nets named** -- and not an assertion of
 # zero, which would be unachievable and would therefore be switched off.
-AUDIO_OFF_MAGND_MM = 118.2
+AUDIO_OFF_MAGND_MM = 118.1
 
 
 def audio_off_its_own_plane(board=BOARD):
@@ -604,7 +604,7 @@ def _vias(board=BOARD):
 # It was **1990.6 mm** before returns.py laid a stitch, at a median separation
 # of 7.39 mm and a worst of 22.76. Down as copper is laid; up only with the
 # vias named in the failure message.
-AUDIO_RETURN_AREA_MM2 = 367.8
+AUDIO_RETURN_AREA_MM2 = 370.7
 
 
 def return_loops(board=BOARD):
@@ -680,6 +680,251 @@ def check_return_loops(board=BOARD):
             + ", ".join(f"{r['net']} at ({r['x']:.2f}, {r['y']:.2f}) "
                         f"{r['gap_mm']:.2f} mm" for r in worst)
             + ". Down as copper is laid, up only with the vias named.")
+    return measured
+
+
+# ---------------------------------------------------------------------------
+# 5e. The domain crossings: what they run beside, and where their return goes
+# ---------------------------------------------------------------------------
+#
+# **Every geometric instrument above this line is pointed at the audio nets.**
+# parallel_runs() compares audio against audio and audio against the CV
+# filter's passive node; audio_off_its_own_plane() and return_loops() both
+# filter to AUDIO_FAMILIES; floorplan.check_crossings() reads the *netlist*,
+# so it knows which signals cross the domain boundary and nothing at all about
+# where or how. The class none of them covers is the one carrying the fastest
+# edges on the board.
+#
+# So MCLK -- a continuously running 10.4 MHz clock -- could be laid 0.43 mm
+# from SIN6 for 30 mm, and its return current could be sent on a 150 mm round
+# trip to reach the only conductor joining the two planes, and **not one
+# number in this repository would move.** Both are true of the board as laid.
+#
+# That is the trace-coupling finding one section up arriving one net class
+# along instead of one router along: an instrument written for the victims
+# that were interesting when it was written. The two functions below are the
+# same measurement asked of the aggressors nobody had measured.
+
+
+def crossing_signals():
+    """The signals that cross the domain boundary. Read, not listed.
+
+    floorplan.CROSSINGS already owns the list and floorplan.check_crossings()
+    already holds it against the netlist, so a fourteenth crossing arrives in
+    this file by being declared there rather than by somebody remembering to
+    add it here. That is CROSSING_RULE's own correction applied to its
+    consumer: the rule went stale because a second artefact restated it.
+
+    Rails and grounds are dropped. A rail's coupling into audio is a supply
+    question and design.rail_crosstalk() owns it; a ground plane is the return
+    path rather than an aggressor.
+    """
+    # Imported here rather than at the top because floorplan imports design
+    # and this file imports both -- a local import keeps the cycle impossible
+    # rather than merely absent today.
+    import floorplan
+    skip = set(design.RAILS) | set(RETURN_VIA_NETS)
+    return tuple(net for net in floorplan.CROSSINGS if net not in skip)
+
+
+def _net_segments(board, names):
+    """Copper on whole nets, keyed (net, layer). The unchannelled sibling of
+    _segments(), through _raw_segments() -- which was checked against the
+    parser and finds all 5081, unlike the via regex that found 151 of 994."""
+    import collections
+    text = board.read_text() if hasattr(board, "read_text") else board
+    wanted = set(names)
+    out = collections.defaultdict(list)
+    for x0, y0, x1, y1, _w, layer, net in _raw_segments(text):
+        if net in wanted and math.hypot(x1 - x0, y1 - y0) > 1e-6:
+            out[(net, layer)].append((x0, y0, x1, y1))
+    return out
+
+
+# Total coupled length, over every (crossing signal, audio net) pair that runs
+# within COUPLING_REACH_MM on one layer. A ratchet, in the shape
+# AUDIO_OFF_MAGND_MM is: down as copper is moved, up only with the pairs named.
+#
+# **The number is dominated by one pair and that is the useful part.** MCLK
+# against SIN6 is 30.2 mm at 0.428 mm, and MCLK is the only aggressor here
+# that runs continuously rather than in bursts at the 2 kHz envelope frame.
+# One `krt.py --nets "MCLK"` is what lowers this.
+DIGITAL_AUDIO_MM = 244.2
+
+
+def digital_audio_runs(board=BOARD):
+    """Coupled length between each crossing signal and each audio net.
+
+    Same layer, same machinery as parallel_runs(): _overlap() decides what
+    counts as coupled and COUPLING_REACH_MM decides how close is close, so the
+    two measurements are comparable rather than merely similar.
+
+    **What this can and cannot price.** Through design.trace_mutual_
+    capacitance() into pin_impedance() the worst pair here lands near -104 dB,
+    fifty decibels inside the -54 dB requirement -- so on a steady-state
+    divider it is comfortable, and that model is the whole of what board_
+    coupling() does. What it does not cover is an aggressor whose *return*
+    has to cross the pour gap, which is crossing_returns() below and is the
+    same geometry asked the other way round. Neither function is the answer
+    on its own; the pair of them is.
+    """
+    audio = re.compile(r"^(%s)\d+$" % "|".join(AUDIO_FAMILIES))
+    text = board.read_text() if hasattr(board, "read_text") else board
+    audio_nets = sorted({net for *_rest, net in _raw_segments(text)
+                         if audio.match(net)})
+    segments = _net_segments(text, tuple(crossing_signals()) + tuple(audio_nets))
+
+    pairs = {}
+    for (aggressor, layer_a), aggressor_segments in segments.items():
+        if aggressor not in crossing_signals():
+            continue
+        for (victim, layer_v), victim_segments in segments.items():
+            if victim not in audio_nets or layer_a != layer_v:
+                continue
+            length, pitch = 0.0, None
+            for sa in aggressor_segments:
+                for sb in victim_segments:
+                    # Bounding-box reject before the sampled overlap, which is
+                    # 12 point-to-segment solves and the inner loop here is
+                    # thousands of pairs.
+                    if (min(sa[0], sa[2]) - COUPLING_REACH_MM
+                            > max(sb[0], sb[2])
+                            or max(sa[0], sa[2]) + COUPLING_REACH_MM
+                            < min(sb[0], sb[2])
+                            or min(sa[1], sa[3]) - COUPLING_REACH_MM
+                            > max(sb[1], sb[3])
+                            or max(sa[1], sa[3]) + COUPLING_REACH_MM
+                            < min(sb[1], sb[3])):
+                        continue
+                    piece, gap = _overlap(sa, sb)
+                    if piece > 0.0:
+                        length += piece
+                        pitch = gap if pitch is None else min(pitch, gap)
+            if length > 0.0:
+                key = f"{aggressor}/{victim}"
+                if key not in pairs or length > pairs[key]["length_mm"]:
+                    pairs[key] = {"length_mm": length, "pitch_mm": pitch,
+                                  "layer": layer_a}
+
+    total = sum(row["length_mm"] for row in pairs.values())
+    worst = max(pairs.items(), key=lambda kv: kv[1]["length_mm"],
+                default=(None, None))
+    return {"pairs": pairs, "total_mm": total,
+            "worst": worst[0], "worst_row": worst[1],
+            "declared_mm": DIGITAL_AUDIO_MM}
+
+
+def check_digital_audio_runs(board=BOARD):
+    """The ratchet. Raises if a crossing signal has moved closer to audio."""
+    measured = digital_audio_runs(board)
+    if measured["total_mm"] > DIGITAL_AUDIO_MM + 0.05:
+        worst = sorted(measured["pairs"].items(),
+                       key=lambda kv: -kv[1]["length_mm"])
+        raise AssertionError(
+            f"crossing signals run {measured['total_mm']:.1f} mm alongside "
+            f"audio and constraints.DIGITAL_AUDIO_MM declares "
+            f"{DIGITAL_AUDIO_MM:.1f} -- "
+            + ", ".join(f"{pair} {row['length_mm']:.1f} mm at "
+                        f"{row['pitch_mm']:.2f}" for pair, row in worst[:4])
+            + ". Down as copper is moved, up only with the pairs named.")
+    return measured
+
+
+# How far a crossing signal's return current has to travel to find a conductor
+# between the two ground planes, in millimetres, worst case. A ratchet.
+#
+# **Why it is a large number and not a small one.** In1.Cu and In2.Cu are both
+# split at the same y, so a signal that crosses the boundary has no return
+# path underneath it at all: the current has to run along one pour's edge to a
+# part that bridges the domains, cross, and run back. Today exactly one part
+# does that -- R902, at the west edge -- and the envelope ADC's bundle crosses
+# at the east one.
+#
+# Lowering it is a stitching capacitor on the split, not a re-route. That adds
+# no DC path, so R902 stays the module's only DC star and constraint 5.2 --
+# which is about R901 and the *mixer* -- is untouched either way. What it does
+# need is for verify.check_ground_star() to learn the difference between a DC
+# bridge and an AC one, because today it holds "exactly one MAGND/MDGND part"
+# and would refuse the fix.
+CROSSING_RETURN_MM = 75.6
+
+
+def domain_bridges():
+    """Every part with a pin on MAGND and a pin on MDGND, and where it sits.
+
+    Derived from the netlist rather than listed, so a stitching capacitor
+    appears here by being drawn. That is the difference between this and the
+    declaration it replaces: verify.check_ground_star() names R902, and a
+    named part cannot tell you that a second one would have helped.
+    """
+    magnd = {ref for ref, _pin in design.NETS.get("MAGND", ())}
+    mdgnd = {ref for ref, _pin in design.NETS.get("MDGND", ())}
+    out = {}
+    for ref in sorted(magnd & mdgnd):
+        try:
+            x, y, *_rotation = placement.position(ref)
+        except Exception:                       # not placed is not a bridge
+            continue
+        out[ref] = (x, y)
+    return out
+
+
+def crossing_returns(board=BOARD):
+    """Where each crossing signal cuts the pour gap, and how far its return is.
+
+    The gap is the two pour edges, SPLIT_Y +- GROUND_GAP/2 -- the same pair
+    audio_off_its_own_plane() measures from, for the same reason: between them
+    there is no reference plane at all, so a track that spans them has nothing
+    underneath it and its return current is somewhere else entirely.
+
+    The distance reported is to the nearest domain_bridges() part, measured in
+    the plane rather than through it. It is a lower bound on the return's path
+    and an upper bound on nothing -- the current also has to get back, so the
+    loop is about twice this.
+    """
+    edge = placement.SPLIT_Y
+    signals = crossing_signals()
+    segments = _net_segments(board, signals)
+    bridges = domain_bridges()
+
+    per_net = {}
+    for (net, layer), rows in segments.items():
+        for x0, y0, x1, y1 in rows:
+            if (y0 - edge) * (y1 - edge) > 0:
+                continue                        # both ends the same side
+            t = 0.5 if y1 == y0 else (edge - y0) / (y1 - y0)
+            at_x = x0 + t * (x1 - x0)
+            nearest, distance = None, math.inf
+            for ref, (bx, by) in bridges.items():
+                gap = math.hypot(at_x - bx, edge - by)
+                if gap < distance:
+                    nearest, distance = ref, gap
+            row = {"x_mm": at_x, "layer": layer,
+                   "nearest": nearest, "distance_mm": distance}
+            if net not in per_net or distance > per_net[net]["distance_mm"]:
+                per_net[net] = row
+
+    worst = max(per_net.items(), key=lambda kv: kv[1]["distance_mm"],
+                default=(None, {"distance_mm": 0.0}))
+    return {"edge_mm": edge, "bridges": bridges, "per_net": per_net,
+            "worst": worst[0], "worst_mm": worst[1]["distance_mm"],
+            "declared_mm": CROSSING_RETURN_MM}
+
+
+def check_crossing_returns(board=BOARD):
+    """The ratchet. Raises if a crossing's return path has got longer."""
+    measured = crossing_returns(board)
+    if measured["worst_mm"] > CROSSING_RETURN_MM + 0.05:
+        worst = sorted(measured["per_net"].items(),
+                       key=lambda kv: -kv[1]["distance_mm"])
+        raise AssertionError(
+            f"the worst crossing return is {measured['worst_mm']:.1f} mm and "
+            f"constraints.CROSSING_RETURN_MM declares "
+            f"{CROSSING_RETURN_MM:.1f} -- "
+            + ", ".join(f"{net} at x={row['x_mm']:.1f} is "
+                        f"{row['distance_mm']:.1f} mm from {row['nearest']}"
+                        for net, row in worst[:4])
+            + ". Down as bridges are added, up only with the nets named.")
     return measured
 
 
@@ -888,6 +1133,33 @@ def _report():
         print(f"   the field is the term nothing here derives -- "
               f"board_coupling() solves trace against trace, and an aggressor "
               f"inside a potted brick has no drawing")
+        print()
+        runs = check_digital_audio_runs()
+        rets = check_crossing_returns()
+        print("5e. the domain crossings, as aggressors and as return paths")
+        print("    every measurement above this line filters to the audio "
+              "nets; check_crossings() reads the netlist and knows which "
+              "signals cross and nothing about where")
+        for pair, row in sorted(runs["pairs"].items(),
+                                key=lambda kv: -kv[1]["length_mm"])[:4]:
+            print(f"   {pair:<16} {row['length_mm']:6.1f} mm at "
+                  f"{row['pitch_mm']:.3f} mm pitch on {row['layer']}")
+        print(f"   total {runs['total_mm']:>6.1f} mm against "
+              f"{runs['declared_mm']:.1f} declared -- a ratchet, and "
+              f"{runs['worst']} is the one aggressor that runs continuously")
+        print(f"   priced as board_coupling() prices the others it is ~50 dB "
+              f"inside the requirement; what that model does not carry is the "
+              f"return path below")
+        print(f"   bridges between the planes: "
+              f"{', '.join(f'{r} at x={x:.1f}' for r, (x, _y) in rets['bridges'].items())}")
+        for net, row in sorted(rets["per_net"].items(),
+                               key=lambda kv: -kv[1]["distance_mm"])[:4]:
+            print(f"   {net:<16} crosses at x = {row['x_mm']:6.1f}, "
+                  f"{row['distance_mm']:5.1f} mm from {row['nearest']}")
+        print(f"   worst {rets['worst_mm']:>6.1f} mm against "
+              f"{rets['declared_mm']:.1f} declared -- so the return loop is "
+              f"about twice it, and PWM1-6 are absent because U11 straddles "
+              f"the split by design")
         print()
         induced = max(r["inductive_db"] for r in b["rows"])
         print(f"   inductive, the same        {induced:>7.1f} dB   "

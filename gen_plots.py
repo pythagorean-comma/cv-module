@@ -52,6 +52,7 @@ import subprocess
 import sys
 
 import design
+import placement
 import verify
 from toolchain import kicad
 
@@ -107,6 +108,26 @@ def orderable():
             f"the board has {verify.UNROUTED_ITEMS} unrouted connections. See "
             f"verify.UNROUTED_ITEMS, and gen_pcb.py's own docstring for why "
             f"the copper is not generated")
+    # **The fourth reason, and it is the first one that is not electrical.**
+    # A board with no fixings is a board nobody can mount, and every other
+    # gate here would pass on it: the netlist is complete, the copper is
+    # closed, DRC is clean, and gen_fab.check_holes() would count the drill
+    # against the board and agree exactly -- a perfect package of a board with
+    # nothing to bolt down.
+    #
+    # Read as a *shortfall* rather than as a zero: what the design asks for is
+    # placement.mounting_holes(), derived from the board's own span and
+    # courtyards, and what the board has is verify.MOUNTING_HOLES. The gate is
+    # the comparison, which is the one thing neither number can be on its own.
+    wanted = len(placement.mounting_holes())
+    if verify.MOUNTING_HOLES < wanted:
+        reasons.append(
+            f"the board carries {verify.MOUNTING_HOLES} of the {wanted} "
+            f"fixings placement.mounting_holes() derives: the only unplated "
+            f"holes on it belong to the controller module's own footprint. "
+            f"Adding them needs the footprints placed and both plane pours "
+            f"refilled around them -- the pours run to 0.45 mm of the board "
+            f"edge, so this is a KiCad step and not a text one")
     return reasons
 
 

@@ -1391,6 +1391,125 @@ def main():
         finally:
             design.CAP_DC_BIAS[part] = original
 
+    # **The three new instruments, and each is planted the way its own subject
+    # allows.** All three exist because a finding had no check: nothing in
+    # this repository measured a digital aggressor against audio, nothing
+    # measured where a crossing signal's return current goes, and nothing
+    # asked whether the board can be bolted to anything.
+    def _a_crossing_signal_moves_closer():
+        import constraints
+        import re as _re
+        text = verify.PCB.read_text()
+        # MCLK's own copper, translated 0.2 mm east -- which is toward SIN6,
+        # the pair that dominates the figure. An artefact plant rather than a
+        # declaration one, because the thing being claimed is that the check
+        # reads the copper: move the aggressor and the number has to move.
+        pattern = _re.compile(
+            r'(\t\(segment\n\t\t\(start )([-\d.]+)( )([-\d.]+)'
+            r'(\)\n\t\t\(end )([-\d.]+)( )([-\d.]+)'
+            r'(\)\n\t\t\(width [\d.]+\)\n\t\t\(layer "[^"]+"\)\n\t\t\(net ")'
+            r'MCLK(")')
+
+        def _east(match):
+            return (match.group(1) + f"{float(match.group(2)) + 0.2:.6f}"
+                    + match.group(3) + match.group(4) + match.group(5)
+                    + f"{float(match.group(6)) + 0.2:.6f}" + match.group(7)
+                    + match.group(8) + match.group(9) + "MCLK"
+                    + match.group(10))
+
+        moved, count = pattern.subn(_east, text)
+        if not count:
+            raise RuntimeError(
+                "no MCLK segment matched -- the mutation plants nothing, and "
+                "constraints._raw_segments()' pattern has moved")
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(moved)
+            planted = pathlib.Path(handle.name)
+        try:
+            constraints.check_digital_audio_runs(planted)
+        finally:
+            planted.unlink()
+
+    def _the_only_plane_bridge_goes_missing():
+        # crossing_returns() measures to the nearest domain_bridges() part,
+        # and domain_bridges() is derived from the netlist rather than named
+        # -- which is the whole reason a stitching capacitor would show up in
+        # it. Take R902 off MAGND and there is no conductor between the planes
+        # at all, so every crossing's return becomes unbounded.
+        import constraints
+        original = list(design.NETS["MAGND"])
+        design.NETS["MAGND"] = [pin for pin in original if pin[0] != "R902"]
+        if len(design.NETS["MAGND"]) == len(original):
+            design.NETS["MAGND"] = original
+            raise RuntimeError(
+                "R902 is not on MAGND -- the mutation plants nothing, and "
+                "design.DOMAIN_STAR has moved")
+        try:
+            constraints.check_crossing_returns()
+        finally:
+            design.NETS["MAGND"] = original
+
+    def _a_fixing_appears_undeclared():
+        # The board grows one mounting hole and nobody moves the declaration.
+        # Planted in the artefact rather than in MOUNTING_HOLES, because what
+        # has to be provable is that the count comes off the board: a check
+        # that compared the constant to itself would pass on any board at all,
+        # which is the failure this whole file exists for.
+        #
+        # The footprint is all-NPTH on purpose. That is the discriminator
+        # between a fixing and a through-hole part, and it is why the
+        # controller module's own four unplated holes do not count.
+        text = verify.PCB.read_text()
+        marker = "\t(segment\n"
+        if marker not in text:
+            raise RuntimeError(
+                "no segment to insert before -- the mutation plants nothing")
+        hole = (
+            '\t(footprint "MountingHole:MountingHole_3.2mm"\n'
+            '\t\t(layer "F.Cu")\n'
+            '\t\t(at 50 50)\n'
+            '\t\t(property "Reference" "H901")\n'
+            '\t\t(pad "" np_thru_hole circle\n'
+            '\t\t\t(at 0 0)\n'
+            '\t\t\t(size 3.2 3.2)\n'
+            '\t\t\t(drill 3.2)\n'
+            '\t\t\t(layers "F&B.Cu" "F&B.Mask")\n'
+            '\t\t)\n'
+            '\t)\n')
+        at = text.index(marker)
+        with tempfile.NamedTemporaryFile("w", suffix=".kicad_pcb",
+                                         delete=False) as handle:
+            handle.write(text[:at] + hole + text[at:])
+            planted = pathlib.Path(handle.name)
+        try:
+            if verify.check_mounting_holes(verify.PCB):
+                raise RuntimeError(
+                    "the tracked board already disagrees with "
+                    "verify.MOUNTING_HOLES -- this fault cannot discriminate")
+            found = verify.check_mounting_holes(planted)
+        finally:
+            planted.unlink()
+        if not found:
+            raise RuntimeError(
+                "a fixing was added and check_mounting_holes did not see it")
+        raise AssertionError(found[0])
+
+    def _a_fixing_has_nowhere_to_go():
+        # placement.mounting_holes() walks each fixing along its own edge
+        # until the keep-out clears every courtyard, and returns the position
+        # whether or not it succeeded -- so check_mounting_gap() is what
+        # catches a walk that gave up. Widen the keep-out past what the edges
+        # can offer and it has to say which pair beat it, the way
+        # check_courtyard_gap() does.
+        import placement as _placement
+        original = _placement.MOUNTING_KEEPOUT_MM
+        _placement.MOUNTING_KEEPOUT_MM = 20.0
+        try:
+            _placement.check_mounting_gap()
+        finally:
+            _placement.MOUNTING_KEEPOUT_MM = original
+
     for label, provoke in (
             ("a biased ceramic is short of its stated minimum",
              _biased_ceramic_falls_short),
@@ -1416,7 +1535,15 @@ def main():
             ("audio copper falls south of the ground split",
              _split_moves_north),
             ("the board is built to KiCad's default thickness",
-             _thickness_is_kicads_default)):
+             _thickness_is_kicads_default),
+            ("a crossing signal is re-routed closer to audio",
+             _a_crossing_signal_moves_closer),
+            ("the only conductor between the planes goes missing",
+             _the_only_plane_bridge_goes_missing),
+            ("the board grows a fixing nobody declared",
+             _a_fixing_appears_undeclared),
+            ("a fixing has nowhere on its edge to go",
+             _a_fixing_has_nowhere_to_go)):
         try:
             provoke()
             found = []
