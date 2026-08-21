@@ -315,7 +315,18 @@ PRICES = {
         "BAT54's 545 mV, and design.clamp_vf_ceiling() says the mixer's "
         "headroom will take 320 mV. The BAT54 that used to be fitted here "
         "missed by 5.5 dB. Higher leakage is the price and it is free on a "
-        "node inside an op-amp's feedback loop."),
+        "node inside an op-amp's feedback loop. "
+        "**Buy 40 -- the minimum order, not a mistake.** Nexperia lists it as "
+        "Production and RS UK stocks tens of thousands, but in a 40-piece "
+        "minimum, and several distributors quote no stock before 2027. Three "
+        "substitutes were measured against clamp_vf_ceiling() rather than "
+        "guessed at: Toshiba's CRS06 lands on this exact footprint and "
+        "publishes no forward-voltage maximum below 1 A, so the best bound it "
+        "supports at 36 mA is 360 mV against a 320 mV ceiling; onsemi's "
+        "NRVB120VLSF clears it at 275 mV and wants a SOD-123FL land KiCad "
+        "does not ship; Diotec's SKL12 gives one figure, 550 mV at 1 A. Forty "
+        "of these is GBP 4-12, which is cheaper than any of that. See "
+        "docs/footprint-audit.md."),
 
     design.BYPASS_RELAY: band(
         3.00, 5.50, "GBP", 10,

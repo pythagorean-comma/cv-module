@@ -341,12 +341,18 @@ is 40 pieces of a part this repository prices at **GBP 0.10–0.30**: **GBP
 deleted the same afternoon and less than a day of anybody's time. Where a
 minimum order is 40 of something cheap, the cheapest fix is to buy 40.
 
-So: **no change, and the reason is the price of the alternative rather than the
-price of the part.** If a second source is ever needed, `NRVB120VLSF` is the
-one that qualifies on stated maxima and costs a hand-drawn SOD-123FL land; the
-`CRS06` becomes available the moment somebody is willing to measure its forward
-drop at 36 mA and record it as a `MEASURED` value with a range, which is what
-that mechanism is for.
+**Decided: the PMEG stays and the 40 get bought** — the reason being the price
+of the alternative rather than the price of the part. The order list still says
+3, because it counts what the board needs plus the spares rule and leaves reels
+and minimums to the basket where their numbers are visible; the 40 is a fact
+about a distributor, and it is written on the BOM line so that the next stock
+scare does not re-run this search.
+
+If a second source is ever needed, `NRVB120VLSF` is the one that qualifies on
+stated maxima and costs a hand-drawn SOD-123FL land. The `CRS06` becomes
+available the moment somebody measures its forward drop at 36 mA and records it
+as a `MEASURED` value with a range — which is a five-minute bench job once one
+is in hand, and exactly what that mechanism is for.
 
 ### And the quantities were wrong, by more than the board costs
 
