@@ -426,6 +426,51 @@ against SBOS484D. `cv:SSI2164` is KiCad's own symbol with output *types*
 repinned rather than numbers, so its numbering is still KiCad's and it agrees
 with `VCA_PINS`.
 
+## The vendor-specific lands — four checked, four exact
+
+The second audit: the lands whose KiCad footprint is named for a *series*
+rather than a part, where "the series matches" is all that had been checked.
+Each measured against the manufacturer's own recommended land pattern.
+
+| part | manufacturer's recommended land | KiCad's footprint | |
+|---|---|---|---|
+| **Würth WE-SL2 744222** | 9.5 mm overall, pads **2.0 × 1.2**, rows **2.54** apart | pads 2.0 × 1.2 at x = ±3.75 → 9.5 overall, rows 2.54 | ✅ **exact, numbering included** |
+| **SCHURTER UMT 250** | pads **2 × 3.75**, **6.5** between inner edges → ±4.25 centres | pads 2.0 × 3.75 at ±4.25 | ✅ **exact** |
+| **Bourns SRN6045TA** | **6.5** overall, **5.1** tall, **1.8** gap → 2.35 wide at ±2.075 | pads 2.35 × 5.1 at ±2.075 | ✅ **exact** |
+| **Raspberry Pi Pico** | Figure 5: **22.58** outer, **16.18** inner, **49.86** tall, 2.54 pitch | columns at ±9.69 with 3.2 × 1.6 pads → 22.58 / 16.18 / 49.86 | ✅ **exact** |
+
+**Three of the four datasheets confirmed figures this repo already carried**,
+which is worth as much as the geometry: the WE-SL2's Schematic block gives the
+winding pairing `verify.check_supply()` asserts (1-4 and 2-3, each winding
+straight across the body); SCHURTER's Variants table gives `3403.0168.11` as
+the 1.6 A part with a 300 mV drop at 1.0 In, and its Pre-Arcing table is
+`INLET_FUSE_PREARC` verbatim; Bourns' `-150M` row gives 15 µH ±20 %, DCR
+71 mΩ, Irms 2.80 A, Isat 3.80 A.
+
+### The Pico's stencil is the detail that could most easily have been missing
+
+Raspberry Pi's Figure 6 is a **paste stencil drawn separately from the
+footprint**, and the text says why: *"Through trials with customers, we have
+determined that the paste stencil must be bigger than the footprint...  We
+recommend paste zones 163% larger than the footprint."* The zones are
+**3.80 × 2.20 mm** against 3.2 × 1.6 mm pads — 1.633×, exactly the figure
+quoted.
+
+A footprint that ignored that would place, route, pass DRC and reflow badly,
+and nothing in this repository would have known: paste is not copper, so no
+check here reads it. **KiCad's footprint implements it** — 53 paste-only pads
+at 3.8 × 2.2 — and those apertures are present in `fab/cv-module-F_Paste.gtp`,
+checked in the exported gerber rather than assumed from the library.
+
+### And one word was overstated
+
+Bourns call the SRN6045TA **semi-shielded**; `design.py` called it shielded.
+Nothing computes with it, and the distinction is not nothing on this board: a
+semi-shielded part is a ferrite core with a magnetic epoxy coating rather than
+a closed magnetic path, so it leaks more flux — and it is a 1.1 MHz switcher's
+inductor on a board whose noise argument is in microvolts. Corrected where it
+was written.
+
 ## What this suggests as an instrument
 
 `Design.check_order_codes()` already decodes one vendor family's part numbers

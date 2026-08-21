@@ -3582,7 +3582,14 @@ MCU_DCDC_CIN_HF = "100n/50V X7R"
 # 16 V or higher ... high-quality ceramic type with X7R or X5R grade".
 MCU_DCDC_CBOOT = "100n/50V X7R"
 # Bourns SRN6045TA-150M, datasheet read first-hand: 15 uH +/-20 %, DCR 71 mohm
-# +/-20 %, Irms 2.80 A, Isat 3.80 A, SRF 20 MHz, 6.0 x 6.0 x 4.5 mm shielded.
+# +/-20 %, Irms 2.80 A, Isat 3.80 A, SRF 20 MHz, 6.0 x 6.0 x 4.5 mm.
+# **Semi-shielded and not shielded**, which is Bourns' own word for it and
+# was overstated here until the land audit read the first page. The
+# distinction is a real one on this board -- a semi-shielded part is a
+# ferrite core with a magnetic epoxy coating rather than a closed magnetic
+# path, so it leaks more flux, and this is a 1.1 MHz switcher's inductor on
+# a board whose noise argument is in microvolts. Nothing here computes with
+# it; what it changes is where it may sit, which is placement's business.
 # Same series and same land as the SRN6045TA-120M this replaced. The
 # datasheet's own selection rule is section 9.2.2.4's last line -- "The
 # inductor current rating should be a bit higher than current limit" -- and the
@@ -7208,7 +7215,7 @@ SO6L_FP = "Package_SO:SO-6L_10x3.84mm_P1.27mm"
 # 4-pad land makes the same geometry a statement about the *package*, which is
 # what a footprint is.
 CRYSTAL_FP = "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm"
-# 6.0 x 6.0 x 4.5 mm shielded, the SRN6045TA's own body.
+# 6.0 x 6.0 x 4.5 mm semi-shielded, the SRN6045TA's own body.
 INDUCTOR_FP = "Inductor_SMD:L_Bourns_SRN6045TA"
 USB_MICROB_FP = "Connector_USB:USB_Micro-B_Molex-105017-0001"
 SMA_FP = "Diode_SMD:D_SMA"
